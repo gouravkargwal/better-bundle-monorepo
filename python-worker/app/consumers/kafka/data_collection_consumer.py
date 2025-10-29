@@ -102,6 +102,7 @@ class DataCollectionKafkaConsumer:
                 "collection_created",
                 "collection_deleted",
                 "order_paid",
+                "order_updated",
                 "refund_created",
                 "customer_created",
                 "customer_updated",
@@ -126,6 +127,7 @@ class DataCollectionKafkaConsumer:
             "collection_created",
             "collection_deleted",
             "order_paid",
+            "order_updated",
             "refund_created",
             "customer_created",
             "customer_updated",
@@ -170,23 +172,6 @@ class DataCollectionKafkaConsumer:
 
             return shop_data
 
-    def can_handle(self, event_type: str) -> bool:
-        """Indicate which event types this consumer can handle"""
-        return event_type in [
-            "data_collection",
-            "product_updated",
-            "product_created",
-            "product_deleted",
-            "collection_updated",
-            "collection_created",
-            "collection_deleted",
-            "order_paid",
-            "refund_created",
-            "customer_created",
-            "customer_updated",
-            "inventory_updated",
-        ]
-
     async def _handle_data_collection_job(
         self, event: Dict[str, Any], shop_data: Dict[str, Any]
     ):
@@ -209,6 +194,11 @@ class DataCollectionKafkaConsumer:
         try:
             event_type = event.get("event_type")
             shopify_id = event.get("shopify_id")
+
+            # ✅ ADD LOGGING FOR ORDER_UPDATED EVENTS
+            logger.info(
+                f"🔄 Processing {event_type} webhook for {shopify_id} in shop {shop_data['id']}"
+            )
 
             if not shopify_id:
                 logger.error(f"❌ No shopify_id in webhook event: {event_type}")
@@ -272,6 +262,10 @@ class DataCollectionKafkaConsumer:
             },
             # Order events
             "order_paid": {
+                "data_types": ["orders"],
+                "specific_ids": {"orders": [shopify_id]},
+            },
+            "order_updated": {
                 "data_types": ["orders"],
                 "specific_ids": {"orders": [shopify_id]},
             },

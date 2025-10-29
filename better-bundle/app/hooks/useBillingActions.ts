@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRevalidator } from "@remix-run/react";
+import logger from "app/utils/logger";
 
 export function useBillingActions(currency: string = "USD") {
   const [isLoading, setIsLoading] = useState(false);
@@ -27,10 +28,10 @@ export function useBillingActions(currency: string = "USD") {
       if (result.success && result.confirmation_url) {
         window.open(result.confirmation_url, "_top");
       } else {
-        console.error("Failed to setup billing:", result.error);
+        logger.error({ error: result.error }, "Failed to setup billing");
       }
     } catch (error) {
-      console.error("Error setting up billing:", error);
+      logger.error({ error }, "Error setting up billing");
     } finally {
       setIsLoading(false);
     }
@@ -47,14 +48,13 @@ export function useBillingActions(currency: string = "USD") {
       const result = await response.json();
 
       if (result.success) {
-        console.log("Subscription cancelled successfully");
         // Revalidate current route data in Remix SPA instead of full reload
         revalidator.revalidate();
       } else {
-        console.error("Failed to cancel subscription:", result.error);
+        logger.error({ error: result.error }, "Failed to cancel subscription");
       }
     } catch (error) {
-      console.error("Error cancelling subscription:", error);
+      logger.error({ error }, "Error cancelling subscription");
     } finally {
       setIsLoading(false);
     }
@@ -72,16 +72,15 @@ export function useBillingActions(currency: string = "USD") {
       const result = await response.json();
 
       if (result.success) {
-        console.log("Cap increased successfully");
         // Revalidate current route data in Remix SPA instead of full reload
         revalidator.revalidate();
         return { success: true, message: result.message };
       } else {
-        console.error("Failed to increase cap:", result.error);
+        logger.error({ error: result.error }, "Failed to increase cap");
         return { success: false, error: result.error };
       }
     } catch (error) {
-      console.error("Error increasing cap:", error);
+      logger.error({ error }, "Error increasing cap");
       return { success: false, error: "Network error" };
     } finally {
       setIsLoading(false);

@@ -1,16 +1,11 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
-import {
-  activateSubscription,
-  increaseBillingCycleCap,
-  reactivateShopIfSuspended,
-} from "../services/billing.service";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
+import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { topic, shop, payload } = await authenticate.webhook(request);
-
-  console.log(`📋 Subscription update: ${topic} for shop ${shop}`);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     const appSub = payload.app_subscription;
@@ -21,7 +16,7 @@ export async function action({ request }: ActionFunctionArgs) {
       lineItems[0]?.plan?.pricing_details?.capped_amount?.amount;
 
     if (!subscriptionId || !status) {
-      console.error("❌ No subscription data in update webhook");
+      logger.error({ payload }, "No subscription data in update webhook");
       return json(
         { success: false, error: "No subscription data" },
         { status: 400 },
@@ -35,11 +30,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
-      console.log(`⚠️ No shop record found for domain ${shop}`);
+      logger.warn({ shop }, "No shop record found for domain");
       return json({ success: true });
     }
 
-    // Route based on status
+    // ✅ Handle business logic only - No status syncing
     switch (status) {
       case "ACTIVE":
         await handleActiveSubscription(
@@ -49,18 +44,25 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         break;
       case "CANCELLED":
+      case "DECLINED":
         await handleCancelledSubscription(shopRecord, subscriptionId);
         break;
-      case "REJECTED":
-        await handleRejectedSubscription(shopRecord, subscriptionId);
+      case "APPROACHING_CAPPED_AMOUNT":
+        await handleCapApproach(shopRecord, subscriptionId);
         break;
       default:
-        console.log(`⚠️ Unhandled subscription status: ${status}`);
+        logger.info({ status }, "Subscription status change logged");
     }
 
     return json({ success: true });
   } catch (error) {
-    console.error("❌ Error processing subscription update:", error);
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
+      "Error processing subscription update",
+    );
     return json(
       { success: false, error: "Webhook processing failed" },
       { status: 500 },
@@ -68,93 +70,159 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
+// ✅ Business logic handlers - Handle subscription activation
 async function handleActiveSubscription(
   shopRecord: any,
   subscriptionId: string,
   currentCappedAmount?: number,
 ) {
-  // Check if this is a cap increase
-  const shopSubscription = await prisma.shop_subscriptions.findFirst({
-    where: { shop_id: shopRecord.id, is_active: true },
-    include: {
-      billing_cycles: {
-        where: { status: "ACTIVE" as any },
-        orderBy: { cycle_number: "desc" },
-        take: 1,
-      },
-    },
-  });
+  try {
+    // Find the shop subscription record
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: shopRecord.id },
+      include: { shopify_subscriptions: true },
+    });
 
-  if (shopSubscription) {
-    const currentCycle = (shopSubscription as any)?.billing_cycles?.[0];
-    const isCapIncrease =
-      currentCycle &&
-      currentCappedAmount &&
-      currentCappedAmount > Number(currentCycle.current_cap_amount);
-
-    if (isCapIncrease) {
-      console.log(
-        `📈 Cap increase detected: ${currentCycle.current_cap_amount} → ${currentCappedAmount}`,
+    if (!shopSubscription) {
+      logger.error(
+        { shop: shopRecord.shop_domain, subscriptionId },
+        "No shop subscription found for active subscription",
       );
-      await increaseBillingCycleCap(
-        shopRecord.id,
-        currentCappedAmount,
-        "shopify_webhook",
-      );
-      await reactivateShopIfSuspended(shopRecord.id);
-    } else {
-      // Regular activation
-      await activateSubscription(shopRecord.id, subscriptionId);
+      return;
     }
-  }
 
-  console.log(
-    `✅ Active subscription processed for shop ${shopRecord.shop_domain}`,
-  );
+    // Update shopify_subscriptions table
+    if (shopSubscription.shopify_subscriptions) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscriptions.id },
+        data: {
+          status: "ACTIVE",
+          activated_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // Update shop_subscriptions table
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        status: "ACTIVE",
+        is_active: true,
+        activated_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // Reactivate shop if suspended
+    await prisma.shops.update({
+      where: { id: shopRecord.id },
+      data: {
+        is_active: true,
+        suspended_at: null,
+        suspension_reason: null,
+        service_impact: null,
+        updated_at: new Date(),
+      },
+    });
+
+    // Invalidate suspension cache
+    await invalidateSuspensionCache(shopRecord.id);
+
+    logger.info(
+      {
+        shop: shopRecord.shop_domain,
+        subscriptionId,
+        currentCappedAmount,
+        shopSubscriptionId: shopSubscription.id,
+      },
+      "Subscription activated and shop reactivated",
+    );
+  } catch (error) {
+    logger.error({ error }, "Error activating subscription");
+    throw error;
+  }
 }
 
 async function handleCancelledSubscription(
   shopRecord: any,
   subscriptionId: string,
 ) {
-  // Update subscription status
-  await prisma.shop_subscriptions.updateMany({
-    where: { shop_id: shopRecord.id, is_active: true },
-    data: {
-      status: "CANCELLED" as any,
-      cancelled_at: new Date(),
-      updated_at: new Date(),
-    },
-  });
+  try {
+    // Find the shop subscription record
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: shopRecord.id },
+      include: { shopify_subscriptions: true },
+    });
 
-  // Suspend shop services
-  await prisma.shops.update({
-    where: { id: shopRecord.id },
-    data: {
-      is_active: false,
-      suspended_at: new Date(),
-      suspension_reason: "subscription_cancelled",
-      service_impact: "Services suspended due to cancellation",
-      updated_at: new Date(),
-    },
-  });
+    if (!shopSubscription) {
+      logger.error(
+        { shop: shopRecord.shop_domain, subscriptionId },
+        "No shop subscription found for cancelled subscription",
+      );
+      return;
+    }
 
-  console.log(`🚫 Subscription cancelled for shop ${shopRecord.shop_domain}`);
+    // Update shopify_subscriptions table
+    if (shopSubscription.shopify_subscriptions) {
+      await prisma.shopify_subscriptions.update({
+        where: { id: shopSubscription.shopify_subscriptions.id },
+        data: {
+          status: "CANCELLED",
+          cancelled_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+
+    // Update shop_subscriptions table
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        status: "CANCELLED",
+        is_active: false,
+        cancelled_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // Suspend shop services
+    await prisma.shops.update({
+      where: { id: shopRecord.id },
+      data: {
+        is_active: false,
+        suspended_at: new Date(),
+        suspension_reason: "subscription_cancelled",
+        service_impact: "Services suspended due to subscription cancellation",
+        updated_at: new Date(),
+      },
+    });
+
+    logger.info(
+      {
+        shop: shopRecord.shop_domain,
+        subscriptionId,
+        shopSubscriptionId: shopSubscription.id,
+      },
+      "Subscription cancelled and shop suspended",
+    );
+  } catch (error) {
+    logger.error({ error }, "Error handling cancelled subscription");
+    throw error;
+  }
 }
 
-async function handleRejectedSubscription(
-  shopRecord: any,
-  subscriptionId: string,
-) {
-  // Update subscription status
-  await prisma.shop_subscriptions.updateMany({
-    where: { shop_id: shopRecord.id, is_active: true },
-    data: {
-      status: "CANCELLED" as any, // Using CANCELLED as there's no REJECTED status in the enum
-      cancelled_at: new Date(),
-      updated_at: new Date(),
-    },
-  });
+async function handleCapApproach(shopRecord: any, subscriptionId: string) {
+  try {
+    // Handle cap approach - could send notifications, etc.
+    logger.info(
+      { shop: shopRecord.shop_domain, subscriptionId },
+      "Subscription approaching capped amount",
+    );
 
-  console.log(`❌ Subscription rejected for shop ${shopRecord.shop_domain}`);
+    // TODO: Add cap approach logic (notifications, warnings, etc.)
+  } catch (error) {
+    logger.error({ error }, "Error handling cap approach");
+    throw error;
+  }
 }

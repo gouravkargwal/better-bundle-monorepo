@@ -1,98 +1,39 @@
-/**
- * Apollo Analytics API Client - Fixed Version
- *
- * This client handles all analytics tracking for the Apollo Post-Purchase extension.
- * It properly integrates with the unified analytics backend system.
- *
- * Key Features:
- * - Session management with the unified system
- * - Recommendation view tracking (when recommendations are displayed)
- * - Recommendation click tracking (when "Add to Order" is clicked)
- * - Add to order success tracking (when product is successfully added)
- * - Proper error handling and retry logic
- */
-
-// ============================================================================
-// TYPES
-// ============================================================================
-
-export type ExtensionContext =
-  | "homepage"
-  | "product_page"
-  | "collection_page"
-  | "cart_page"
-  | "search_page"
-  | "customer_account"
-  | "checkout_page"
-  | "order_page"
-  | "thank_you_page"
-  | "post_purchase";
-
-export type InteractionType =
-  | "page_viewed"
-  | "product_viewed"
-  | "product_added_to_cart"
-  | "product_removed_from_cart"
-  | "cart_viewed"
-  | "collection_viewed"
-  | "search_submitted"
-  | "checkout_started"
-  | "checkout_completed"
-  | "customer_linked"
-  | "recommendation_ready"
-  | "recommendation_viewed"
-  | "recommendation_clicked"
-  | "recommendation_add_to_cart"
-  | "recommendation_declined";
-
-interface UnifiedInteractionRequest {
-  session_id: string;
-  shop_domain: string;
-  context: ExtensionContext;
-  interaction_type: InteractionType;
-  customer_id?: string;
-  product_id?: string;
-  collection_id?: string;
-  search_query?: string;
-  page_url?: string;
-  referrer?: string;
-  metadata: Record<string, any>;
-}
-
-interface UnifiedResponse {
-  success: boolean;
-  message: string;
-  data?: {
-    session_id?: string;
-    interaction_id?: string;
-    [key: string]: any;
-  };
-}
-
-// ============================================================================
-// APOLLO ANALYTICS CLIENT
-// ============================================================================
+import { BACKEND_URL } from "../constant";
+import type {
+  InteractionType,
+  UnifiedInteractionRequest,
+  UnifiedResponse,
+} from "../types";
+import { type Logger, logger } from "../utils/logger";
+import type { JWTManager } from "../utils/jwtManager";
 
 class ApolloAnalyticsClient {
   private baseUrl: string;
+  private logger: Logger;
+  private jwtManager: JWTManager | null = null;
 
   constructor() {
-    // Use the unified analytics service URL
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
+    this.baseUrl = BACKEND_URL as string;
+    this.logger = logger;
   }
 
-  /**
-   * Track interaction using unified analytics
-   * This is the core method that all other tracking methods use
-   */
+  setJWTManager(jwtManager: JWTManager) {
+    this.jwtManager = jwtManager;
+  }
+
   private async trackInteraction(
     sessionId: string,
     shopDomain: string,
     interactionType: InteractionType,
     productId?: string,
+    customerId?: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     try {
+      if (!this.jwtManager) {
+        throw new Error("JWT Manager not initialized");
+      }
+
       const url = `${this.baseUrl}/api/apollo/track-interaction`;
 
       const request: UnifiedInteractionRequest = {
@@ -100,56 +41,83 @@ class ApolloAnalyticsClient {
         shop_domain: shopDomain,
         context: "post_purchase",
         interaction_type: interactionType,
-        product_id: productId ? String(productId) : undefined, // ✅ Ensure string
+        product_id: productId ? String(productId) : undefined,
+        customer_id: customerId ? String(customerId) : undefined,
         metadata: metadata || {},
       };
 
-      const response = await fetch(url, {
+      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(request),
-        keepalive: true, // Ensures request completes even if page unloads
+        keepalive: true,
+        shopDomain: shopDomain,
+        customerId: customerId,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
+        this.logger.error(
+          {
+            error: new Error(`Interaction tracking failed: ${response.status}`),
+            shop_domain: shopDomain,
+            interactionType,
+            productId,
+            customerId,
+            metadata,
+          },
+          "Interaction tracking failed",
+        );
         throw new Error(`Interaction tracking failed: ${response.status}`);
       }
 
       const result: UnifiedResponse = await response.json();
 
       if (result.success) {
-        console.log(
-          "✅ Apollo interaction tracked:",
-          interactionType,
-          result.data?.interaction_id,
-        );
+        if (result.session_recovery) {
+          localStorage.setItem(
+            "unified_session_id",
+            result.session_recovery.new_session_id,
+          );
+        }
         return true;
       } else {
+        this.logger.error(
+          {
+            error: new Error(result.message || "Failed to track interaction"),
+            shop_domain: shopDomain,
+            interactionType,
+            productId,
+            customerId,
+            metadata,
+          },
+          "Failed to track interaction",
+        );
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Apollo interaction tracking error:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+          interactionType,
+          productId,
+          customerId,
+          metadata,
+        },
+        "Interaction tracking error",
+      );
       return false;
     }
   }
 
-  /**
-   * Track recommendation view
-   * Called when recommendations are displayed to the user
-   *
-   * @param shopDomain - Shop domain (e.g., "mystore.myshopify.com")
-   * @param sessionId - Session ID from the combined API response
-   * @param productId - Product ID being viewed
-   * @param position - Position in the recommendation list (1-indexed)
-   * @param metadata - Additional tracking data
-   */
   async trackRecommendationView(
     shopDomain: string,
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -157,39 +125,37 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_viewed",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
-        // Standard structure expected by adapters
         data: {
           product: {
             id: productId,
+            title: metadata?.product_title || "",
+            price: metadata?.product_price || 0,
+            type: metadata?.product_type || "",
+            vendor: metadata?.product_vendor || "",
+            url: metadata?.product_url || "",
           },
           type: "recommendation",
           position: position,
           widget: "apollo_recommendation",
           algorithm: "apollo_algorithm",
+          confidence: metadata?.recommendation_confidence || 0.0,
+          pageUrl: metadata?.page_url || "",
         },
         ...metadata,
       },
     );
   }
 
-  /**
-   * Track recommendation click
-   * Called when user clicks "Add to Order" button
-   *
-   * @param shopDomain - Shop domain (e.g., "mystore.myshopify.com")
-   * @param sessionId - Session ID from the combined API response
-   * @param productId - Product ID being clicked
-   * @param position - Position in the recommendation list (1-indexed)
-   * @param metadata - Additional tracking data (variant_id, price, etc.)
-   */
   async trackRecommendationClick(
     shopDomain: string,
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -197,41 +163,38 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_clicked",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
-        // Standard structure expected by adapters
         data: {
           product: {
             id: productId,
+            title: metadata?.product_title || "",
+            price: metadata?.product_price || 0,
+            type: metadata?.product_type || "",
+            vendor: metadata?.product_vendor || "",
+            url: metadata?.product_url || "",
           },
           type: "recommendation",
           position: position,
           widget: "apollo_recommendation",
           algorithm: "apollo_algorithm",
+          confidence: metadata?.recommendation_confidence || 0.0,
+          pageUrl: metadata?.page_url || "",
         },
         ...metadata,
       },
     );
   }
 
-  /**
-   * Track successful add to order
-   * Called after product is successfully added via changeset
-   *
-   * @param shopDomain - Shop domain (e.g., "mystore.myshopify.com")
-   * @param sessionId - Session ID from the combined API response
-   * @param productId - Product ID that was added
-   * @param variantId - Variant ID that was added
-   * @param position - Position in the recommendation list (1-indexed)
-   * @param metadata - Additional tracking data (price, new_total, etc.)
-   */
   async trackAddToOrder(
     shopDomain: string,
     sessionId: string,
     productId: string,
     variantId: string,
     position: number,
+    customerId: string,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
     return this.trackInteraction(
@@ -239,10 +202,10 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_add_to_cart",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
-        // Standard structure expected by adapters
         data: {
           cartLine: {
             merchandise: {
@@ -265,21 +228,12 @@ class ApolloAnalyticsClient {
     );
   }
 
-  /**
-   * Track recommendation decline
-   * Called when user declines/rejects a recommendation
-   *
-   * @param shopDomain - Shop domain (e.g., "mystore.myshopify.com")
-   * @param sessionId - Session ID from the combined API response
-   * @param productId - Product ID that was declined
-   * @param position - Position in the recommendation list (1-indexed)
-   * @param metadata - Additional tracking data (reason, etc.)
-   */
   async trackRecommendationDecline(
     shopDomain: string,
     sessionId: string,
     productId: string,
     position: number,
+    customerId: string,
     productData?: any,
     metadata?: Record<string, any>,
   ): Promise<boolean> {
@@ -288,10 +242,10 @@ class ApolloAnalyticsClient {
       shopDomain,
       "recommendation_declined",
       productId,
+      customerId,
       {
         extension_type: "apollo",
         source: "apollo_post_purchase",
-        // Streamlined metadata - only what Gorse actually uses
         data: {
           product: {
             id: productId,
@@ -313,9 +267,5 @@ class ApolloAnalyticsClient {
     );
   }
 }
-
-// ============================================================================
-// EXPORT DEFAULT INSTANCE
-// ============================================================================
 
 export const apolloAnalytics = new ApolloAnalyticsClient();

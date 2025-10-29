@@ -30,7 +30,11 @@ from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.record_matching import router as record_matching_router
 from app.api.v1.fbt_status import router as fbt_status_router
+from app.api.v1.logs import router as logs_router
+from app.api.v1.data_collection import router as data_collection_router
 from app.domains.billing.api.billing_api import router as billing_api_router
+from app.api.v1.suspension import router as suspension_router
+from app.api.v1.auth import router as auth_router
 
 
 logger = get_logger(__name__)
@@ -40,7 +44,6 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
-    logger.info("🚀 Starting BetterBundle Python Worker...")
 
     # Initialize services
     await initialize_services()
@@ -50,12 +53,9 @@ async def lifespan(app: FastAPI):
     if kafka_consumer_manager:
         await kafka_consumer_manager.start_all_consumers()
 
-    logger.info("✅ BetterBundle Python Worker started successfully")
-
     yield
 
     # Shutdown
-    logger.info("🛑 Shutting down BetterBundle Python Worker...")
 
     # Stop Kafka consumers first
     if kafka_consumer_manager:
@@ -67,8 +67,6 @@ async def lifespan(app: FastAPI):
     await topic_manager.close()
 
     await cleanup_services()
-
-    logger.info("✅ BetterBundle Python Worker shutdown completed")
 
 
 # Create FastAPI app
@@ -86,7 +84,11 @@ app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
 app.include_router(record_matching_router)
 app.include_router(fbt_status_router)
+app.include_router(logs_router)
+app.include_router(data_collection_router)
 app.include_router(billing_api_router)
+app.include_router(suspension_router)
+app.include_router(auth_router)
 
 # Include unified analytics routers
 from app.domains.analytics.api import (
@@ -162,7 +164,6 @@ async def initialize_services():
 async def cleanup_services():
     """Cleanup all services"""
     try:
-        logger.info("🧹 Starting service cleanup...")
 
         # Kafka consumers are stopped by kafka_consumer_manager in lifespan
 
@@ -174,8 +175,6 @@ async def cleanup_services():
 
         # Clear services dictionary
         services.clear()
-
-        logger.info("✅ Service cleanup completed")
 
     except Exception as e:
         logger.error(f"Failed to cleanup services: {e}")

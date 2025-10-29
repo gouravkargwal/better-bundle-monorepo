@@ -1,18 +1,40 @@
 class RecommendationAPI {
   constructor() {
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app"; // Update this to your actual backend URL
-    this.shopifyBaseUrl = window.location.origin;
+    // Use config for base URL
+    this.baseUrl = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
+    this.logger = window.phoenixLogger || console; // Use the global logger with fallback
+    this.phoenixJWT = null; // Will be set by PhoenixJWT manager
+    this.isLoading = false; // Prevent duplicate API calls
+  }
+
+  /**
+   * Set Phoenix JWT manager reference
+   */
+  setPhoenixJWT(phoenixJWT) {
+    this.phoenixJWT = phoenixJWT;
   }
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
       const context = window.context || 'homepage';
       const shopDomain = window.shopDomain || '';
-
       if (!shopDomain) {
-        console.error('❌ API: Shop domain is required but not provided');
+        this.logger.error('❌ API: Shop domain is required but not provided');
         throw new Error('Shop domain is required but not provided');
       }
+
+      // Check if Phoenix JWT is available and initialized
+      if (!this.phoenixJWT || !this.phoenixJWT.isReady()) {
+        this.logger.error('❌ API: Phoenix JWT not initialized');
+        throw new Error('Phoenix JWT not initialized');
+      }
+
+      // Prevent duplicate API calls
+      if (this.isLoading) {
+        this.logger.warn('⚠️ API: Request already in progress, skipping');
+        return [];
+      }
+      this.isLoading = true;
 
       // Build request body for unified recommendation API
       const requestBody = {
@@ -52,22 +74,18 @@ class RecommendationAPI {
       const unifiedSessionId = sessionStorage.getItem('unified_session_id');
       if (unifiedSessionId) {
         requestBody.session_id = unifiedSessionId;
-        console.log('🔗 Phoenix: Using unified session_id:', unifiedSessionId);
       } else if (window.sessionId) {
         requestBody.session_id = String(window.sessionId); // Fallback to window.sessionId
-        console.log('🔗 Phoenix: Using window.sessionId:', window.sessionId);
       }
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
-      console.log('🌐 Fetching recommendations from unified API:', apiUrl);
-      console.log('📦 Request body:', requestBody);
-      console.log('🔗 Backend URL:', this.baseUrl);
 
       // Create AbortController for timeout with retry logic
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-      const response = await fetch(apiUrl, {
+      // Use JWT authentication for the request
+      const response = await this.phoenixJWT.makeAuthenticatedRequest(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,28 +98,30 @@ class RecommendationAPI {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        console.error(`❌ API: Request failed with status ${response.status}`);
+        if (response.status === 403) {
+          this.logger.warn('⏸️ API: Services suspended - shop is not active');
+          return [];
+        }
+        this.logger.error(`❌ API: Request failed with status ${response.status}`);
         throw new Error(`API error: ${response.status}`);
       }
 
       const data = await response.json();
-      console.log('✅ API: Recommendations received from unified API:', data);
 
       if (data.success && data.recommendations && data.recommendations.length > 0) {
-        // Backend provides complete product data via webhooks - no need for additional API calls
-        console.log('✅ API: Using recommendations directly from unified backend:', data.recommendations);
         return data.recommendations;
       } else {
-        console.log('⚠️ API: No recommendations available from unified API');
         return [];
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        console.error('⏰ API: Request timed out after 8 seconds');
+        this.logger.error('⏰ API: Request timed out after 10 seconds');
       } else {
-        console.error('❌ API: Error fetching recommendations from unified API:', error);
+        this.logger.error('❌ API: Error fetching recommendations from unified API:', error);
       }
       return [];
+    } finally {
+      this.isLoading = false;
     }
   }
 
@@ -142,14 +162,13 @@ class RecommendationAPI {
       }
 
       const data = await response.json();
-      console.log('Added to cart:', data);
 
       // Dispatch custom event for theme compatibility
       window.dispatchEvent(new CustomEvent('cart:updated', { detail: data }));
 
       return data;
     } catch (error) {
-      console.error('Error adding to cart:', error);
+      this.logger.error('Error adding to cart:', error);
       throw error;
     }
   }

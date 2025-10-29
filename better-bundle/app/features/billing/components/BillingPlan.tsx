@@ -29,13 +29,11 @@ export function BillingPlan({
 
   // Route to appropriate component based on billing status
   const renderBillingComponent = () => {
-    console.log(billingState.status);
-
     switch (billingState.status) {
       case "trial_active":
         return (
           <TrialActive
-            trialData={billingState.trialData!}
+            trialData={billingState.trialData}
             shopCurrency={shopCurrency}
           />
         );
@@ -56,9 +54,7 @@ export function BillingPlan({
               });
 
               const result = await response.json();
-              console.log("Billing setup response:", result);
               if (result.success && result.confirmationUrl) {
-                console.log("Redirecting to:", result.confirmationUrl);
                 window.top!.location.href = result.confirmationUrl;
               } else {
                 console.error("No confirmation URL in response:", result);

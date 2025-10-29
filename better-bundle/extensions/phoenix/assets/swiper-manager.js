@@ -5,6 +5,7 @@
 class SwiperManager {
   constructor() {
     this.isUpdatingDropdowns = false;
+    this.logger = window.phoenixLogger || console; // Use the global logger with fallback
   }
 
   // Initialize Swiper
@@ -12,14 +13,12 @@ class SwiperManager {
     try {
       // Skip Swiper initialization if we're updating dropdowns
       if (this.isUpdatingDropdowns) {
-        console.log('🔄 Skipping Swiper initialization during dropdown updates');
         return;
       }
 
       if (typeof Swiper !== "undefined") {
         // Always destroy existing Swiper instance if it exists
         if (window.swiper && typeof window.swiper.destroy === 'function') {
-          console.log('🔄 Destroying existing Swiper instance');
           window.swiper.destroy(true, true);
           window.swiper = null;
         }
@@ -40,13 +39,7 @@ class SwiperManager {
         const minSlidesForLoop = slidesPerView + 2;
         const shouldLoop = slideCount >= minSlidesForLoop;
 
-        console.log('🎯 Swiper config:', {
-          slideCount,
-          slidesPerView,
-          shouldLoop,
-          viewportWidth,
-          minSlidesForLoop
-        });
+
 
         // Swiper is loaded globally from CDN
         window.swiper = new window.Swiper(".swiper", {
@@ -84,7 +77,6 @@ class SwiperManager {
             : false,
           on: {
             init: function () {
-              console.log("✅ Swiper initialized with recommendations!");
               // Prevent navigation clicks from triggering product card clicks
               if (window.productCardManager) {
                 window.productCardManager.preventNavigationClickPropagation();
@@ -106,7 +98,6 @@ class SwiperManager {
               const shouldLoopNow = currentSlides.length >= minSlidesForLoop;
 
               if (this.loop !== shouldLoopNow) {
-                console.log('🔄 Updating loop setting:', shouldLoopNow, 'Slides:', currentSlides.length, 'Required:', minSlidesForLoop);
                 this.loop = shouldLoopNow;
                 this.update();
               }
@@ -115,7 +106,7 @@ class SwiperManager {
         });
       }
     } catch (error) {
-      console.error('❌ Swiper initialization failed:', error);
+      this.logger.error('❌ Swiper initialization failed:', error);
       // Continue without Swiper - variants should still work
     }
   }
@@ -128,14 +119,12 @@ class SwiperManager {
     if (nextButton) {
       nextButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        console.log('🔄 Next button clicked - preventing product card click');
       });
     }
 
     if (prevButton) {
       prevButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        console.log('🔄 Prev button clicked - preventing product card click');
       });
     }
   }
@@ -143,7 +132,7 @@ class SwiperManager {
   // Update Swiper when content changes
   updateSwiper() {
     if (this.isUpdatingDropdowns) {
-      console.log('🔄 Skipping Swiper update during dropdown updates');
+      this.logger.warn('🔄 Skipping Swiper update during dropdown updates');
       return;
     }
 

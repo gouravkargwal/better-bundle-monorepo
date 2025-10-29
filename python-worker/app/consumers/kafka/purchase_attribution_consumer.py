@@ -164,6 +164,22 @@ class PurchaseAttributionKafkaConsumer:
                 currency = getattr(order, "currency_code", None) or "USD"
                 customer_id = getattr(order, "customer_id", None)
 
+                # ✅ CHECK ORDER METAFIELDS FOR SESSION ID (following Phoenix pattern)
+                session_id_from_metafields = None
+                order_metafields = getattr(order, "metafields", None)
+                if order_metafields and isinstance(order_metafields, list):
+                    for metafield in order_metafields:
+                        if (
+                            isinstance(metafield, dict)
+                            and metafield.get("namespace") == "bb_recommendation"
+                            and metafield.get("key") == "session_id"
+                        ):
+                            session_id_from_metafields = metafield.get("value")
+                            logger.info(
+                                f"✅ Found session ID in order metafields: {session_id_from_metafields}"
+                            )
+                            break
+
                 # Try to find a recent session for this customer (optional)
                 user_session = None
                 if customer_id:
@@ -180,6 +196,34 @@ class PurchaseAttributionKafkaConsumer:
                     )
                     session_result = await session.execute(session_query)
                     user_session = session_result.scalar_one_or_none()
+
+                # ✅ PRIORITIZE SESSION ID FROM ORDER METAFIELDS (Apollo)
+                if session_id_from_metafields:
+                    # Find the specific session by ID from metafields
+                    specific_session_query = (
+                        select(UserSession)
+                        .where(
+                            and_(
+                                UserSession.shop_id == shop_id,
+                                UserSession.id == session_id_from_metafields,
+                            )
+                        )
+                        .limit(1)
+                    )
+                    specific_session_result = await session.execute(
+                        specific_session_query
+                    )
+                    specific_user_session = specific_session_result.scalar_one_or_none()
+
+                    if specific_user_session:
+                        user_session = specific_user_session
+                        logger.info(
+                            f"✅ Using session from order metafields: {session_id_from_metafields}"
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ Session ID from metafields not found: {session_id_from_metafields}"
+                        )
 
                 # PRE-CHECK: Only process if customer has extension interactions
                 has_interactions = await self._has_extension_interactions(
@@ -209,6 +253,9 @@ class PurchaseAttributionKafkaConsumer:
                     currency=currency,
                     products=products,
                     created_at=getattr(order, "order_date", None) or now_utc(),
+                    updated_at=getattr(
+                        order, "updated_at", None
+                    ),  # For post-purchase additions
                     metadata={
                         "source": "normalization",
                         "line_item_count": len(products),

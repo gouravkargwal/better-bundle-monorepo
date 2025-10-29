@@ -5,6 +5,7 @@
 
 {{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
 <script src="{{ 'swiper-bundle.min.js' | asset_url }}" defer></script>
+<script src="{{ 'pino-browser.js' | asset_url }}" defer></script>
 
 <script>
   window.enableAutoplay = {{ block.settings.enable_autoplay | default: true }};
@@ -65,7 +66,11 @@
 </script>
 
 <!-- Load our custom JavaScript files in correct order -->
+<script src="{{ 'config.js' | asset_url }}" defer></script>
 <script src="{{ 'analytics.js' | asset_url }}" defer></script>
+<!-- JWT Authentication (load synchronously before others) -->
+<script src="{{ 'jwtTokenManager.js' | asset_url }}"></script>
+<script src="{{ 'phoenixJWT.js' | asset_url }}" defer></script>
 <script src="{{ 'api.js' | asset_url }}" defer></script>
 <!-- Core modules (load in order) -->
 <script src="{{ 'variant-manager.js' | asset_url }}" defer></script>
@@ -79,7 +84,7 @@
 
 {% render 'recommendation-styles' %}
 
-<div class="container">
+<div class="container better-bundle-recommendations">
   {% if block.settings.show_heading and block.settings.heading != blank %}
     <div class="section-heading">
       <{{ block.settings.heading_size | default: 'h2' }}>

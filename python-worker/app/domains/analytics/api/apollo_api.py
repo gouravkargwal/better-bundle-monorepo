@@ -5,8 +5,9 @@ This API handles interactions from the Apollo Post-Purchase extension.
 Apollo can show recommendations and track interactions after purchase completion.
 """
 
+import time
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.analytics_tracking_service import (
@@ -22,6 +23,7 @@ from app.api.v1.recommendations import (
     fetch_recommendations_logic,
     services as recommendation_services,
 )
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -51,6 +53,10 @@ class ApolloResponse(BaseModel):
     success: bool = Field(..., description="Whether the operation was successful")
     message: str = Field(..., description="Response message")
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
+    # Session recovery information
+    session_recovery: Optional[Dict[str, Any]] = Field(
+        None, description="Session recovery details"
+    )
 
 
 class ApolloCombinedRequest(BaseModel):
@@ -100,7 +106,9 @@ class ApolloCombinedResponse(BaseModel):
 
 
 @router.post("/get-session-and-recommendations", response_model=ApolloCombinedResponse)
-async def get_session_and_recommendations(request: ApolloCombinedRequest):
+async def get_session_and_recommendations(
+    request: ApolloCombinedRequest, authorization: str = Header(None)
+):
     """
     Get or create session and fetch recommendations in a single API call
 
@@ -120,11 +128,42 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
                 detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
             )
 
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
+        # Generate a browser session ID for Apollo if not provided
+        browser_session_id = (
+            request.browser_session_id
+            or f"apollo_{request.customer_id}_{int(time.time())}"
+        )
+
         # Step 2: Get or create unified session
         session = await session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
-            browser_session_id=request.browser_session_id,
+            browser_session_id=browser_session_id,
             user_agent=request.user_agent,
             client_id=request.client_id,
             ip_address=request.ip_address,
@@ -204,6 +243,9 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
             recommendation_count=recommendation_count,
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error in Apollo combined request: {str(e)}")
         raise HTTPException(
@@ -213,7 +255,9 @@ async def get_session_and_recommendations(request: ApolloCombinedRequest):
 
 
 @router.post("/track-interaction", response_model=ApolloResponse)
-async def track_apollo_interaction(request: ApolloInteractionRequest):
+async def track_apollo_interaction(
+    request: ApolloInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Apollo Post-Purchase extension
 
@@ -243,7 +287,7 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
             "extension_type": "apollo",
         }
 
-        # Track the interaction
+        # Try to track interaction with the original session
         logger.info(
             f"Calling analytics_service.track_interaction with session_id={request.session_id}"
         )
@@ -257,8 +301,76 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
         )
         logger.info(f"Analytics service returned interaction: {interaction}")
 
+        # Check if session recovery is needed
+        session_recovery_info = None
         if not interaction:
-            raise HTTPException(status_code=500, detail="Failed to track interaction")
+            logger.warning(
+                f"Session {request.session_id} not found, attempting recovery..."
+            )
+
+            # Try to find recent session for same customer
+            if request.customer_id:
+                recent_session = await session_service._find_recent_customer_session(
+                    request.customer_id, shop_id, minutes_back=30
+                )
+
+                if recent_session:
+                    logger.info(f"✅ Recovered recent session: {recent_session.id}")
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": recent_session.id,
+                        "recovery_reason": "recent_session_found",
+                        "recovered_at": recent_session.last_active.isoformat(),
+                    }
+
+                    # Try tracking with recovered session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=recent_session.id,
+                        extension_type=ExtensionType.APOLLO,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+            # If still no interaction, create new session
+            if not interaction:
+                logger.info("Creating new session as fallback...")
+                new_session = await session_service.get_or_create_session(
+                    shop_id=shop_id,
+                    customer_id=request.customer_id,
+                    browser_session_id=f"recovered_{request.session_id}",
+                )
+
+                if new_session:
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": new_session.id,
+                        "recovery_reason": "new_session_created",
+                        "recovered_at": new_session.created_at.isoformat(),
+                    }
+
+                    # Try tracking with new session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=new_session.id,
+                        extension_type=ExtensionType.APOLLO,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+        if not interaction:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to track interaction even with session recovery",
+            )
+
+        # Log session recovery if it occurred
+        if session_recovery_info:
+            logger.info(
+                f"🔄 Session recovered: {session_recovery_info['original_session_id']} → {session_recovery_info['new_session_id']}"
+            )
 
         logger.info(f"Apollo interaction tracked successfully: {interaction.id}")
 
@@ -267,12 +379,16 @@ async def track_apollo_interaction(request: ApolloInteractionRequest):
             message="Apollo interaction tracked successfully",
             data={
                 "interaction_id": interaction.id,
-                "session_id": request.session_id,
+                "session_id": interaction.session_id,  # This will be the recovered session ID
                 "interaction_type": request.interaction_type,
                 "timestamp": interaction.created_at.isoformat(),
             },
+            session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error tracking Apollo interaction: {str(e)}", exc_info=True)
         raise HTTPException(

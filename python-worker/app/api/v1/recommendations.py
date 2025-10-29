@@ -5,7 +5,7 @@ Handles all recommendation requests from Shopify extension with context-based ro
 
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from dataclasses import dataclass
 
 from app.shared.helpers import now_utc
@@ -26,6 +26,7 @@ from app.recommandations.recommendation_executor import RecommendationExecutor
 from app.recommandations.smart_selection_service import SmartSelectionService
 from app.recommandations.shop_lookup_service import ShopLookupService
 from app.recommandations.client_id_resolver import ClientIdResolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -441,19 +442,51 @@ async def fetch_recommendations_logic(
 
 # --- FastAPI Endpoint (Thin Wrapper) ---
 @router.post("/", response_model=RecommendationResponse)
-async def get_recommendations(request: RecommendationRequest):
+async def get_recommendations(
+    request: RecommendationRequest, authorization: str = Header(None)
+):
     """
     Get recommendations based on context with intelligent fallback system.
 
-    This endpoint provides context-aware recommendations using a reusable core logic
-    function, handling HTTP-specific concerns like error translation and response modeling.
+    This endpoint provides context-aware recommendations using JWT-based authorization.
+    It uses stateless JWT validation instead of Redis/database checks for better performance.
     """
     try:
+        # Extract JWT token from Authorization header
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+
+        # Check shop status using JWT (stateless - no Redis needed!)
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
         # Pass the request and the bundled services to the core logic function
         result_data = await fetch_recommendations_logic(request, services)
 
         return RecommendationResponse(success=True, **result_data)
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except InvalidInputError as e:
         # Handle validation errors with a 400 Bad Request
         raise HTTPException(status_code=400, detail=str(e))

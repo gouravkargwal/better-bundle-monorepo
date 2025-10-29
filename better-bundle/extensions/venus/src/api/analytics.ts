@@ -5,6 +5,9 @@
  * Follows proper separation of concerns and single responsibility principle.
  */
 
+import { BACKEND_URL } from "../constant";
+import { type Logger, logger } from "../utils/logger";
+
 // Unified Analytics Types
 export type ExtensionContext =
   | "homepage"
@@ -75,12 +78,46 @@ export interface UnifiedResponse {
     client_id?: string;
     [key: string]: any;
   };
+  // Session recovery information
+  session_recovery?: {
+    original_session_id: string;
+    new_session_id: string;
+    recovery_reason: string;
+    recovered_at: string;
+  };
 }
 
 class AnalyticsApiClient {
   private baseUrl: string;
+  private logger: Logger;
+  private makeAuthenticatedRequest:
+    | ((url: string, options?: RequestInit) => Promise<Response>)
+    | null = null;
+
   constructor() {
-    this.baseUrl = "https://c5da58a2ed7b.ngrok-free.app";
+    this.baseUrl = BACKEND_URL;
+    this.logger = logger;
+  }
+
+  /**
+   * Set JWT authentication function
+   */
+  setJWT(
+    makeAuthenticatedRequest: (
+      url: string,
+      options?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    this.makeAuthenticatedRequest = makeAuthenticatedRequest;
+  }
+
+  /**
+   * Get current session ID from sessionStorage
+   * Note: This method is deprecated - session management is handled by the calling component
+   */
+  getCurrentSessionId(): string | null {
+    // Session management is handled by the calling component using Shopify storage API
+    return null;
   }
 
   async getOrCreateSession(
@@ -88,6 +125,10 @@ class AnalyticsApiClient {
     customerId: string,
   ): Promise<string> {
     try {
+      if (!this.makeAuthenticatedRequest) {
+        throw new Error("JWT authentication not initialized");
+      }
+
       const url = `${this.baseUrl}/api/venus/get-or-create-session`;
       const payload: UnifiedSessionRequest = {
         shop_domain: shopDomain,
@@ -97,21 +138,17 @@ class AnalyticsApiClient {
         referrer: undefined,
       };
 
-      console.log("🌐 Venus: Creating session with:", {
-        shop_domain: shopDomain,
-        customer_id: customerId,
-      });
-
-      const response = await fetch(url, {
+      // Use JWT authentication for the request
+      const response = await this.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(payload),
         keepalive: true,
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
         throw new Error(`Session creation failed: ${response.status}`);
       }
 
@@ -119,13 +156,25 @@ class AnalyticsApiClient {
 
       if (result.success && result.data && result.data.session_id) {
         const sessionId = result.data.session_id;
-        console.log("✅ Venus: Session created/retrieved:", sessionId);
         return sessionId;
       } else {
+        this.logger.error(
+          {
+            message: result.message,
+            shop_domain: shopDomain,
+          },
+          "Failed to create session",
+        );
         throw new Error(result.message || "Failed to create session");
       }
     } catch (error) {
-      console.error("💥 Venus: Session creation error:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Session creation error",
+      );
       throw error;
     }
   }
@@ -135,14 +184,15 @@ class AnalyticsApiClient {
    */
   async trackUnifiedInteraction(
     request: UnifiedInteractionRequest,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
+      if (!this.makeAuthenticatedRequest) {
+        return { success: false };
+      }
+
       const url = `${this.baseUrl}/api/venus/track-interaction`;
-      const response = await fetch(url, {
+      const response = await this.makeAuthenticatedRequest(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify(request),
         keepalive: true,
       });
@@ -154,17 +204,29 @@ class AnalyticsApiClient {
       const result: UnifiedResponse = await response.json();
 
       if (result.success) {
-        console.log(
-          "✅ Venus interaction tracked:",
-          result.data?.interaction_id,
-        );
-        return true;
+        return {
+          success: true,
+          sessionRecovery: result.session_recovery || null,
+        };
       } else {
+        this.logger.error(
+          {
+            message: result.message,
+            shop_domain: request.shop_domain,
+          },
+          "Failed to track interaction",
+        );
         throw new Error(result.message || "Failed to track interaction");
       }
     } catch (error) {
-      console.error("💥 Venus interaction tracking error:", error);
-      return false;
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: request.shop_domain,
+        },
+        "Interaction tracking error",
+      );
+      return { success: false };
     }
   }
 
@@ -220,7 +282,7 @@ class AnalyticsApiClient {
     customerId?: string,
     productIds?: string[],
     metadata?: Record<string, any>,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
       const recommendations = (productIds || []).map((id, index) => ({
         id,
@@ -246,8 +308,14 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation view:", error);
-      return false;
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation view",
+      );
+      return { success: false };
     }
   }
 
@@ -262,7 +330,7 @@ class AnalyticsApiClient {
     sessionId: string,
     customerId?: string,
     metadata?: Record<string, any>,
-  ): Promise<boolean> {
+  ): Promise<{ success: boolean; sessionRecovery?: any }> {
     try {
       const request: UnifiedInteractionRequest = {
         session_id: sessionId,
@@ -293,8 +361,14 @@ class AnalyticsApiClient {
 
       return await this.trackUnifiedInteraction(request);
     } catch (error) {
-      console.error("Failed to track recommendation click:", error);
-      return false;
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation click",
+      );
+      return { success: false };
     }
   }
 }

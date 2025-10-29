@@ -19,10 +19,6 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
   const navigation = useNavigation();
   const isLoading = navigation.state === "submitting";
 
-  console.log("🔍 OnboardingPage - data:", data);
-  console.log("🔍 OnboardingPage - error:", error);
-  console.log("🔍 OnboardingPage - isLoading:", isLoading);
-
   return (
     <Page>
       <TitleBar title="Welcome to BetterBundle!" />

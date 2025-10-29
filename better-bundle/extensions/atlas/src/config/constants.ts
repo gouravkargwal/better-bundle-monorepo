@@ -41,3 +41,5 @@ export const API_ENDPOINTS = {
   TRACK_SEARCH: "/api/atlas/track-search",
   TRACK_FORM_SUBMISSION: "/api/atlas/track-form-submission",
 } as const;
+export const BACKEND_URL =
+  "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;

@@ -6,6 +6,8 @@ import {
 } from "../api/recommendations";
 import { analyticsApi } from "../api/analytics";
 import { useApi } from "@shopify/ui-extensions-react/customer-account";
+import { logger } from "../utils/logger";
+import { useJWT } from "./useJWT";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount: string, currencyCode: string): string => {
@@ -83,10 +85,19 @@ export function useRecommendations({
   columnConfig,
 }: UseRecommendationsProps) {
   const { storage } = useApi();
+  const { makeAuthenticatedRequest, isReady } = useJWT(shopDomain, customerId);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  // Set up JWT authentication for APIs
+  useEffect(() => {
+    if (isReady && makeAuthenticatedRequest) {
+      recommendationApi.setJWT(makeAuthenticatedRequest);
+      analyticsApi.setJWT(makeAuthenticatedRequest);
+    }
+  }, [isReady, makeAuthenticatedRequest]);
 
   useEffect(() => {
     const initializeSession = async () => {
@@ -94,33 +105,35 @@ export function useRecommendations({
         // 1. Try reading from storage first (fastest)
         const cachedSessionId =
           await storage.read<string>("unified_session_id");
-
         if (cachedSessionId) {
-          console.log(
-            "🔗 Venus: Using cached session_id from storage:",
-            cachedSessionId,
-          );
           setSessionId(cachedSessionId);
           return;
         }
 
         // 2. If not in storage, fetch from backend API
-        console.log("🌐 Venus: Fetching session_id from backend");
         const sessionId = await analyticsApi.getOrCreateSession(
           shopDomain,
           customerId,
         );
         await storage.write("unified_session_id", sessionId);
-        console.log("✨ Venus: Session initialized from backend:", sessionId);
         setSessionId(sessionId);
       } catch (err) {
-        console.error("❌ Venus: Failed to initialize session:", err);
+        logger.error(
+          {
+            error: err instanceof Error ? err.message : String(err),
+            shop_domain: shopDomain,
+          },
+          "Failed to initialize session",
+        );
         setError("Failed to initialize session");
       }
     };
 
-    initializeSession();
-  }, [storage, shopDomain, customerId]);
+    // Only initialize session if JWT is ready
+    if (isReady) {
+      initializeSession();
+    }
+  }, [storage, shopDomain, customerId, isReady]);
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
@@ -130,8 +143,8 @@ export function useRecommendations({
     position: number,
     productUrl: string,
   ): Promise<string> => {
-    analyticsApi
-      .trackRecommendationClick(
+    try {
+      const result = await analyticsApi.trackRecommendationClick(
         shopDomain,
         context,
         productId,
@@ -139,10 +152,25 @@ export function useRecommendations({
         sessionId,
         customerId,
         { source: `${context}_recommendation` },
-      )
-      .catch((error) => {
-        console.error(`Failed to track ${context} click:`, error);
-      });
+      );
+
+      // Handle session recovery if the API returned a new session
+      if (result.success && result.sessionRecovery) {
+        await storage.write(
+          "unified_session_id",
+          result.sessionRecovery.new_session_id,
+        );
+        setSessionId(result.sessionRecovery.new_session_id);
+      }
+    } catch (error) {
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation click",
+      );
+    }
 
     return productUrl;
   };
@@ -155,7 +183,7 @@ export function useRecommendations({
 
     try {
       const productIds = products.map((product) => product.id);
-      await analyticsApi.trackRecommendationView(
+      const result = await analyticsApi.trackRecommendationView(
         shopDomain,
         context,
         sessionId,
@@ -163,16 +191,35 @@ export function useRecommendations({
         productIds,
         { source: `${context}_page` },
       );
-      console.log(`✅ Venus: Recommendation view tracked for ${context}`);
+
+      // Handle session recovery if the API returned a new session
+      if (result.success && result.sessionRecovery) {
+        await storage.write(
+          "unified_session_id",
+          result.sessionRecovery.new_session_id,
+        );
+        setSessionId(result.sessionRecovery.new_session_id);
+      }
     } catch (error) {
-      console.error(`❌ Venus: Failed to track recommendation view:`, error);
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: shopDomain,
+        },
+        "Failed to track recommendation view",
+      );
     }
   };
 
   // Fetch recommendations
   useEffect(() => {
-    if (!sessionId) {
-      console.log("⏳ Venus: Waiting for session initialization");
+    if (!sessionId || !isReady) {
+      logger.error(
+        {
+          shop_domain: shopDomain,
+        },
+        "Waiting for session and JWT initialization",
+      );
       return;
     }
     const fetchRecommendations = async () => {
@@ -197,10 +244,14 @@ export function useRecommendations({
               handle: rec.handle,
               price: formatPrice(rec.price.amount, rec.price.currency_code),
               image: rec.image,
-              images: (rec as any).images,
+              images: rec.images || [],
               inStock: rec.available ?? true,
-              url: rec.url,
-              variants: (rec as any).variants || [],
+              url:
+                rec.url ||
+                (shopDomain
+                  ? `https://${shopDomain}/products/${rec.handle}`
+                  : rec.handle),
+              variants: rec.variants || [],
             }),
           );
 
@@ -209,15 +260,21 @@ export function useRecommendations({
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
       } catch (err) {
-        console.error(`Error fetching ${context} recommendations:`, err);
-        setError(`Failed to load recommendations`);
+        logger.error(
+          {
+            error: err instanceof Error ? err.message : String(err),
+            shop_domain: shopDomain,
+          },
+          "Failed to fetch recommendations",
+        );
+        setError("Failed to load recommendations");
       } finally {
         setLoading(false);
       }
     };
 
     fetchRecommendations();
-  }, [customerId, context, limit, sessionId, shopDomain]);
+  }, [customerId, context, limit, sessionId, shopDomain, isReady]);
 
   return {
     loading,

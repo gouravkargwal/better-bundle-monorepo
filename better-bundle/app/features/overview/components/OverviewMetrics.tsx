@@ -1,4 +1,3 @@
-// features/overview/components/OverviewMetrics.tsx
 import {
   Card,
   Text,
@@ -7,7 +6,7 @@ import {
   Icon,
   Badge,
 } from "@shopify/polaris";
-import { CashDollarIcon, EyeCheckMarkIcon } from "@shopify/polaris-icons";
+import { CashDollarIcon, ArrowUpIcon } from "@shopify/polaris-icons";
 import { getCurrencySymbol } from "../../../utils/currency";
 
 interface OverviewMetricsProps {
@@ -20,6 +19,19 @@ interface OverviewMetricsProps {
     isTrialPhase: boolean;
     phaseLabel: string;
     phaseDescription: string;
+    totalOrders: number;
+    attributedOrders: number;
+    activePlan: {
+      name: string;
+      type: string;
+      description?: string;
+      commissionRate: number;
+      thresholdAmount: number;
+      currency: string;
+      status: string;
+      startDate: Date;
+      isActive: boolean;
+    } | null;
   };
 }
 
@@ -40,21 +52,31 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
+  // Calculate ROI metrics
+  const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
+  const commissionPaid = overviewData.totalRevenue * commissionRate;
+  const netProfit = overviewData.totalRevenue - commissionPaid;
+  const roiPercentage =
+    commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
+
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-        gap: "24px",
+        gap: "12px",
       }}
     >
-      {/* Revenue Card */}
+      {/* Total Revenue Generated Card */}
       <div
         style={{
           transition: "all 0.2s ease-in-out",
           cursor: "pointer",
           borderRadius: "16px",
           overflow: "hidden",
+          height: "200px",
+          display: "flex",
+          flexDirection: "column",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = "translateY(-2px)";
@@ -66,7 +88,14 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
         }}
       >
         <Card>
-          <div style={{ padding: "20px" }}>
+          <div
+            style={{
+              padding: "12px",
+              height: "180px",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             <BlockStack gap="200">
               <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
@@ -76,7 +105,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     tone="subdued"
                     fontWeight="medium"
                   >
-                    {overviewData.phaseLabel}
+                    💰 Total Revenue Generated
                   </Text>
                 </BlockStack>
                 <div
@@ -84,13 +113,13 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    minWidth: "48px",
-                    minHeight: "48px",
-                    padding: "12px",
+                    minWidth: "44px",
+                    minHeight: "44px",
+                    padding: "10px",
                     backgroundColor: overviewData.isTrialPhase
                       ? "#F59E0B15"
                       : "#10B98115",
-                    borderRadius: "12px",
+                    borderRadius: "14px",
                     border: `2px solid ${overviewData.isTrialPhase ? "#F59E0B30" : "#10B98130"}`,
                   }}
                 >
@@ -103,14 +132,18 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                 }}
               >
                 <Text as="p" variant="heading2xl" fontWeight="bold">
-                  {formatCurrencyValue(
-                    overviewData.totalRevenue,
-                    overviewData.currency,
-                  )}
+                  {overviewData.totalRevenue > 0
+                    ? formatCurrencyValue(
+                        overviewData.totalRevenue,
+                        overviewData.currency,
+                      )
+                    : "Ready to earn"}
                 </Text>
               </div>
               <Text as="p" variant="bodySm" tone="subdued">
-                {overviewData.phaseDescription}
+                {overviewData.totalRevenue > 0
+                  ? overviewData.phaseDescription
+                  : "AI recommendations are active and tracking revenue"}
               </Text>
               {overviewData.revenueChange !== null && (
                 <div>{getChangeBadge(overviewData.revenueChange)}</div>
@@ -120,13 +153,16 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
         </Card>
       </div>
 
-      {/* Conversion Rate Card */}
+      {/* Cost Efficiency Card */}
       <div
         style={{
           transition: "all 0.2s ease-in-out",
           cursor: "pointer",
           borderRadius: "16px",
           overflow: "hidden",
+          height: "200px",
+          display: "flex",
+          flexDirection: "column",
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = "translateY(-2px)";
@@ -138,7 +174,14 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
         }}
       >
         <Card>
-          <div style={{ padding: "20px" }}>
+          <div
+            style={{
+              padding: "12px",
+              height: "180px",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
             <BlockStack gap="200">
               <InlineStack align="space-between" blockAlign="center">
                 <BlockStack gap="100">
@@ -148,7 +191,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     tone="subdued"
                     fontWeight="medium"
                   >
-                    Conversion Rate
+                    💡 Cost Efficiency
                   </Text>
                 </BlockStack>
                 <div
@@ -156,24 +199,45 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    minWidth: "48px",
-                    minHeight: "48px",
-                    padding: "12px",
-                    backgroundColor: "#3B82F615",
-                    borderRadius: "12px",
-                    border: "2px solid #3B82F630",
+                    minWidth: "44px",
+                    minHeight: "44px",
+                    padding: "10px",
+                    backgroundColor: "#8B5CF615",
+                    borderRadius: "14px",
+                    border: "2px solid #8B5CF630",
                   }}
                 >
-                  <Icon source={EyeCheckMarkIcon} tone="base" />
+                  <Icon source={ArrowUpIcon} tone="base" />
                 </div>
               </InlineStack>
-              <div style={{ color: "#3B82F6" }}>
+              <div style={{ color: "#8B5CF6" }}>
                 <Text as="p" variant="heading2xl" fontWeight="bold">
-                  {overviewData.conversionRate.toFixed(1)}%
+                  {overviewData.totalRevenue > 0
+                    ? `${roiPercentage.toFixed(0)}% ROI`
+                    : "Commission-Based"}
                 </Text>
               </div>
-              {overviewData.conversionRateChange !== null && (
-                <div>{getChangeBadge(overviewData.conversionRateChange)}</div>
+              <Text as="p" variant="bodySm" tone="subdued">
+                {overviewData.totalRevenue > 0 ? (
+                  <>
+                    You earned{" "}
+                    {formatCurrencyValue(
+                      overviewData.totalRevenue,
+                      overviewData.currency,
+                    )}
+                    , paid only{" "}
+                    {formatCurrencyValue(commissionPaid, overviewData.currency)}
+                  </>
+                ) : (
+                  "No charges until revenue is generated"
+                )}
+              </Text>
+              {overviewData.totalRevenue > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  <Badge tone="success" size="small">
+                    {(commissionRate * 100).toFixed(1)}% commission rate
+                  </Badge>
+                </div>
               )}
             </BlockStack>
           </div>

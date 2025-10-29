@@ -1,11 +1,10 @@
 import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import logger from "../utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
-
-  console.log(`💸 Billing failed: ${topic} for shop ${shop}`);
 
   try {
     const billingAttempt = payload.subscription_billing_attempt;
@@ -15,7 +14,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const failureReason = billingAttempt?.failure_reason;
 
     if (!subscriptionId) {
-      console.error("❌ No billing attempt data in failed webhook");
+      logger.error({ shop }, "No billing attempt data in failed webhook");
       return json(
         { success: false, error: "No billing data" },
         { status: 400 },
@@ -29,7 +28,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
-      console.log(`⚠️ No shop record found for domain ${shop}`);
+      logger.warn({ shop }, "No shop record found for domain");
       return json({ success: true });
     }
 
@@ -43,7 +42,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopSubscription) {
-      console.log(`⚠️ No active subscription found for shop ${shop}`);
+      logger.warn({ shop }, "No active subscription found for shop");
       return json({ success: true });
     }
 
@@ -71,8 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
       failure_reason: failureReason,
     };
 
-    // ✅ RACE CONDITION PROTECTION: Use upsert to prevent duplicate processing
-    const upsertResult = await prisma.billing_invoices.upsert({
+    await prisma.billing_invoices.upsert({
       where: {
         shopify_invoice_id: invoiceData.shopify_invoice_id,
       },
@@ -85,17 +83,9 @@ export async function action({ request }: ActionFunctionArgs) {
       create: invoiceData,
     });
 
-    console.log(
-      `❌ Billing invoice processed: ${invoiceData.shopify_invoice_id} (${upsertResult.id}) - Status: FAILED`,
-    );
-
-    console.log(
-      `❌ Billing failed: $${amount} ${currency} - Reason: ${failureReason}`,
-    );
-
     return json({ success: true });
   } catch (error) {
-    console.error("❌ Error processing billing failure:", error);
+    logger.error({ error, shop }, "Error processing billing failure");
     return json(
       { success: false, error: "Webhook processing failed" },
       { status: 500 },

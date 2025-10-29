@@ -7,7 +7,7 @@ Mercury runs on checkout pages and requires Shopify Plus plan.
 
 from typing import Optional, Dict, Any
 import time
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.models.extension import ExtensionType, ExtensionContext
@@ -18,6 +18,7 @@ from app.domains.analytics.services.analytics_tracking_service import (
 )
 from app.core.logging.logger import get_logger
 from app.domains.analytics.services.shop_resolver import shop_resolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -68,58 +69,16 @@ class MercuryResponse(BaseModel):
     success: bool
     message: str
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
-
-
-async def validate_shopify_plus_store(shop_domain: str) -> bool:
-    """
-    Validate if the store is on Shopify Plus plan.
-    This is a critical requirement for Mercury checkout extensions.
-    Uses database check for optimal performance.
-    """
-    try:
-        from app.core.database.session import get_session_context
-
-        logger.info(f"🔍 Mercury: Validating Shopify Plus for {shop_domain}")
-
-        # Check database for Shopify Plus status (fastest approach)
-        async with get_session_context() as session:
-            from sqlalchemy import select
-            from app.core.database.models import Shop
-
-            result = await session.execute(
-                select(Shop.shopify_plus, Shop.plan_type)
-                .where(Shop.shop_domain == shop_domain)
-                .where(Shop.is_active == True)
-            )
-            shop_data = result.fetchone()
-
-            if not shop_data:
-                logger.warning(f"⚠️ Mercury: Shop {shop_domain} not found or inactive")
-                return False
-
-            is_plus = shop_data.shopify_plus or False
-            plan_type = shop_data.plan_type or ""
-
-            if not is_plus:
-                logger.warning(
-                    f"⚠️ Mercury: Store {shop_domain} is not on Shopify Plus plan (plan: {plan_type})"
-                )
-                return False
-
-            logger.info(
-                f"✅ Mercury: Store {shop_domain} validated as Shopify Plus (plan: {plan_type})"
-            )
-            return True
-
-    except Exception as e:
-        logger.error(
-            f"❌ Mercury: Failed to validate Shopify Plus for {shop_domain}: {e}"
-        )
-        return False
+    # Session recovery information
+    session_recovery: Optional[Dict[str, Any]] = Field(
+        None, description="Session recovery details"
+    )
 
 
 @router.post("/get-or-create-session", response_model=MercuryResponse)
-async def get_or_create_mercury_session(request: MercurySessionRequest):
+async def get_or_create_mercury_session(
+    request: MercurySessionRequest, authorization: str = Header(None)
+):
     """
     Get or create unified session for Mercury extension
 
@@ -127,10 +86,34 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
     but also supports anonymous sessions. Requires Shopify Plus plan.
     """
     try:
-        # Validate Shopify Plus status first
-        is_shopify_plus = await validate_shopify_plus_store(request.shop_domain)
+        # JWT-based suspension check first (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
 
-        if not is_shopify_plus:
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
+        # Check Shopify Plus status from JWT token (no database query needed!)
+        shop_info = await suspension_middleware.get_shop_info_from_jwt(jwt_token)
+        if not shop_info or not shop_info.get("shopify_plus", False):
             logger.warning(
                 f"⚠️ Mercury: Store {request.shop_domain} is not Shopify Plus - Mercury disabled"
             )
@@ -191,6 +174,9 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
             },
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error starting Mercury session: {str(e)}")
         raise HTTPException(
@@ -199,7 +185,9 @@ async def get_or_create_mercury_session(request: MercurySessionRequest):
 
 
 @router.post("/track-interaction", response_model=MercuryResponse)
-async def track_mercury_interaction(request: MercuryInteractionRequest):
+async def track_mercury_interaction(
+    request: MercuryInteractionRequest, authorization: str = Header(None)
+):
     """
     Track user interaction from Mercury extension
 
@@ -211,6 +199,31 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
     - Cart value changes
     """
     try:
+        # JWT-based suspension check first (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
+
         # Add extension type to metadata
         enhanced_metadata = {
             **request.metadata,
@@ -226,7 +239,7 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
         if not shop_id:
             raise HTTPException(status_code=404, detail="Shop not found")
 
-        # Track interaction using unified analytics
+        # Try to track interaction with the original session
         interaction = await analytics_service.track_interaction(
             session_id=request.session_id,
             extension_type=ExtensionType.MERCURY,
@@ -236,36 +249,94 @@ async def track_mercury_interaction(request: MercuryInteractionRequest):
             interaction_metadata=enhanced_metadata,
         )
 
+        # Check if session recovery is needed
+        session_recovery_info = None
         if not interaction:
             logger.warning(
-                f"Mercury interaction tracking failed for session {request.session_id}"
-            )
-            # Return success but with a warning - this is more graceful (like Atlas)
-            return MercuryResponse(
-                success=True,
-                message="Mercury interaction tracked (session may have expired)",
-                data={
-                    "interaction_id": None,
-                    "session_id": request.session_id,
-                    "warning": "Session not found or expired",
-                },
+                f"Session {request.session_id} not found, attempting recovery..."
             )
 
-        # Feature computation is now automatically triggered in track_interaction method
+            # Try to find recent session for same customer
+            if request.customer_id:
+                recent_session = await session_service._find_recent_customer_session(
+                    request.customer_id, shop_id, minutes_back=30
+                )
+
+                if recent_session:
+                    logger.info(f"✅ Recovered recent session: {recent_session.id}")
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": recent_session.id,
+                        "recovery_reason": "recent_session_found",
+                        "recovered_at": recent_session.last_active.isoformat(),
+                    }
+
+                    # Try tracking with recovered session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=recent_session.id,
+                        extension_type=ExtensionType.MERCURY,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+            # If still no interaction, create new session
+            if not interaction:
+                logger.info("Creating new session as fallback...")
+                new_session = await session_service.get_or_create_session(
+                    shop_id=shop_id,
+                    customer_id=request.customer_id,
+                    browser_session_id=f"recovered_{request.session_id}",
+                )
+
+                if new_session:
+                    session_recovery_info = {
+                        "original_session_id": request.session_id,
+                        "new_session_id": new_session.id,
+                        "recovery_reason": "new_session_created",
+                        "recovered_at": new_session.created_at.isoformat(),
+                    }
+
+                    # Try tracking with new session
+                    interaction = await analytics_service.track_interaction(
+                        session_id=new_session.id,
+                        extension_type=ExtensionType.MERCURY,
+                        interaction_type=request.interaction_type,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata=enhanced_metadata,
+                    )
+
+        if not interaction:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to track interaction even with session recovery",
+            )
+
+        # Log session recovery if it occurred
+        if session_recovery_info:
+            logger.info(
+                f"🔄 Session recovered: {session_recovery_info['original_session_id']} → {session_recovery_info['new_session_id']}"
+            )
 
         return MercuryResponse(
             success=True,
             message="Mercury interaction tracked successfully",
             data={
                 "interaction_id": interaction.id,
-                "session_id": request.session_id,
+                "session_id": interaction.session_id,  # This will be the recovered session ID
                 "interaction_type": request.interaction_type,
                 "checkout_step": request.checkout_step,
                 "cart_value": request.cart_value,
                 "timestamp": interaction.created_at.isoformat(),
             },
+            session_recovery=session_recovery_info,  # Frontend gets recovery info
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
     except Exception as e:
         logger.error(f"Error tracking Mercury interaction: {str(e)}")
         raise HTTPException(

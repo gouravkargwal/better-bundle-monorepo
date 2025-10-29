@@ -131,16 +131,6 @@ def performance_monitor(operation_name: Optional[str] = None):
                 wall_time = (time.time() - start_time) * 1000
                 cpu_time = (time.process_time() - start_cpu) * 1000
 
-                logger.info(
-                    f"Performance metrics",
-                    operation=op_name,
-                    wall_time_ms=wall_time,
-                    cpu_time_ms=cpu_time,
-                    efficiency_percent=(
-                        (cpu_time / wall_time * 100) if wall_time > 0 else 0
-                    ),
-                )
-
                 return result
 
             except Exception as e:
@@ -182,16 +172,6 @@ def async_performance_monitor(operation_name: Optional[str] = None):
 
                 wall_time = (time.time() - start_time) * 1000
                 cpu_time = (time.process_time() - start_cpu) * 1000
-
-                logger.info(
-                    f"Async performance metrics",
-                    operation=op_name,
-                    wall_time_ms=wall_time,
-                    cpu_time_ms=cpu_time,
-                    efficiency_percent=(
-                        (cpu_time / wall_time * 100) if wall_time > 0 else 0
-                    ),
-                )
 
                 return result
 

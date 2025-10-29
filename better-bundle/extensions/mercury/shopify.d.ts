@@ -23,3 +23,21 @@ declare module './src/api/recommendations.js' {
   const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
+
+//@ts-ignore
+declare module './src/utils/jwtManager.js' {
+  const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/utils/logger.js' {
+  const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/constant.js' {
+  const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}

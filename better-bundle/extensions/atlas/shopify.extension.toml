@@ -16,17 +16,6 @@ watch = ["src/**/*"]
 [capabilities]
 network_calls = true
 
-[runtime_configuration_definition]
-type = "object"
-
-[runtime_configuration_definition.properties.backend_url]
-type = "string"
-required = true
-
 [settings]
 type = "object"
-
-[settings.fields.backend_url]
-type = "single_line_text_field"
-name = "Backend URL"
-description = "https://c5da58a2ed7b.ngrok-free.app"
+fields = {}

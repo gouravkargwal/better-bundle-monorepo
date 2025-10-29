@@ -12,10 +12,10 @@ import { SkeletonGrid } from "./components/SkeletonGrid";
 import { useRecommendations } from "./hooks/useRecommendations";
 
 export default reactExtension("customer-account.profile.block.render", () => (
-  <ProfileBlock />
+  <ProfileBlockWithRecommendations />
 ));
 
-function ProfileBlock() {
+function ProfileBlockWithRecommendations() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { navigate } = useNavigation();
 
@@ -28,9 +28,9 @@ function ProfileBlock() {
     columnConfig,
   } = useRecommendations({
     context: "profile",
-    limit: 8,
+    limit: 6,
     customerId,
-    shopDomain: "",
+    shopDomain: undefined, // Will use customer_id to look up shop domain
     columnConfig: {
       extraSmall: 1, // 1 column on very small screens
       small: 2, // 2 columns on small screens

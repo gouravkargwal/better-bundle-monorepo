@@ -214,13 +214,13 @@ class GraphQLOrderAdapter(BaseAdapter):
             ).get(  # Updated to snake_case
                 "edges", []
             ),
-            metafields=(payload.get("metafields", {}) or {}).get("edges", []),
+            metafields=self._process_metafields(payload.get("metafields", {})),
             transactions=payload.get("transactions") or [],
             refunds=self._extract_refunds(payload, shop_id),
             extras={},
         )
 
-        result = model.dict()
+        result = model.model_dump()
         return result
 
     def _convert_address_ids(
@@ -238,6 +238,42 @@ class GraphQLOrderAdapter(BaseAdapter):
             converted_address["id"] = _extract_numeric_gid(converted_address["id"])
 
         return converted_address
+
+    def _process_metafields(self, metafields_data):
+        """Process metafields from GraphQL edges format to normalized nodes"""
+        if not metafields_data or not isinstance(metafields_data, dict):
+            return []
+
+        edges = metafields_data.get("edges", [])
+        if not isinstance(edges, list):
+            return []
+
+        processed_metafields = []
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+
+            node = edge.get("node", {})
+            if not isinstance(node, dict):
+                continue
+
+            # Extract and process metafield data
+            processed_metafield = {
+                "id": _extract_numeric_gid(node.get("id")),
+                "namespace": node.get("namespace"),
+                "key": node.get("key"),
+                "value": node.get("value"),
+                "type": node.get("type"),
+                "description": node.get("description"),
+                "created_at": node.get("created_at"),
+                "updated_at": node.get("updated_at"),
+            }
+
+            # Only add if we have essential fields
+            if processed_metafield.get("namespace") and processed_metafield.get("key"):
+                processed_metafields.append(processed_metafield)
+
+        return processed_metafields
 
     def _extract_refunds(
         self, payload: Dict[str, Any], shop_id: str

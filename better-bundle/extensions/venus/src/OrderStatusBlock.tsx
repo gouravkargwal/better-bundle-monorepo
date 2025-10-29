@@ -46,7 +46,6 @@ function OrderStatusWithRecommendations() {
   // Track when recommendations come into view
   useEffect(() => {
     if (!products.length || loading) return;
-    console.log("🔍 Venus: Tracking recommendation view");
     trackRecommendationView();
   }, [products, loading, trackRecommendationView]);
 
@@ -56,13 +55,11 @@ function OrderStatusWithRecommendations() {
     position: number,
     productUrl: string,
   ) => {
-    console.log("🔍 Venus: Tracking recommendation click");
     const urlWithAttribution = await trackRecommendationClick(
       productId,
       position,
       productUrl,
     );
-    // Navigate to product page with attribution parameters immediately
     navigate(urlWithAttribution);
   };
 

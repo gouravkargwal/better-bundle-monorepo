@@ -5,13 +5,14 @@ Lightweight endpoints for session updates
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel, Field
 
 from app.domains.analytics.services.unified_session_service import UnifiedSessionService
 from app.domains.analytics.models.session import SessionUpdate
 from app.core.logging.logger import get_logger
 from app.domains.analytics.services.shop_resolver import shop_resolver
+from app.middleware.suspension_middleware import suspension_middleware
 
 logger = get_logger(__name__)
 
@@ -36,7 +37,9 @@ class SessionResponse(BaseModel):
 
 
 @router.post("/update-client-id", response_model=SessionResponse)
-async def update_client_id(request: UpdateClientIdRequest):
+async def update_client_id(
+    request: UpdateClientIdRequest, authorization: str = Header(None)
+):
     """
     Update client_id for an existing session (background update)
 
@@ -47,6 +50,31 @@ async def update_client_id(request: UpdateClientIdRequest):
         shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
         if not shop_id:
             raise HTTPException(status_code=400, detail="Invalid shop domain")
+
+        # JWT-based suspension check (stateless - no Redis needed!)
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "error": "Missing or invalid authorization header",
+                    "message": "Please provide a valid JWT token in Authorization header",
+                    "required_format": "Bearer <jwt_token>",
+                },
+            )
+
+        jwt_token = authorization.split(" ")[1]
+        if not await suspension_middleware.should_process_shop_from_jwt(jwt_token):
+            message = await suspension_middleware.get_suspension_message_from_jwt(
+                jwt_token
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "Services suspended",
+                    "message": message,
+                    "shop_domain": request.shop_domain,
+                },
+            )
 
         # Get session to verify it exists and belongs to this shop
         session = await session_service.get_session(request.session_id)
@@ -67,6 +95,7 @@ async def update_client_id(request: UpdateClientIdRequest):
         return SessionResponse(success=True, message="Client ID updated successfully")
 
     except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
         raise
     except Exception as e:
         logger.error(f"Error updating client_id: {str(e)}")

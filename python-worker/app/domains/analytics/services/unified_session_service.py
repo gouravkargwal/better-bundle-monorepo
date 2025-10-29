@@ -242,7 +242,7 @@ class UnifiedSessionService:
                     return None
 
                 # Prepare update data
-                update_dict = update_data.dict(exclude_unset=True)
+                update_dict = update_data.model_dump(exclude_unset=True)
                 if "last_active" not in update_dict:
                     update_dict["last_active"] = now_utc()
 
@@ -1013,3 +1013,49 @@ class UnifiedSessionService:
 
         except Exception as e:
             logger.error(f"Error cleaning up expired sessions: {str(e)}")
+
+    async def _find_recent_customer_session(
+        self, customer_id: str, shop_id: str, minutes_back: int = 30
+    ) -> Optional[UserSession]:
+        """
+        Find the most recent session for a customer within the last N minutes
+
+        Args:
+            customer_id: Customer identifier
+            shop_id: Shop identifier
+            minutes_back: How many minutes back to look for sessions
+
+        Returns:
+            UserSession if found, None otherwise
+        """
+        try:
+            cutoff_time = now_utc() - timedelta(minutes=minutes_back)
+
+            async with get_transaction_context() as session:
+                stmt = (
+                    select(UserSessionModel)
+                    .where(
+                        and_(
+                            UserSessionModel.customer_id == customer_id,
+                            UserSessionModel.shop_id == shop_id,
+                            UserSessionModel.status == SessionStatus.ACTIVE,
+                            UserSessionModel.last_active > cutoff_time,
+                        )
+                    )
+                    .order_by(desc(UserSessionModel.last_active))
+                    .limit(1)
+                )
+
+                result = await session.execute(stmt)
+                session_data = result.scalar_one_or_none()
+
+                if session_data:
+                    logger.info(
+                        f"🔍 Found recent session for customer {customer_id}: {session_data.id}"
+                    )
+                    return self._convert_to_user_session(session_data)
+                return None
+
+        except Exception as e:
+            logger.error(f"Error finding recent customer session: {str(e)}")
+            return None

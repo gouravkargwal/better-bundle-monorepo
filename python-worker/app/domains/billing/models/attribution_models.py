@@ -79,6 +79,7 @@ class PurchaseEvent(BaseModel):
     currency: str
     products: List[Dict[str, Any]]
     created_at: datetime
+    updated_at: Optional[datetime] = None  # For post-purchase additions
     metadata: Dict[str, Any]
 
 

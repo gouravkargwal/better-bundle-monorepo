@@ -14,23 +14,47 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const offset = (page - 1) * limit;
 
   try {
-    // Get shop record
+    // Get shop record with subscription info
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: session.shop },
-      select: { id: true, currency_code: true },
+      select: {
+        id: true,
+        currency_code: true,
+        shop_subscriptions: {
+          select: {
+            status: true,
+            is_active: true,
+          },
+        },
+      },
     });
 
     if (!shop) {
       return json({ error: "Shop not found" });
     }
 
+    // Determine if shop has active paid subscription
+    const hasActivePaidSubscription =
+      shop.shop_subscriptions?.status === "ACTIVE" &&
+      shop.shop_subscriptions?.is_active === true;
+
+    // Build where clause based on subscription status
+    const whereClause: any = {
+      shop_id: shop.id,
+      deleted_at: null, // Only non-deleted records
+    };
+
+    // If shop has active paid subscription, exclude trial records
+    if (hasActivePaidSubscription) {
+      whereClause.billing_phase = {
+        not: "TRIAL", // Exclude trial records for paid subscribers
+      };
+    }
+
     // Get commission records with pagination
     const [commissions, totalCount] = await Promise.all([
       prisma.commission_records.findMany({
-        where: {
-          shop_id: shop.id,
-          deleted_at: null, // Only non-deleted records
-        },
+        where: whereClause,
         orderBy: { order_date: "desc" },
         skip: offset,
         take: limit,
@@ -46,10 +70,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
       prisma.commission_records.count({
-        where: {
-          shop_id: shop.id,
-          deleted_at: null,
-        },
+        where: whereClause,
       }),
     ]);
 
@@ -79,6 +100,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       shopCurrency: shop.currency_code || "USD",
       shopId: shop.id,
+      subscriptionStatus: shop.shop_subscriptions?.status || "TRIAL",
+      hasActivePaidSubscription,
     };
 
     return json(commissionData);

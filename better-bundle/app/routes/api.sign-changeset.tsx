@@ -21,6 +21,7 @@ export const loader = async ({ request }: { request: Request }) => {
 export const action = async ({ request }: { request: Request }) => {
   const body = await request.json();
 
+  // Check if changeset includes metafield changes for session ID (following Phoenix pattern)
   // Create JWT using jose library
   const secret = new TextEncoder().encode(process.env.SHOPIFY_API_SECRET!);
 

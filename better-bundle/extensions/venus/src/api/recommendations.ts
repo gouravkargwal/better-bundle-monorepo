@@ -1,5 +1,8 @@
 // API client for recommendation endpoints
 
+import { BACKEND_URL } from "../constant";
+import { type Logger, logger } from "../utils/logger";
+
 export type ExtensionContext =
   | "homepage"
   | "product_page"
@@ -67,51 +70,75 @@ export interface RecommendationResponse {
   timestamp: string;
 }
 
-const RECOMMENDATION_API_BASE =
-  "https://c5da58a2ed7b.ngrok-free.app/api/v1/recommendations";
-
 export class RecommendationApiClient {
   private baseUrl: string;
+  private logger: Logger;
+  private makeAuthenticatedRequest:
+    | ((url: string, options?: RequestInit) => Promise<Response>)
+    | null = null;
 
-  constructor(baseUrl: string = RECOMMENDATION_API_BASE) {
-    this.baseUrl = baseUrl;
+  constructor() {
+    this.baseUrl = BACKEND_URL;
+    this.logger = logger;
+  }
+
+  /**
+   * Set JWT authentication function
+   */
+  setJWT(
+    makeAuthenticatedRequest: (
+      url: string,
+      options?: RequestInit,
+    ) => Promise<Response>,
+  ): void {
+    this.makeAuthenticatedRequest = makeAuthenticatedRequest;
   }
 
   async getRecommendations(
     request: RecommendationRequest,
   ): Promise<RecommendationResponse> {
     try {
-      const response = await fetch(`${this.baseUrl}/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      // Check if JWT authentication is available
+      if (!this.makeAuthenticatedRequest) {
+        throw new Error("JWT authentication not initialized");
+      }
+
+      // Use JWT authentication for the request
+      const response = await this.makeAuthenticatedRequest(
+        `${this.baseUrl}/api/v1/recommendations`,
+        {
+          method: "POST",
+          body: JSON.stringify(request),
         },
-        body: JSON.stringify(request),
-      });
+      );
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error("Services suspended");
+        }
+        this.logger.error(
+          {
+            error: new Error(`HTTP error! status: ${response.status}`),
+            shop_domain: request.shop_domain,
+          },
+          "Failed to fetch recommendations",
+        );
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
       return data;
     } catch (error) {
-      console.error("Failed to fetch recommendations:", error);
+      this.logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          shop_domain: request.shop_domain,
+        },
+        "Failed to fetch recommendations",
+      );
       throw error;
     }
   }
-
-  async getHealthCheck(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
-    } catch (error) {
-      console.error("Health check failed:", error);
-      return false;
-    }
-  }
-
-  // Analytics methods moved to separate service: /api/analytics.ts
 }
 
 // Default instance

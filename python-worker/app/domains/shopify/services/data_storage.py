@@ -265,9 +265,9 @@ class ShopifyDataStorageService:
             if isinstance(item, str):
                 # JSON string - parse and return as dict
                 return json.loads(item)
-            elif hasattr(item, "dict"):
+            elif hasattr(item, "model_dump"):
                 # Pydantic model
-                return item.dict()
+                return item.model_dump()
             elif isinstance(item, dict):
                 # Already a dictionary
                 return item

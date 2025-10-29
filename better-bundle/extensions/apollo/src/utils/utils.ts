@@ -1,8 +1,5 @@
 import type { ProductRecommendationAPI } from "../types";
 
-/**
- * Format price with currency
- */
 export const formatPrice = (
   amount: number | string,
   currencyCode: string,
@@ -14,19 +11,12 @@ export const formatPrice = (
   }).format(numAmount);
 };
 
-/**
- * Check if product is eligible for post-purchase
- */
 export const isProductEligible = (
   product: ProductRecommendationAPI,
 ): boolean => {
-  // Basic eligibility - can be extended based on product metadata
   return product.available && product.inventory > 0;
 };
 
-/**
- * Get error message for Shopify API errors
- */
 export const getShopifyErrorMessage = (code: string): string => {
   const errorMessages: Record<string, string> = {
     insufficient_inventory: "This product is out of stock",

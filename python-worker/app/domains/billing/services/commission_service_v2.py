@@ -72,6 +72,14 @@ class CommissionServiceV2:
             # Calculate commission
             commission_data = self._calculate_commission(purchase_attr)
 
+            # Skip creating commission if no revenue to attribute
+            if commission_data["attributed_revenue"] <= 0:
+                logger.info(
+                    f"⏭️ Skipping commission creation for attribution {purchase_attribution_id}: "
+                    f"no revenue to attribute (${commission_data['attributed_revenue']})"
+                )
+                return None
+
             # Create commission based on subscription status
             commission = await self._create_commission_by_status(
                 shop_id,

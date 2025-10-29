@@ -10,7 +10,7 @@ import { CheckCircleIcon } from "@shopify/polaris-icons";
 import type { TrialData } from "../types/billing.types";
 
 interface TrialActiveProps {
-  trialData: TrialData;
+  trialData: TrialData | undefined;
   shopCurrency: string;
 }
 
@@ -21,6 +21,15 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
       currency: shopCurrency,
     }).format(amount);
   };
+
+  // Add null check for trialData
+  if (!trialData) {
+    return (
+      <div style={{ padding: "24px", textAlign: "center" }}>
+        <Text as="p">Trial data not available</Text>
+      </div>
+    );
+  }
 
   const trialProgress = trialData.progress;
   const remainingAmount =

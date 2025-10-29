@@ -22,15 +22,17 @@
     {% assign product_id = 'design-mode-' | append: forloop.index %}
     <div class="swiper-slide">
       <div class="product-card" data-product-id="{{ product_id }}">
-        <img
-          class="product-card__image"
-          src="https://via.placeholder.com/600x400/{{ dummy_colors[product_index] }}/666666?text={{ product | replace: ' ', '+' }}"
-          alt="{{ product }}"
-          width="600"
-          height="400"
-          loading="lazy"
-          onclick="console.log('Design mode: Product clicked - {{ product }}')"
-        >
+        <div class="product-card__image-container">
+          <img
+            class="product-card__image"
+            src="https://via.placeholder.com/600x400/{{ dummy_colors[product_index] }}/666666?text={{ product | replace: ' ', '+' }}"
+            alt="{{ product }}"
+            width="600"
+            height="400"
+            loading="lazy"
+            onclick="console.log('Design mode: Product clicked - {{ product }}')"
+          >
+        </div>
         <div class="product-card__body">
           <h4 class="product-card__title">{{ product }}</h4>
 
@@ -52,7 +54,6 @@
                 class="qty-input"
                 placeholder="1"
                 onclick="event.stopPropagation()"
-                style="display: inline-block; width: 50px; height: 32px; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center; font-size: 14px; color: #374151; background: #ffffff;"
               >
               <button
                 class="qty-btn qty-plus"

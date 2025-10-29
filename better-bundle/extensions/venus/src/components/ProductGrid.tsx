@@ -67,13 +67,9 @@ export function ProductGrid({
       getColumnsArray(columns.large || 4),
     );
 
-  // Filter products based on maxProducts limit (this would need to be handled at the parent level)
-  // For now, we'll show all products but the parent can limit them
-  const displayProducts = products;
-
   return (
     <Grid columns={columnsConfig} spacing="base">
-      {displayProducts.map((product, index) => (
+      {products.map((product, index) => (
         <ProductCard
           key={product.id}
           product={product}

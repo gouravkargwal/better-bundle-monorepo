@@ -98,7 +98,6 @@ class UnifiedGorseService:
             # Core entity sync
             ("users", self._sync_users_to_gorse(shop_id)),
             ("products", self._sync_products_to_gorse(shop_id)),
-            ("collections", self._sync_collections_to_gorse(shop_id)),
             # Advanced feature sync
             ("interaction_feedback", self._sync_interaction_features_to_gorse(shop_id)),
             ("session_feedback", self._sync_session_features_to_gorse(shop_id)),
@@ -296,26 +295,6 @@ class UnifiedGorseService:
         except Exception as e:
             logger.error(f"Failed to sync products for shop {shop_id}: {str(e)}")
             return 0
-
-    async def _sync_collections_to_gorse(self, shop_id: str) -> int:
-        """
-        Sync collections using ALL optimized collection features
-        ✅ FIX: Collections should NOT be sent as items to Gorse
-        Collections are used for category-based recommendations, not as items
-        """
-        try:
-            # Collections are not sent as items to Gorse anymore
-            # They are used for category detection and filtering only
-            logger.info(
-                f"✅ Collections sync skipped - collections are not sent as items to Gorse for shop {shop_id}"
-            )
-            return 0
-
-        except Exception as e:
-            logger.error(f"Failed to sync collections for shop {shop_id}: {str(e)}")
-            return 0
-
-    # ===== ADVANCED FEATURE SYNC METHODS =====
 
     async def _sync_interaction_features_to_gorse(self, shop_id: str) -> int:
         """

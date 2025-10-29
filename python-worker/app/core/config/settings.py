@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     PORT: int = Field(default=DEFAULT_PORT, env="PORT")
     ENVIRONMENT: str = Field(default=ENVIRONMENT_DEVELOPMENT, env="ENVIRONMENT")
 
+    # Security Configuration
+    SECRET_KEY: str = Field(
+        default="your-secret-key-change-in-production", env="SECRET_KEY"
+    )
+
     # Sub-settings
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
@@ -373,7 +378,7 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_file = ".env"
+        env_file = [".env.local", ".env"]  # Try .env.local first, then .env
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "allow"

@@ -39,10 +39,30 @@ export interface OverviewMetrics {
   } | null;
 }
 
+export interface PerformanceData {
+  topBundles: Array<{
+    id: string;
+    name: string;
+    revenue: number;
+    orders: number;
+    conversionRate: number;
+  }>;
+  revenueByExtension: Array<{
+    type: string;
+    revenue: number;
+    percentage: number;
+  }>;
+  trends: {
+    weeklyGrowth: number;
+    monthlyGrowth: number;
+  };
+}
+
 export interface OverviewData {
   shop: ShopInfo;
   billingPlan: BillingPlan | null;
   overviewData: OverviewMetrics;
+  performanceData: PerformanceData;
 }
 
 export interface OverviewError {

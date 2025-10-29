@@ -3,8 +3,10 @@ import { Page, Layout, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { OverviewHero } from "./OverviewHero";
 import { OverviewMetrics } from "./OverviewMetrics";
+import { ValueCommunicationBanner } from "./ValueCommunicationBanner";
+import { ROIValueProofSection } from "./ROIValueProofSection";
+import { RecentPerformanceTable } from "./RecentPerformanceTable";
 import { BillingStatus } from "./BillingStatus";
-import { QuickActions } from "./QuickActions";
 import { HelpSection } from "./HelpSection";
 import type { OverviewData, OverviewError } from "../services/overview.types";
 
@@ -32,24 +34,68 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
 
   return (
     <Page>
-      <TitleBar title="Overview" />
+      <TitleBar title="Better Bundle Overview" />
       <BlockStack gap="300">
         <Layout>
           <Layout.Section>
             <BlockStack gap="300">
-              <OverviewHero shop={data.shop} />
+              {/* Hero Section */}
+              <OverviewHero
+                shop={data.shop}
+                subscriptionStatus={data.overviewData.activePlan?.status}
+                totalRevenueGenerated={data.overviewData.totalRevenue}
+                currency={data.overviewData.currency}
+              />
+
+              {/* Value Communication Banner */}
+              <ValueCommunicationBanner
+                subscriptionStatus={
+                  data.overviewData.activePlan?.status || "ACTIVE"
+                }
+                totalRevenueGenerated={data.overviewData.totalRevenue}
+                currency={data.overviewData.currency}
+                commissionRate={
+                  data.overviewData.activePlan?.commissionRate || 0.03
+                }
+                isTrialPhase={data.overviewData.isTrialPhase}
+              />
+
+              {/* Key Performance Metrics */}
               <OverviewMetrics overviewData={data.overviewData} />
-              {data.billingPlan && (
-                <BillingStatus billingPlan={data.billingPlan} />
-              )}
+
+              {/* ROI & Value Proof Section */}
+              <ROIValueProofSection
+                totalRevenueGenerated={data.overviewData.totalRevenue}
+                currency={data.overviewData.currency}
+                commissionRate={
+                  data.overviewData.activePlan?.commissionRate || 0.03
+                }
+                isTrialPhase={data.overviewData.isTrialPhase}
+              />
+
+              {/* Recent Performance Table */}
+              <RecentPerformanceTable
+                performanceData={data.performanceData}
+                currency={data.overviewData.currency}
+              />
+
+              {/* Billing Status and Help Section */}
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-                  gap: "24px",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+                  gap: "16px",
                 }}
               >
-                <QuickActions />
+                <BillingStatus
+                  subscriptionStatus={data.overviewData.activePlan?.status}
+                  commissionRate={
+                    data.overviewData.activePlan?.commissionRate || 0.03
+                  }
+                  isTrialPhase={data.overviewData.isTrialPhase}
+                  totalRevenueGenerated={data.overviewData.totalRevenue}
+                  currency={data.overviewData.currency}
+                />
                 <HelpSection />
               </div>
             </BlockStack>

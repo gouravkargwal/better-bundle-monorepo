@@ -5,6 +5,7 @@ import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 import { OverviewService } from "../features/overview/services/overview.service";
 import { OverviewPage } from "../features/overview/components/OverviewPage";
+import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -14,7 +15,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const data = await overviewService.getOverviewData(session.shop);
     return json(data);
   } catch (error) {
-    console.error("Failed to load overview data:", error);
+    logger.error({ error, shop: session.shop }, "Failed to load overview data");
     return json(
       {
         error:

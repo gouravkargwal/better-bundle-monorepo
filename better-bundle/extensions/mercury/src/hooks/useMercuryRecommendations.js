@@ -3,6 +3,8 @@ import {
   recommendationApi,
 } from "../api/recommendations";
 import { analyticsApi } from "../api/analytics";
+import { JWTManager } from "../utils/jwtManager";
+import { logger } from "../utils/logger";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount, currencyCode) => {
@@ -54,9 +56,26 @@ export function useRecommendations({
   const [products, setProducts] = useState([]);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [jwtManager, setJwtManager] = useState(null);
   const hasFetchedRecommendations = useRef(false);
 
+  // Initialize JWT Manager
   useEffect(() => {
+    if (storage && shopDomain) {
+      const jwt = new JWTManager(storage);
+      setJwtManager(jwt);
+
+      // Set JWT manager on API clients
+      recommendationApi.setJWTManager(jwt);
+      analyticsApi.setJWTManager(jwt);
+    }
+  }, [storage, shopDomain]);
+
+  useEffect(() => {
+    if (!jwtManager) {
+      return;
+    }
+
     const initializeSession = async () => {
       try {
         // 1. Try reading from storage first (fastest) - with expiration check
@@ -64,20 +83,13 @@ export function useRecommendations({
         const cachedExpiry = await storage.read("unified_session_expires_at");
 
         if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-          console.log(
-            "🔗 Mercury: Using cached session_id from storage:",
-            cachedSessionId,
-          );
+
           setSessionId(cachedSessionId);
           return;
         }
 
-        if (cachedSessionId && cachedExpiry) {
-          console.log("⚠️ Mercury: Cached session expired, creating new session");
-        }
 
         // 2. If not in storage, fetch from backend API
-        console.log("🌐 Mercury: Fetching session_id from backend");
         const sessionId = await analyticsApi.getOrCreateSession(
           shopDomain,
           customerId,
@@ -88,16 +100,15 @@ export function useRecommendations({
         await storage.write("unified_session_id", sessionId);
         await storage.write("unified_session_expires_at", expiresAt.toString());
 
-        console.log("✨ Mercury: Session initialized from backend:", sessionId);
         setSessionId(sessionId);
       } catch (err) {
-        console.error("❌ Mercury: Failed to initialize session:", err);
+        logger.error("Failed to initialize session:", err);
         setError("Failed to initialize session");
       }
     };
 
     initializeSession();
-  }, [storage, shopDomain, customerId]);
+  }, [jwtManager, storage, shopDomain, customerId]);
 
   // Memoize cart data to prevent infinite re-renders
   const memoizedCartData = useMemo(() => ({
@@ -124,12 +135,11 @@ export function useRecommendations({
 
       if (!success) {
         // If tracking failed, clear cached session
-        console.warn("⚠️ Mercury: Click tracking failed, clearing cached session");
         await storage.remove("unified_session_id");
         setSessionId(null);
       }
     } catch (error) {
-      console.error(`Failed to track ${context} click:`, error);
+      logger.error(`Failed to track ${context} click:`, error);
       // Clear cached session on error
       await storage.remove("unified_session_id");
       setSessionId(null);
@@ -155,17 +165,12 @@ export function useRecommendations({
         { source: `${context}_page` },
       );
 
-      if (success) {
-        console.log(`✅ Mercury: Recommendation view tracked for ${context}`);
-      } else {
-        // If tracking failed, clear cached session and retry
-        console.warn("⚠️ Mercury: Tracking failed, clearing cached session");
+      if (!success) {
         await storage.remove("unified_session_id");
         setSessionId(null);
-        // The useEffect will automatically create a new session
       }
     } catch (error) {
-      console.error(`❌ Mercury: Failed to track recommendation view:`, error);
+      logger.error(`Failed to track recommendation view:`, error);
       // Clear cached session on error
       await storage.remove("unified_session_id");
       setSessionId(null);
@@ -174,13 +179,11 @@ export function useRecommendations({
 
   // Fetch recommendations
   useEffect(() => {
-    if (!sessionId) {
-      console.log("⏳ Mercury: Waiting for session initialization");
+    if (!jwtManager || !sessionId) {
       return;
     }
 
     if (hasFetchedRecommendations.current) {
-      console.log("⏳ Mercury: Recommendations already fetched");
       return;
     }
 
@@ -245,7 +248,7 @@ export function useRecommendations({
           throw new Error(`Failed to fetch ${context} recommendations`);
         }
       } catch (err) {
-        console.error(`Error fetching ${context} recommendations:`, err);
+        logger.error(`Error fetching ${context} recommendations:`, err);
         setError(`Failed to load recommendations`);
       } finally {
         setLoading(false);
@@ -253,7 +256,7 @@ export function useRecommendations({
     };
 
     fetchRecommendations();
-  }, [customerId, context, limit, sessionId, shopDomain, memoizedCartData]);
+  }, [jwtManager, customerId, context, limit, sessionId, shopDomain, memoizedCartData]);
 
   return {
     loading,

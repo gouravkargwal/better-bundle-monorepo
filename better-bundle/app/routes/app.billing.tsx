@@ -4,9 +4,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { BillingService } from "../features/billing/services/billing.service";
 import { TabbedBillingPage } from "../features/billing/components/TabbedBillingPage";
+import logger from "../utils/logger";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
@@ -20,16 +21,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
       throw new Error("Shop not found");
     }
 
-    // Get billing state using the service
-    const billingState = await BillingService.getBillingState(shopRecord.id);
+    // ✅ Get billing state with admin context for Shopify API calls
+    const billingState = await BillingService.getBillingState(
+      shopRecord.id,
+      admin,
+    );
+
+    // Check URL parameters for callback status
+    const url = new URL(request.url);
+    const subscriptionStatus = url.searchParams.get("subscription");
 
     return json({
       shopId: shopRecord.id,
       shopCurrency: shopRecord.currency_code || "USD",
       billingState,
+      subscriptionStatus, // Pass the status to the component
     });
   } catch (error) {
-    console.error("Billing loader error:", error);
+    logger.error({ error, shop }, "Billing loader error");
     return json({
       error: "Failed to load billing data",
     });
@@ -47,13 +56,14 @@ export default function BillingPage() {
     );
   }
 
-  const { shopId, shopCurrency, billingState } = loaderData;
+  const { shopId, shopCurrency, billingState, subscriptionStatus } = loaderData;
 
   return (
     <TabbedBillingPage
       shopId={shopId}
       shopCurrency={shopCurrency}
       billingState={billingState}
+      subscriptionStatus={subscriptionStatus}
     />
   );
 }

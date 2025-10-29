@@ -7,7 +7,7 @@ function formatPrice(amount, currencyCode) {
       typeof currencyCode !== "string" ||
       currencyCode.trim() === ""
     ) {
-      console.log("⚠️ Invalid currency, using USD as fallback:", currencyCode);
+      this.logger.warn("⚠️ Invalid currency, using USD as fallback:", currencyCode);
       currencyCode = "USD";
     }
 
@@ -81,6 +81,7 @@ function formatPrice(amount, currencyCode) {
 class ProductCardManager {
   constructor() {
     this.productDataStore = {};
+    this.logger = window.phoenixLogger || console; // Use the global logger with fallback
     // RecommendationAPI is loaded globally from api.js
     this.api =
       window.recommendationApi ||
@@ -101,35 +102,28 @@ class ProductCardManager {
   // Manage skeleton loading state
   setSkeletonState(state) {
     this.skeletonState = state;
-    console.log(`🔄 ProductCardManager: Skeleton state changed to ${state}`);
   }
 
   // Show skeleton loading during API calls
   showSkeletonLoading() {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
     if (!swiperWrapper) {
-      console.error('❌ ProductCardManager: Swiper wrapper not found');
+      this.logger.error('❌ ProductCardManager: Swiper wrapper not found');
       return;
     }
 
-    console.log('🔄 ProductCardManager: Updating skeleton loading...');
     this.setSkeletonState('loading');
 
     // Check if skeleton already exists and is visible
     const existingSkeleton = swiperWrapper.querySelector('.loading-placeholder:not(.fade-out)');
     if (existingSkeleton) {
-      console.log('✅ ProductCardManager: Skeleton already exists and visible, just updating state');
       return;
     }
-
-    // Only create skeleton if none exists or if existing ones are faded out
-    console.log('🔄 ProductCardManager: Creating skeleton loading...');
 
     // Clear existing content
     swiperWrapper.innerHTML = '';
 
     // Create skeleton slides matching actual product card structure
-    console.log('🔄 Creating 4 skeleton slides...');
     for (let i = 0; i < 4; i++) {
       const slide = document.createElement('div');
       slide.className = 'swiper-slide loading-placeholder';
@@ -167,10 +161,7 @@ class ProductCardManager {
         </div>
       `;
       swiperWrapper.appendChild(slide);
-      console.log(`✅ Created skeleton slide ${i + 1}`);
     }
-
-    console.log('📊 Total skeleton slides created:', swiperWrapper.children.length);
 
     // Initialize Swiper for skeleton
     this.initializeSwiper();
@@ -186,15 +177,14 @@ class ProductCardManager {
   ) {
     const swiperWrapper = document.querySelector(".swiper-wrapper");
     if (!swiperWrapper) {
-      console.error('❌ ProductCardManager: Swiper wrapper not found');
+      this.logger.error('❌ ProductCardManager: Swiper wrapper not found');
       return;
     }
 
-    console.log('🔄 ProductCardManager: Updating product cards with', recommendations.length, 'recommendations');
 
     // Check if we're already showing real content to prevent duplication
     if (this.skeletonState === 'loaded') {
-      console.log('⚠️ ProductCardManager: Real content already loaded, skipping skeleton update');
+      this.logger.warn('⚠️ ProductCardManager: Real content already loaded, skipping skeleton update');
       return;
     }
 
@@ -223,13 +213,6 @@ class ProductCardManager {
         // Store product data for variant price updates
         recommendations.forEach((product) => {
           this.productDataStore[product.id] = product;
-          console.log('🏪 Stored product data:', {
-            productId: product.id,
-            productTitle: product.title,
-            options: product.options,
-            variants: product.variants?.length,
-            storedData: this.productDataStore[product.id]
-          });
         });
 
         // Create new slides from recommendations
@@ -258,7 +241,7 @@ class ProductCardManager {
         // Skip reinitialization if we're updating dropdowns to prevent card movement
         setTimeout(() => {
           if (this.dropdownManager && this.dropdownManager.isUpdatingDropdowns) {
-            console.log('🔄 Skipping Swiper reinitialization during dropdown updates');
+            this.logger.warn('🔄 Skipping Swiper reinitialization during dropdown updates');
             return;
           }
 
@@ -296,9 +279,8 @@ class ProductCardManager {
           }
         }
 
-        console.log('✅ ProductCardManager: Successfully updated product cards');
       } catch (error) {
-        console.error('❌ ProductCardManager: Error updating product cards:', error);
+        this.logger.error('❌ ProductCardManager: Error updating product cards:', error);
         // Fallback: hide the carousel if there's an error
         const carouselContainer = document.querySelector('.shopify-app-block');
         if (carouselContainer) {
@@ -319,37 +301,34 @@ class ProductCardManager {
     if (this.renderer) {
       return this.renderer.createProductSlide(product, index, analyticsApi, sessionId, context);
     } else {
-      console.error('❌ ProductCardRenderer not loaded');
+      this.logger.error('❌ ProductCardRenderer not loaded');
       return null;
     }
   }
 
   // Handle variant selection for any option type
   selectVariant(productId, optionName, selectedValue) {
-    console.log('🎯 selectVariant called:', { productId, optionName, selectedValue });
 
     const productData = this.productDataStore[productId];
     const productCard = document.querySelector(`[data-product-id="${productId}"]`);
 
     if (!productData) {
-      console.error('❌ Product data not found for:', productId);
+      this.logger.error('❌ Product data not found for:', productId);
       return;
     }
 
     if (!productCard) {
-      console.error('❌ Product card not found for:', productId);
+      this.logger.error('❌ Product card not found for:', productId);
       return;
     }
 
-    console.log('✅ Found product data and card for:', productId);
 
     // Update visual state of the dropdown
     const dropdown = productCard.querySelector(`[data-option="${optionName}"]`);
     if (dropdown) {
       dropdown.classList.add('selected');
-      console.log('✅ Updated dropdown visual state for:', optionName, selectedValue);
     } else {
-      console.warn('⚠️ Dropdown not found for option:', optionName);
+      this.logger.warn('⚠️ Dropdown not found for option:', optionName);
     }
 
     // Update dependent dropdowns based on current selection
@@ -361,7 +340,6 @@ class ProductCardManager {
     const selectedOptions = this.dropdownManager ?
       this.dropdownManager.getSelectedOptions(productCard) :
       {};
-    console.log('📋 All selected options:', selectedOptions);
 
     // Find matching variant
     const matchingVariant = this.variantManager ?
@@ -369,13 +347,12 @@ class ProductCardManager {
       null;
 
     if (matchingVariant) {
-      console.log('✅ Found matching variant:', matchingVariant);
       if (this.variantManager) {
         this.variantManager.updateVariantPriceFromSelection(matchingVariant, productId);
         this.variantManager.updateAvailability(matchingVariant, productCard);
       }
     } else {
-      console.warn('⚠️ No matching variant found, showing unavailable');
+      this.logger.warn('⚠️ No matching variant found, showing unavailable');
       if (this.variantManager) {
         this.variantManager.showVariantUnavailable(productId);
       }
@@ -410,7 +387,7 @@ class ProductCardManager {
     if (this.swiperManager) {
       this.swiperManager.preventNavigationClickPropagation();
     } else {
-      console.error('❌ SwiperManager not loaded');
+      this.logger.error('❌ SwiperManager not loaded');
     }
   }
 
@@ -419,7 +396,7 @@ class ProductCardManager {
     if (this.swiperManager) {
       this.swiperManager.initializeSwiper();
     } else {
-      console.error('❌ SwiperManager not loaded');
+      this.logger.error('❌ SwiperManager not loaded');
     }
   }
 
@@ -440,7 +417,7 @@ class ProductCardManager {
           { source: "cart_recommendation" }
         )
         .catch((error) => {
-          console.error("Failed to track product click:", error);
+          this.logger.error("Failed to track product click:", error);
         });
     }
 
@@ -484,7 +461,7 @@ class ProductCardManager {
 
     // Validate variant ID
     if (!selectedVariantId || selectedVariantId === '') {
-      console.error('No valid variant ID found:', { selectedVariantId, variantId, variantSelect });
+      this.logger.error('No valid variant ID found:', { selectedVariantId, variantId, variantSelect });
       throw new Error('No valid variant ID found');
     }
 
@@ -510,13 +487,11 @@ class ProductCardManager {
         "_bb_rec_source": "betterbundle",
       };
 
-      console.log('Adding to cart:', { selectedVariantId, selectedQuantity, itemProperties });
 
       if (window.analyticsApi && sessionId) {
         const shopDomain = window.shopDomain;
         const customerId = window.customerId;
 
-        console.log('🔄 Tracking add to cart BEFORE cart API call to prevent cancellation');
 
         // Use sendBeacon for reliable delivery even during page navigation
         const trackingPromise = window.analyticsApi.trackAddToCart(
@@ -535,7 +510,7 @@ class ProductCardManager {
 
         // Don't await the tracking - let it complete in background
         trackingPromise.catch((error) => {
-          console.warn('Analytics tracking failed (non-blocking):', error);
+          this.logger.warn('Analytics tracking failed (non-blocking):', error);
         });
       }
 
@@ -551,14 +526,10 @@ class ProductCardManager {
       addToCartButton.style.cursor = "pointer";
       addToCartButton.textContent = originalButtonText;
 
-      // Show success feedback
-      console.log("Success: Product added to cart!");
 
-      // Reload page to update cart UI
-      console.log("🔄 Reloading page to update cart UI...");
       window.location.reload();
     } catch (error) {
-      console.error("Error adding to cart:", error);
+      this.logger.error("Error adding to cart:", error);
 
       // Restore button state on error
       if (addToCartButton) {
@@ -567,7 +538,6 @@ class ProductCardManager {
         addToCartButton.textContent = originalButtonText;
       }
 
-      console.error("Error: Failed to add product to cart");
     }
   }
 }
