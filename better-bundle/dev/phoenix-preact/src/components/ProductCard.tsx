@@ -1,5 +1,5 @@
 import type { FunctionalComponent } from "preact";
-import { useState, useMemo, useEffect } from "preact/hooks";
+import { useState, useMemo, useEffect, useRef } from "preact/hooks";
 import type { Product, Variant } from "../types";
 import { formatPrice } from "../utils/format";
 import styles from "../styles/carousel.module.css";
@@ -28,10 +28,25 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
   onAddToCart,
 }) => {
   const [qty, setQty] = useState(1);
-  const [currentImage, setCurrentImage] = useState(product.image);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showImageGallery, setShowImageGallery] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const autoSlideRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize selected options immediately
+  // Get all available images
+  const allImages = useMemo(() => {
+    const images = [product.image];
+    if (product.images && product.images.length > 0) {
+      const additionalImages = product.images.filter(
+        (img) => img !== product.image,
+      );
+      images.push(...additionalImages);
+    }
+    return images.filter(Boolean);
+  }, [product.image, product.images]);
+
+  // Initialize selected options
   const [selectedOptions, setSelectedOptions] = useState<
     Record<string, string>
   >(() => {
@@ -67,12 +82,59 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
     });
   }, [product.variants, product.options, selectedOptions]);
 
-  // Update image when variant changes
+  // Auto-slide for desktop hover (only when gallery is active)
   useEffect(() => {
-    if (selectedVariant?.image) {
-      setCurrentImage(selectedVariant.image);
+    if (isHovered && showImageGallery && allImages.length > 1) {
+      autoSlideRef.current = setInterval(() => {
+        setCurrentImageIndex((prev) => (prev + 1) % allImages.length);
+      }, 2000);
+    } else {
+      if (autoSlideRef.current) {
+        clearInterval(autoSlideRef.current);
+        autoSlideRef.current = null;
+      }
     }
-  }, [selectedVariant]);
+
+    return () => {
+      if (autoSlideRef.current) {
+        clearInterval(autoSlideRef.current);
+      }
+    };
+  }, [isHovered, showImageGallery, allImages.length]);
+
+  // Reset gallery when hover ends
+  useEffect(() => {
+    if (!isHovered && showImageGallery) {
+      setShowImageGallery(false);
+      setCurrentImageIndex(0);
+    }
+  }, [isHovered, showImageGallery]);
+
+  const handleImageClick = () => {
+    onClick(product.id, position, product.url);
+  };
+
+  const handleSeeMoreClick = (e: Event) => {
+    e.stopPropagation();
+    setShowImageGallery(true);
+  };
+
+  const handlePrevImage = (e: Event) => {
+    e.stopPropagation();
+    setCurrentImageIndex(
+      (prev) => (prev - 1 + allImages.length) % allImages.length,
+    );
+  };
+
+  const handleNextImage = (e: Event) => {
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev + 1) % allImages.length);
+  };
+
+  const handleImageDotClick = (index: number, e: Event) => {
+    e.stopPropagation();
+    setCurrentImageIndex(index);
+  };
 
   const handleOptionChange = (optionName: string, value: string) => {
     setSelectedOptions((prev) => ({
@@ -96,17 +158,42 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
     selectedVariant?.compare_at_price &&
     selectedVariant.compare_at_price > (selectedVariant.price || product.price);
 
+  const currentImage = allImages[currentImageIndex] || product.image;
+  const hasMultipleImages = allImages.length > 1;
+
   return (
     <article className={styles.productCard} data-product-id={product.id}>
       {/* Image Section */}
-      <div className={styles.imageSection}>
+      <div
+        className={styles.imageSection}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
         <div
           className={styles.productImage}
-          onClick={() => onClick(product.id, position, product.url)}
+          onClick={handleImageClick}
           role="button"
           tabIndex={0}
         >
-          <img src={currentImage} alt={product.title} loading="lazy" />
+          <img
+            src={currentImage}
+            alt={`${product.title} - ${currentImageIndex + 1}`}
+            loading="lazy"
+            className={styles.productImg}
+          />
+
+          {/* "See More" Button - Only show if multiple images and not in gallery mode */}
+          {hasMultipleImages && !showImageGallery && (
+            <button
+              className={styles.seeMoreBtn}
+              onClick={handleSeeMoreClick}
+              aria-label="View more images"
+            >
+              +{allImages.length - 1} more
+            </button>
+          )}
+
+          {/* Discount Badge */}
           {hasDiscount && (
             <span className={styles.discountBadge}>
               {Math.round(
@@ -119,13 +206,44 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
             </span>
           )}
         </div>
+
+        {/* Pagination Controls - Only show when gallery is active */}
+        {hasMultipleImages && showImageGallery && (
+          <div className={styles.imagePagination}>
+            <button
+              className={styles.paginationArrow}
+              onClick={handlePrevImage}
+              aria-label="Previous image"
+            >
+              ‹
+            </button>
+
+            <div className={styles.paginationDots}>
+              {allImages.map((_, index) => (
+                <button
+                  key={index}
+                  className={`${styles.paginationDot} ${index === currentImageIndex ? styles.paginationDotActive : ""}`}
+                  onClick={(e) => handleImageDotClick(index, e)}
+                  aria-label={`View image ${index + 1}`}
+                />
+              ))}
+            </div>
+
+            <button
+              className={styles.paginationArrow}
+              onClick={handleNextImage}
+              aria-label="Next image"
+            >
+              ›
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Content Section */}
       <div className={styles.contentSection}>
         <h3 className={styles.productTitle}>{product.title}</h3>
 
-        {/* Updated Price Section */}
         <div className={styles.priceSection}>
           <div className={styles.priceGroup}>
             <span className={styles.currentPrice}>
@@ -167,7 +285,6 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
           </div>
         </div>
 
-        {/* Variants - No Labels */}
         {product.options?.length ? (
           <div className={styles.variantsRow}>
             {product.options.map((option) => (
@@ -189,7 +306,6 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
           </div>
         ) : null}
 
-        {/* Add to Cart */}
         <button
           className={`${styles.addToCartBtn} ${isLoading ? styles.loading : ""} ${!selectedVariant?.available ? styles.disabled : ""}`}
           disabled={!selectedVariant?.available || isLoading}

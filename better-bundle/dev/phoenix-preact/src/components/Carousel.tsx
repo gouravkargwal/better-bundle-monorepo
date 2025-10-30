@@ -1,7 +1,7 @@
 import type { FunctionalComponent } from "preact";
 import { useEffect, useRef, useMemo } from "preact/hooks";
 import { Splide } from "@splidejs/splide";
-import "@splidejs/splide/css/core"; // Only core styles
+import "@splidejs/splide/css/core";
 import { ProductCard } from "./ProductCard";
 import { useRecommendations } from "../hooks/useRecommendations";
 import type { Product } from "../types";
@@ -115,30 +115,26 @@ export const Carousel: FunctionalComponent<CarouselProps> = ({
     }
   }, [products, isDesignMode, trackRecommendationView]);
 
-  // In Carousel.tsx - Add logic to hide pagination when not needed
+  // Initialize Splide with custom pagination
   useEffect(() => {
     if (!products?.length || !splideRef.current || splideInstance.current)
       return;
-
-    const shouldShowPagination = showPagination && products.length > 4; // Only show if more than 4 items
 
     splideInstance.current = new Splide(splideRef.current, {
       type: products.length > 4 ? "loop" : "slide",
       perPage: 4,
       perMove: 1,
-      gap: "1rem",
-      arrows: showArrows,
-      pagination: shouldShowPagination, // Conditional pagination
+      gap: "0.5rem", // Reduced gap
+      arrows: false, // We'll use custom arrows
+      pagination: false, // We'll use custom pagination
       autoplay: enableAutoplay,
       interval: autoplayDelay,
       pauseOnHover: true,
       pauseOnFocus: true,
-      arrowPath:
-        "M15.5 0.932L11.2 5.312 12.612 6.724 20.68 -1.344 12.612 -9.412 11.2 -8 15.5 -3.62 0 -3.62 0 -1.38 15.5 0.932Z",
       breakpoints: {
-        1200: { perPage: 3, pagination: showPagination && products.length > 3 },
-        768: { perPage: 2, pagination: showPagination && products.length > 2 },
-        480: { perPage: 1, pagination: showPagination && products.length > 1 },
+        1200: { perPage: 3 },
+        768: { perPage: 2 },
+        480: { perPage: 1 },
       },
       lazyLoad: "nearby",
       preloadPages: 1,
@@ -152,9 +148,21 @@ export const Carousel: FunctionalComponent<CarouselProps> = ({
         splideInstance.current = null;
       }
     };
-  }, [products, showArrows, showPagination, enableAutoplay, autoplayDelay]);
+  }, [products, enableAutoplay, autoplayDelay]);
 
-  // Handlers
+  // Custom navigation handlers
+  const handlePrev = () => {
+    if (splideInstance.current) {
+      splideInstance.current.go("<");
+    }
+  };
+
+  const handleNext = () => {
+    if (splideInstance.current) {
+      splideInstance.current.go(">");
+    }
+  };
+
   const handleClick = async (
     productId: string | number,
     position: number,
@@ -223,6 +231,9 @@ export const Carousel: FunctionalComponent<CarouselProps> = ({
 
   if (products.length === 0) return null;
 
+  // Calculate if we need pagination (more items than visible)
+  const needsPagination = products.length > 4;
+
   return (
     <div className={styles.phoenixCarousel}>
       <div ref={splideRef} className="splide">
@@ -242,6 +253,40 @@ export const Carousel: FunctionalComponent<CarouselProps> = ({
           </ul>
         </div>
       </div>
+
+      {/* Custom Pagination - Same style as product cards */}
+      {needsPagination && (showArrows || showPagination) && (
+        <div className={styles.carouselPagination}>
+          {showArrows && (
+            <button
+              className={styles.carouselArrow}
+              onClick={handlePrev}
+              aria-label="Previous products"
+            >
+              ‹
+            </button>
+          )}
+
+          {showPagination && (
+            <div className={styles.carouselDots}>
+              {/* We'll show simplified dots for main carousel */}
+              <div className={styles.carouselDot} />
+              <div className={styles.carouselDot} />
+              <div className={styles.carouselDot} />
+            </div>
+          )}
+
+          {showArrows && (
+            <button
+              className={styles.carouselArrow}
+              onClick={handleNext}
+              aria-label="Next products"
+            >
+              ›
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

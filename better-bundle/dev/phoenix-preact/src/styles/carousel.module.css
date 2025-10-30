@@ -1,176 +1,154 @@
-/* Modern Professional Product Cards */
+/* Phoenix Carousel - STRICTLY SCOPED */
 .phoenixCarousel {
-  --primary: #1a1a1a;
-  --secondary: #ffffff;
-  --accent: #2563eb;
-  --success: #059669;
-  --danger: #dc2626;
-  --border: #e5e7eb;
-  --text-primary: #111827;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
-  --bg-subtle: #f9fafb;
-  --radius: 8px;
-  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  /* Scoped CSS variables - won't affect theme */
+  --phoenix-primary: #1a1a1a;
+  --phoenix-secondary: #ffffff;
+  --phoenix-accent: #2563eb;
+  --phoenix-success: #059669;
+  --phoenix-danger: #dc2626;
+  --phoenix-border: #e5e7eb;
+  --phoenix-text-primary: #111827;
+  --phoenix-text-secondary: #6b7280;
+  --phoenix-text-muted: #9ca3af;
+  --phoenix-bg-subtle: #f9fafb;
+  --phoenix-radius: 8px;
+  --phoenix-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  --phoenix-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 
   width: 100%;
-  margin: 1.5rem auto 0;
-  isolation: isolate;
+  margin: 0.5rem auto 0;
+  isolation: isolate; /* Create stacking context */
+  contain: layout style paint; /* Prevent style leakage */
+
+  /* Reset any inherited theme styles */
+  all: initial;
+  font-family: inherit;
+  color: inherit;
+  display: block;
+  box-sizing: border-box;
 }
 
-/* Splide Fixes */
+/* Apply box-sizing to all children */
+.phoenixCarousel *,
+.phoenixCarousel *::before,
+.phoenixCarousel *::after {
+  box-sizing: border-box;
+}
+
+/* Splide Fixes - ONLY within phoenix-carousel */
 .phoenixCarousel :global(.splide) {
   overflow: visible !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
 }
 
 .phoenixCarousel :global(.splide__track) {
-  overflow: hidden;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
 }
 
 .phoenixCarousel :global(.splide__slide) {
-  display: flex;
-  align-items: stretch;
-  padding: 0.5rem;
+  display: flex !important;
+  align-items: stretch !important;
+  padding: 0.125rem !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
 }
 
-/* Modern Navigation Arrows */
-.phoenixCarousel :global(.splide__arrow) {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
-  background: var(--secondary);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow);
-  transition: all 0.2s ease;
-  z-index: 2;
+.phoenixCarousel :global(.splide__list) {
+  margin: 0 !important;
+  padding: 0 !important;
+  list-style: none !important;
+  box-sizing: border-box !important;
 }
 
-.phoenixCarousel :global(.splide__arrow:hover) {
-  background: var(--primary);
-  border-color: var(--primary);
-  box-shadow: var(--shadow-lg);
-}
-
-.phoenixCarousel :global(.splide__arrow--prev) {
-  left: -22px;
-}
-.phoenixCarousel :global(.splide__arrow--next) {
-  right: -22px;
-}
-
-/* Clean Chevron Arrows */
-.phoenixCarousel :global(.splide__arrow::before) {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-top: 2px solid var(--text-primary);
-  border-right: 2px solid var(--text-primary);
-  transition: all 0.2s ease;
-}
-
-.phoenixCarousel :global(.splide__arrow--prev::before) {
-  transform: rotate(225deg);
-  margin-right: -1px;
-}
-
-.phoenixCarousel :global(.splide__arrow--next::before) {
-  transform: rotate(45deg);
-  margin-left: -1px;
-}
-
-.phoenixCarousel :global(.splide__arrow:hover::before) {
-  border-color: var(--secondary);
-}
-
-.phoenixCarousel :global(.splide__arrow svg) {
-  display: none;
-}
-
-/* Pagination */
+/* Hide default Splide controls - ONLY in phoenix carousel */
+.phoenixCarousel :global(.splide__arrow),
 .phoenixCarousel :global(.splide__pagination) {
-  position: absolute;
-  bottom: -1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  display: none !important;
 }
 
-.phoenixCarousel :global(.splide__pagination__page) {
-  width: 8px;
-  height: 8px;
-  background: var(--border);
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.phoenixCarousel :global(.splide__pagination__page.is-active) {
-  background: var(--primary);
-  transform: scale(1.25);
-}
-
-/* Product Card - Fixed Layout */
-.productCard {
+/* Product Card - STRICTLY SCOPED */
+.phoenixCarousel .productCard {
   display: flex;
   flex-direction: column;
-  background: var(--secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--phoenix-secondary);
+  border: 1px solid var(--phoenix-border);
+  border-radius: var(--phoenix-radius);
   overflow: hidden;
   transition: all 0.2s ease;
   width: 100%;
-  min-height: 340px;
+  min-height: 320px;
+  margin: 0;
+  box-sizing: border-box;
 }
 
-.productCard:hover {
-  border-color: var(--text-secondary);
-  box-shadow: var(--shadow-lg);
+.phoenixCarousel .productCard:hover {
+  border-color: var(--phoenix-text-secondary);
+  box-shadow: var(--phoenix-shadow-lg);
   transform: translateY(-2px);
 }
 
-/* Image Section - Fixed Aspect Ratio */
-.imageSection {
+/* Image Section */
+.phoenixCarousel .imageSection {
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
+  margin: 0;
 }
 
-.productImage {
+.phoenixCarousel .productImage {
   position: relative;
   aspect-ratio: 4/3;
   overflow: hidden;
   cursor: pointer;
-  background: var(--bg-subtle);
+  background: var(--phoenix-bg-subtle);
+  margin: 0;
 }
 
-.productImage img {
+.phoenixCarousel .productImg {
   width: 100%;
   height: 100%;
   object-fit: cover;
   transition: transform 0.2s ease;
 }
 
-.productCard:hover .productImage img {
+.phoenixCarousel .productCard:hover .productImg {
   transform: scale(1.02);
 }
 
-.discountBadge {
+/* "See More" Button */
+.phoenixCarousel .seeMoreBtn {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  border: none;
+  border-radius: 16px;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+  z-index: 2;
+}
+
+.phoenixCarousel .seeMoreBtn:hover {
+  background: rgba(0, 0, 0, 0.9);
+  transform: scale(1.05);
+}
+
+/* Discount Badge */
+.phoenixCarousel .discountBadge {
   position: absolute;
   top: 0.75rem;
   left: 0.75rem;
-  background: var(--danger);
+  background: var(--phoenix-danger);
   color: white;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
@@ -178,21 +156,103 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.025em;
+  z-index: 2;
 }
 
-/* Content Section - Flexible Layout */
-.contentSection {
-  padding: 1rem;
+/* Image Pagination - Fixed Perfect Dots */
+.phoenixCarousel .imagePagination {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 20px;
+  padding: 0.375rem 0.75rem;
+  backdrop-filter: blur(8px);
+  z-index: 3;
+}
+
+.phoenixCarousel .paginationArrow {
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.phoenixCarousel .paginationArrow:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.phoenixCarousel .paginationDots {
+  display: flex;
+  gap: 0.25rem; /* Reduced gap for tighter spacing */
+  align-items: center;
+}
+
+/* FIXED: Perfect Circle Dots */
+.phoenixCarousel .paginationDot {
+  width: 24px; /* Larger touch target */
+  height: 24px; /* Larger touch target */
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.phoenixCarousel .paginationDot::after {
+  content: "";
+  width: 8px; /* Perfect circle size */
+  height: 8px; /* Same as width */
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  transition: all 0.2s ease;
+  display: block;
+  flex-shrink: 0;
+}
+
+.phoenixCarousel .paginationDot:hover::after {
+  background: rgba(255, 255, 255, 0.8);
+  transform: scale(1.2);
+}
+
+.phoenixCarousel .paginationDotActive::after {
+  background: white !important;
+  transform: scale(1.3);
+}
+
+/* Content Section */
+.phoenixCarousel .contentSection {
+  padding: 0.75rem;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
   flex: 1;
+  margin: 0;
 }
 
-.productTitle {
+.phoenixCarousel .productTitle {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--phoenix-text-primary);
   line-height: 1.25;
   margin: 0;
   display: -webkit-box;
@@ -202,15 +262,16 @@
   min-height: 2.5rem;
 }
 
-/* Improved Price Section - Stacked Layout */
-.priceSection {
+/* Price Section */
+.phoenixCarousel .priceSection {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: 0.5rem;
+  margin: 0;
 }
 
-.priceGroup {
+.phoenixCarousel .priceGroup {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
@@ -218,30 +279,30 @@
   min-width: 0;
 }
 
-.currentPrice {
+.phoenixCarousel .currentPrice {
   font-size: 1.125rem;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--phoenix-text-primary);
   line-height: 1.2;
 }
 
-.originalPrice {
+.phoenixCarousel .originalPrice {
   font-size: 0.8125rem;
-  color: var(--text-muted);
+  color: var(--phoenix-text-muted);
   text-decoration: line-through;
   line-height: 1;
 }
 
-.discountPercent {
+.phoenixCarousel .discountPercent {
   font-size: 0.6875rem;
-  color: var(--danger);
+  color: var(--phoenix-danger);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.025em;
   line-height: 1;
 }
 
-.qtyGroup {
+.phoenixCarousel .qtyGroup {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -249,47 +310,47 @@
   flex-shrink: 0;
 }
 
-.qtyLabel {
+.phoenixCarousel .qtyLabel {
   font-size: 0.6875rem;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--phoenix-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.025em;
 }
 
-.qtyControls {
+.phoenixCarousel .qtyControls {
   display: flex;
   align-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid var(--phoenix-border);
   border-radius: 6px;
   overflow: hidden;
 }
 
-.qtyBtn {
+.phoenixCarousel .qtyBtn {
   width: 26px;
   height: 26px;
   border: none;
-  background: var(--secondary);
+  background: var(--phoenix-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--phoenix-text-primary);
   transition: background-color 0.2s ease;
 }
 
-.qtyBtn:hover:not(:disabled) {
-  background: var(--bg-subtle);
+.phoenixCarousel .qtyBtn:hover:not(:disabled) {
+  background: var(--phoenix-bg-subtle);
 }
 
-.qtyBtn:disabled {
+.phoenixCarousel .qtyBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.qtyValue {
+.phoenixCarousel .qtyValue {
   min-width: 30px;
   height: 26px;
   display: flex;
@@ -297,25 +358,26 @@
   justify-content: center;
   font-size: 0.8125rem;
   font-weight: 500;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  background: var(--bg-subtle);
+  border-left: 1px solid var(--phoenix-border);
+  border-right: 1px solid var(--phoenix-border);
+  background: var(--phoenix-bg-subtle);
 }
 
-/* Variants Row - No Labels */
-.variantsRow {
+/* Variants Row */
+.phoenixCarousel .variantsRow {
   display: flex;
   gap: 0.5rem;
+  margin: 0;
 }
 
-.variantSelect {
+.phoenixCarousel .variantSelect {
   flex: 1;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--phoenix-border);
   border-radius: 6px;
-  background: var(--secondary);
+  background: var(--phoenix-secondary);
   font-size: 0.8125rem;
-  color: var(--text-primary);
+  color: var(--phoenix-text-primary);
   cursor: pointer;
   transition: border-color 0.2s ease;
   appearance: none;
@@ -326,18 +388,18 @@
   padding-right: 2.5rem;
 }
 
-.variantSelect:focus {
+.phoenixCarousel .variantSelect:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--phoenix-accent);
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
 }
 
-/* Add to Cart Button */
-.addToCartBtn {
+/* Add to Cart Button - INCREASED HEIGHT */
+.phoenixCarousel .addToCartBtn {
   width: 100%;
-  padding: 0.75rem;
-  background: var(--primary);
-  color: var(--secondary);
+  padding: 1rem; /* Increased padding */
+  background: var(--phoenix-primary);
+  color: var(--phoenix-secondary);
   border: none;
   border-radius: 6px;
   font-size: 0.875rem;
@@ -346,24 +408,25 @@
   transition: all 0.2s ease;
   position: relative;
   margin-top: auto;
+  min-height: 48px; /* Increased height */
 }
 
-.addToCartBtn:hover:not(:disabled) {
-  background: var(--text-primary);
+.phoenixCarousel .addToCartBtn:hover:not(:disabled) {
+  background: var(--phoenix-text-primary);
   transform: translateY(-1px);
 }
 
-.addToCartBtn.disabled {
-  background: var(--text-muted);
+.phoenixCarousel .addToCartBtn.disabled {
+  background: var(--phoenix-text-muted);
   cursor: not-allowed;
 }
 
-.addToCartBtn.loading {
+.phoenixCarousel .addToCartBtn.loading {
   color: transparent;
   cursor: not-allowed;
 }
 
-.spinner {
+.phoenixCarousel .spinner {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -371,92 +434,184 @@
   width: 16px;
   height: 16px;
   border: 2px solid transparent;
-  border-top: 2px solid var(--secondary);
+  border-top: 2px solid var(--phoenix-secondary);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: phoenix-spin 1s linear infinite;
 }
 
-@keyframes spin {
+@keyframes phoenix-spin {
   to {
     transform: translate(-50%, -50%) rotate(360deg);
   }
 }
 
-/* Responsive Design */
+/* Main Carousel Pagination - Same Style */
+.phoenixCarousel .carouselPagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem; /* Reduced margin */
+  padding: 0.375rem 0.75rem; /* Reduced padding */
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 20px;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.phoenixCarousel .carouselArrow {
+  width: 32px;
+  height: 32px;
+  background: var(--phoenix-secondary);
+  border: 1px solid var(--phoenix-border);
+  border-radius: 50%;
+  color: var(--phoenix-text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.phoenixCarousel .carouselArrow:hover {
+  background: var(--phoenix-primary);
+  color: var(--phoenix-secondary);
+  transform: scale(1.1);
+}
+
+.phoenixCarousel .carouselDots {
+  display: flex;
+  gap: 0.25rem; /* Reduced gap */
+  align-items: center;
+}
+
+/* FIXED: Perfect Circle Carousel Dots */
+.phoenixCarousel .carouselDot {
+  width: 10px; /* Perfect circle */
+  height: 10px; /* Same as width */
+  border-radius: 50%;
+  background: var(--phoenix-border);
+  transition: all 0.2s ease;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.phoenixCarousel .carouselDot:hover {
+  background: var(--phoenix-primary);
+  transform: scale(1.2);
+}
+
+.phoenixCarousel .carouselDotActive {
+  background: var(--phoenix-primary);
+  transform: scale(1.3);
+}
+
+/* Loading and Error States */
+.phoenixCarousel .loading {
+  padding: 2rem;
+  text-align: center;
+  color: var(--phoenix-text-secondary);
+  font-size: 0.875rem;
+}
+
+.phoenixCarousel .error {
+  padding: 1rem;
+  background: #ffebee;
+  border: 1px solid #e57373;
+  border-radius: var(--phoenix-radius);
+  color: #c62828;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+/* Responsive Design - Minimal Margins */
 @media (max-width: 768px) {
   .phoenixCarousel {
-    margin-top: 1.25rem;
+    margin-top: 0.25rem; /* Ultra minimal */
   }
 
   .phoenixCarousel :global(.splide__slide) {
-    padding: 0.25rem;
+    padding: 0.0625rem !important;
   }
 
-  .phoenixCarousel :global(.splide__arrow) {
-    width: 40px;
-    height: 40px;
+  .phoenixCarousel .contentSection {
+    padding: 0.625rem;
+    gap: 0.375rem;
   }
 
-  .contentSection {
-    padding: 0.75rem;
-    gap: 0.5rem;
-  }
-
-  .productTitle {
+  .phoenixCarousel .productTitle {
     font-size: 0.8125rem;
   }
 
-  .currentPrice {
+  .phoenixCarousel .currentPrice {
     font-size: 0.9375rem;
   }
 
-  .priceSection {
+  .phoenixCarousel .priceSection {
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.375rem;
   }
 
-  .qtyGroup {
+  .phoenixCarousel .qtyGroup {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
     width: 100%;
   }
 
-  .variantsRow {
+  .phoenixCarousel .variantsRow {
     flex-direction: column;
-    gap: 0.375rem;
+    gap: 0.25rem;
+  }
+
+  .phoenixCarousel .addToCartBtn {
+    padding: 0.875rem; /* Still increased on mobile */
+    min-height: 46px;
+  }
+
+  .phoenixCarousel .carouselPagination {
+    margin-top: 0.5rem;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
   }
 }
 
 @media (max-width: 640px) {
-  .phoenixCarousel :global(.splide__arrow) {
-    display: none;
+  .phoenixCarousel .productCard {
+    min-height: 300px;
   }
 
-  .productCard {
-    min-height: 320px;
+  .phoenixCarousel .contentSection {
+    padding: 0.5rem;
   }
 
-  .contentSection {
-    padding: 0.625rem;
+  .phoenixCarousel .carouselPagination {
+    margin-top: 0.25rem;
   }
 }
 
 @media (max-width: 480px) {
-  .currentPrice {
-    font-size: 1rem;
+  .phoenixCarousel {
+    margin-top: 0; /* No margin on ultra small */
   }
 
-  .originalPrice {
-    font-size: 0.75rem;
+  .phoenixCarousel :global(.splide__slide) {
+    padding: 0.03125rem !important; /* Absolute minimal */
   }
 
-  .discountPercent {
-    font-size: 0.625rem;
+  .phoenixCarousel .addToCartBtn {
+    min-height: 44px;
+    padding: 0.75rem;
   }
 
-  .variantSelect {
-    padding: 0.625rem 0.75rem;
-    padding-right: 2.25rem;
+  .phoenixCarousel .carouselArrow {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
   }
 }
