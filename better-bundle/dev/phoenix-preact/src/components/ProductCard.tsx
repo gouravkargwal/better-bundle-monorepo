@@ -1,7 +1,7 @@
 import type { FunctionalComponent } from "preact";
 import { useState, useMemo, useEffect, useRef } from "preact/hooks";
 import type { Product, Variant } from "../types";
-import { formatPrice } from "../utils/format";
+import { formatCurrency, formatPrice } from "../utils/format";
 import styles from "../styles/carousel.module.css";
 
 interface ProductCardProps {
@@ -247,11 +247,19 @@ export const ProductCard: FunctionalComponent<ProductCardProps> = ({
         <div className={styles.priceSection}>
           <div className={styles.priceGroup}>
             <span className={styles.currentPrice}>
-              {formatPrice(selectedVariant?.price ?? product.price, currency)}
+              {formatCurrency(
+                selectedVariant?.price ?? product.price,
+                currency,
+                {
+                  showSymbol: true,
+                },
+              )}
             </span>
             {hasDiscount && (
               <span className={styles.originalPrice}>
-                {formatPrice(selectedVariant.compare_at_price!, currency)}
+                {formatCurrency(selectedVariant.compare_at_price!, currency, {
+                  showSymbol: true,
+                })}
               </span>
             )}
             {hasDiscount && (

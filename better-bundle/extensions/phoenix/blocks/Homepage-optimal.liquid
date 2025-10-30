@@ -18,7 +18,7 @@
 
 <div
   class="phoenix-extension"
-  data-phoenix-component="product-carousel"
+  data-phoenix-component="homepage-recommendations"
   data-phoenix-props='
     {
       "limit": {{ block.settings.limit }},
@@ -28,7 +28,8 @@
       "show_pagination": {{ block.settings.show_pagination }},
       "context": "homepage",
       "product_ids": [],
-      "currency": "{{ shop.currency }}"
+      "currency": "{{ shop.currency }}",
+      "title": "{{ block.settings.title }}"
     }
   '
 >
@@ -46,7 +47,13 @@
   "target": "section",
   "tag": "section",
   "settings": [
-    { "type": "header", "content": "Recommendations" },
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Carousel Title",
+      "default": "Recommended Products",
+      "info": "Display title above the product carousel"
+    },
     {
       "type": "range",
       "id": "limit",

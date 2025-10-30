@@ -2,6 +2,7 @@ import { render } from "preact";
 import type { FunctionalComponent } from "preact";
 import { Carousel } from "./components/Carousel";
 import "./style.css";
+import Header from "./components/Header";
 
 // App Component
 const App: FunctionalComponent<{
@@ -12,9 +13,15 @@ const App: FunctionalComponent<{
   const s = settings as Record<string, string | number | boolean | undefined>;
   const sh = shopify as Record<string, string | number | boolean | undefined>;
 
-  if (type === "product-carousel") {
+  if (
+    type === "product-recommendations" ||
+    type === "collection-recommendations" ||
+    type === "homepage-recommendations" ||
+    type === "cart-recommendations"
+  ) {
     return (
       <div className="phoenix-extension">
+        <Header title={String(s.title)} />
         <Carousel
           productIds={
             (s.product_ids as any) ||
@@ -33,51 +40,14 @@ const App: FunctionalComponent<{
       </div>
     );
   }
-
-  if (type === "test-component") {
-    return (
-      <div
-        style={{
-          padding: "20px",
-          backgroundColor: String(s.background_color || "#f0f0f0"),
-          color: String(s.primary_color || "#333"),
-          borderRadius: "8px",
-          border: "2px solid #007acc",
-        }}
-      >
-        <h3>{String(s.title || "Phoenix Test Component")}</h3>
-        <p>
-          Preact is working with hot reload! Updated{" "}
-          {new Date().toLocaleTimeString()}
-        </p>
-        <p>Product ID: {String(sh.productId || "None")}</p>
-        <div style={{ fontSize: "12px", marginTop: "10px" }}>
-          <strong>Settings:</strong> {JSON.stringify(s, null, 2)}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="phoenix-component-error">
-      <h3>Component "{type}" not found</h3>
-      <p>Available: product-carousel, test-component</p>
-    </div>
-  );
 };
 
 // Initialization Logic
 const initializePhoenixComponents = () => {
-  console.log("Phoenix Extension: Checking for components...");
-
   // Find all Phoenix extension containers
   const containers = document.querySelectorAll("[data-phoenix-component]");
-  console.log(
-    `Phoenix Extension: Found ${containers.length} components to mount`,
-  );
 
   if (containers.length === 0) {
-    console.log("Phoenix Extension: No components found, waiting for DOM...");
     return false;
   }
 
@@ -85,12 +55,11 @@ const initializePhoenixComponents = () => {
     try {
       const componentType = container.getAttribute("data-phoenix-component");
       const propsData = container.getAttribute("data-phoenix-props");
+      console.log(componentType, "componentType");
+      console.log(propsData, "propsData");
+      console.log(container, "container");
 
       if (!componentType) {
-        console.warn(
-          "Phoenix Extension: Missing component type on container",
-          container,
-        );
         return;
       }
 
@@ -102,11 +71,6 @@ const initializePhoenixComponents = () => {
         customerId: (window as any).meta?.customer?.id,
         shop: (window as any).Shopify?.shop,
       };
-
-      console.log(
-        `Phoenix Extension: Mounting ${componentType} component #${index}`,
-        { props, shopifyContext },
-      );
 
       // Check if container is valid before rendering
       if (container && container.nodeType === Node.ELEMENT_NODE) {
