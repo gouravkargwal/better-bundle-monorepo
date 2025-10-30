@@ -121,19 +121,21 @@ export function ROIValueProofSection({
                       : formatCurrencyValue(netProfit, currency)}
                   </Text>
                 </div>
-                <div>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    ROI
-                  </Text>
-                  <Text
-                    as="p"
-                    variant="headingMd"
-                    fontWeight="bold"
-                    tone="success"
-                  >
-                    {isTrialPhase ? "∞%" : `${roiPercentage.toFixed(0)}%`}
-                  </Text>
-                </div>
+                {!isTrialPhase && (
+                  <div>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      ROI
+                    </Text>
+                    <Text
+                      as="p"
+                      variant="headingMd"
+                      fontWeight="bold"
+                      tone="success"
+                    >
+                      {`${roiPercentage.toFixed(0)}%`}
+                    </Text>
+                  </div>
+                )}
               </div>
             </BlockStack>
           </div>

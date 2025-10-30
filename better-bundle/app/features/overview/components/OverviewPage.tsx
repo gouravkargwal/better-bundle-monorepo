@@ -5,7 +5,6 @@ import { OverviewHero } from "./OverviewHero";
 import { OverviewMetrics } from "./OverviewMetrics";
 import { ValueCommunicationBanner } from "./ValueCommunicationBanner";
 import { ROIValueProofSection } from "./ROIValueProofSection";
-import { RecentPerformanceTable } from "./RecentPerformanceTable";
 import { BillingStatus } from "./BillingStatus";
 import { HelpSection } from "./HelpSection";
 import type { OverviewData, OverviewError } from "../services/overview.types";
@@ -41,7 +40,6 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
             <BlockStack gap="300">
               {/* Hero Section */}
               <OverviewHero
-                shop={data.shop}
                 subscriptionStatus={data.overviewData.activePlan?.status}
                 totalRevenueGenerated={data.overviewData.totalRevenue}
                 currency={data.overviewData.currency}
@@ -57,7 +55,6 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                 commissionRate={
                   data.overviewData.activePlan?.commissionRate || 0.03
                 }
-                isTrialPhase={data.overviewData.isTrialPhase}
               />
 
               {/* Key Performance Metrics */}
@@ -71,12 +68,6 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                   data.overviewData.activePlan?.commissionRate || 0.03
                 }
                 isTrialPhase={data.overviewData.isTrialPhase}
-              />
-
-              {/* Recent Performance Table */}
-              <RecentPerformanceTable
-                performanceData={data.performanceData}
-                currency={data.overviewData.currency}
               />
 
               {/* Billing Status and Help Section */}

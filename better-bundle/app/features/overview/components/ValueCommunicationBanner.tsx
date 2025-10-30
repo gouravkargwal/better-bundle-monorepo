@@ -1,13 +1,13 @@
 // features/overview/components/ValueCommunicationBanner.tsx
 import { Card, Text, BlockStack, Button, Badge } from "@shopify/polaris";
-import { getCurrencySymbol } from "../../../utils/currency";
+import { formatCurrency } from "../../../utils/currency";
+import { useNavigate } from "@remix-run/react";
 
 interface ValueCommunicationBannerProps {
   subscriptionStatus: string;
   totalRevenueGenerated: number;
   currency: string;
   commissionRate: number;
-  isTrialPhase: boolean;
 }
 
 export function ValueCommunicationBanner({
@@ -15,27 +15,19 @@ export function ValueCommunicationBanner({
   totalRevenueGenerated,
   currency,
   commissionRate,
-  isTrialPhase,
 }: ValueCommunicationBannerProps) {
-  const formatCurrencyValue = (amount: number, currencyCode: string) => {
-    const symbol = getCurrencySymbol(currencyCode);
-    const numericAmount = Math.abs(amount);
-    return `${symbol}${numericAmount.toFixed(2)}`;
-  };
-
   const commissionPaid = totalRevenueGenerated * commissionRate;
   const netProfit = totalRevenueGenerated - commissionPaid;
-
+  const navigation = useNavigate();
   const getBannerContent = () => {
     switch (subscriptionStatus) {
       case "TRIAL":
         return {
           title: "🚀 Trial Performance",
-          subtitle: `You've generated ${formatCurrencyValue(totalRevenueGenerated, currency)} during your trial`,
-          description:
-            "Commission tracked but not charged yet. Upgrade to start earning with our AI recommendations!",
-          ctaText: "Upgrade Now",
-          ctaAction: () => (window.location.href = "/app/billing"),
+          subtitle: `You've generated ${formatCurrency(totalRevenueGenerated, currency)} during your trial`,
+          ctaText: "View Dashboard",
+          ctaAction: () => navigation("/app/dashboard"),
+          description: "Commission tracked but not charged yet",
           bgColor: "#FEF3C7",
           borderColor: "#F59E0B",
           textColor: "#92400E",
@@ -44,10 +36,10 @@ export function ValueCommunicationBanner({
         if (totalRevenueGenerated > 0) {
           return {
             title: "💰 ROI Success",
-            subtitle: `Net profit: ${formatCurrencyValue(netProfit, currency)} from ${formatCurrencyValue(totalRevenueGenerated, currency)} generated`,
-            description: `You paid only ${formatCurrencyValue(commissionPaid, currency)} (${(commissionRate * 100).toFixed(1)}% commission) for ${formatCurrencyValue(totalRevenueGenerated, currency)} in revenue`,
-            ctaText: "View Analytics",
-            ctaAction: () => (window.location.href = "/app/analytics"),
+            subtitle: `Net profit: ${formatCurrency(netProfit, currency)} from ${formatCurrency(totalRevenueGenerated, currency)} generated`,
+            description: `You paid only ${formatCurrency(commissionPaid, currency)} (${(commissionRate * 100).toFixed(1)}% commission) for ${formatCurrency(totalRevenueGenerated, currency)} in revenue`,
+            ctaText: "View Dashboard",
+            ctaAction: () => navigation("/app/dashboard"),
             bgColor: "#D1FAE5",
             borderColor: "#10B981",
             textColor: "#065F46",
@@ -59,8 +51,8 @@ export function ValueCommunicationBanner({
               "Your AI recommendations are active and ready to generate revenue",
             description:
               "Once customers start purchasing through our recommendations, you'll see your ROI metrics here",
-            ctaText: "View Analytics",
-            ctaAction: () => (window.location.href = "/app/analytics"),
+            ctaText: "View Dashboard",
+            ctaAction: () => navigation("/app/dashboard"),
             bgColor: "#EFF6FF",
             borderColor: "#3B82F6",
             textColor: "#1E40AF",
@@ -69,11 +61,11 @@ export function ValueCommunicationBanner({
       case "SUSPENDED":
         return {
           title: "⚠️ Service Suspended",
-          subtitle: `You generated ${formatCurrencyValue(totalRevenueGenerated, currency)} before suspension`,
+          subtitle: `You generated ${formatCurrency(totalRevenueGenerated, currency)} before suspension`,
           description:
             "Reactivate your subscription to continue earning from AI recommendations",
-          ctaText: "Reactivate",
-          ctaAction: () => (window.location.href = "/app/billing"),
+          ctaText: "View Billing",
+          ctaAction: () => navigation("/app/billing"),
           bgColor: "#FEE2E2",
           borderColor: "#EF4444",
           textColor: "#991B1B",
@@ -81,10 +73,10 @@ export function ValueCommunicationBanner({
       default:
         return {
           title: "📊 Performance Overview",
-          subtitle: `Revenue generated: ${formatCurrencyValue(totalRevenueGenerated, currency)}`,
+          subtitle: `Revenue generated: ${formatCurrency(totalRevenueGenerated, currency)}`,
           description: "AI recommendations are working to increase your sales",
-          ctaText: "Learn More",
-          ctaAction: () => (window.location.href = "/app/help"),
+          ctaText: "View Help",
+          ctaAction: () => navigation("/app/help"),
           bgColor: "#EFF6FF",
           borderColor: "#3B82F6",
           textColor: "#1E40AF",

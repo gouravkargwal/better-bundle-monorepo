@@ -1,32 +1,16 @@
+import { formatCurrency } from "app/utils/currency";
+
 interface OverviewHeroProps {
-  shop: {
-    shop_domain: string;
-  };
   subscriptionStatus?: string;
   totalRevenueGenerated?: number;
   currency?: string;
 }
 
 export function OverviewHero({
-  shop,
   subscriptionStatus,
   totalRevenueGenerated,
   currency,
 }: OverviewHeroProps) {
-  const shopName = shop.shop_domain.replace(".myshopify.com", "");
-  const formatCurrencyValue = (amount: number, currencyCode: string) => {
-    const symbol =
-      currencyCode === "USD"
-        ? "$"
-        : currencyCode === "EUR"
-          ? "€"
-          : currencyCode === "GBP"
-            ? "£"
-            : currencyCode;
-    const numericAmount = Math.abs(amount);
-    return `${symbol}${numericAmount.toFixed(2)}`;
-  };
-
   const getStatusBadge = () => {
     switch (subscriptionStatus) {
       case "TRIAL":
@@ -149,7 +133,9 @@ export function OverviewHero({
                 color: "#10B981",
               }}
             >
-              {formatCurrencyValue(totalRevenueGenerated, currency || "USD")}{" "}
+              {formatCurrency(totalRevenueGenerated, currency || "USD", {
+                showSymbol: true,
+              })}
               Generated
             </div>
             <div
