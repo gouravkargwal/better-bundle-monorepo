@@ -80,7 +80,11 @@ async function handleActiveSubscription(
     // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
-      include: { shopify_subscriptions: true },
+      include: {
+        shopify_subscriptions: true,
+        pricing_tiers: true,
+        billing_cycles: true,
+      },
     });
 
     if (!shopSubscription) {
@@ -113,6 +117,63 @@ async function handleActiveSubscription(
         updated_at: new Date(),
       },
     });
+
+    // ✅ CREATE BILLING CYCLE if it doesn't exist
+    // Check if there's already an active billing cycle
+    const activeCycle = shopSubscription.billing_cycles?.find(
+      (cycle: any) => cycle.status === "ACTIVE",
+    );
+
+    if (!activeCycle) {
+      // Determine cap amount: use current capped amount from Shopify, or user_chosen_cap_amount, or default
+      const capAmount =
+        currentCappedAmount || shopSubscription.user_chosen_cap_amount || 1000;
+
+      logger.info(
+        {
+          shop: shopRecord.shop_domain,
+          capAmount,
+          source: currentCappedAmount
+            ? "shopify"
+            : shopSubscription.user_chosen_cap_amount
+              ? "user_chosen"
+              : "default",
+        },
+        "Creating billing cycle for activated subscription",
+      );
+
+      // Create first billing cycle
+      await prisma.billing_cycles.create({
+        data: {
+          shop_subscription_id: shopSubscription.id,
+          cycle_number: 1,
+          start_date: new Date(),
+          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+          initial_cap_amount: capAmount,
+          current_cap_amount: capAmount,
+          usage_amount: 0,
+          commission_count: 0,
+          status: "ACTIVE",
+          activated_at: new Date(),
+        },
+      });
+
+      logger.info(
+        {
+          shop: shopRecord.shop_domain,
+          capAmount,
+        },
+        "Billing cycle created successfully",
+      );
+    } else {
+      logger.info(
+        {
+          shop: shopRecord.shop_domain,
+          cycleId: activeCycle.id,
+        },
+        "Active billing cycle already exists, skipping creation",
+      );
+    }
 
     // Reactivate shop if suspended
     await prisma.shops.update({

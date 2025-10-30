@@ -173,6 +173,43 @@ class BillingCycle(BaseModel):
         return 0
 
 
+class ShopifySubscription(BaseModel):
+    """
+    Shopify subscription model
+    Matches python-worker/app/core/database/models/shopify_subscription.py
+    """
+
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("ACTIVE", "Active"),
+        ("DECLINED", "Declined"),
+        ("CANCELLED", "Cancelled"),
+        ("EXPIRED", "Expired"),
+        ("FROZEN", "Frozen"),
+    ]
+
+    shop_subscription = models.OneToOneField(
+        ShopSubscription, on_delete=models.CASCADE, related_name="shopify_subscriptions"
+    )
+    shopify_subscription_id = models.CharField(max_length=255, unique=True)
+    shopify_line_item_id = models.CharField(max_length=255, null=True, blank=True)
+    confirmation_url = models.URLField(max_length=500, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="PENDING")
+    activated_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    error_count = models.CharField(max_length=20, default="0")
+
+    class Meta:
+        db_table = "shopify_subscriptions"
+        ordering = ["-created_at"]
+        verbose_name = "Shopify Subscription"
+        verbose_name_plural = "Shopify Subscriptions"
+
+    def __str__(self):
+        return f"{self.shop_subscription.shop.shop_domain} - Shopify {self.status}"
+
+
 class BillingInvoice(BaseModel):
     """
     Billing invoice model
