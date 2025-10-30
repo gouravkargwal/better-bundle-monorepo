@@ -1,30 +1,47 @@
 {% comment %}
-  Optimal Collection Page Recommendations - Smart Category Filtering
-  Backend intelligently chooses the best recommendation type based on visitor type and category:
-  - New visitors: Most Popular in Category (social proof)
-  - Returning visitors: Personalized within Category (personalized)
-  - Fallback: General popular items
+  Collection Page Recommendations - React Version
+  Fetches and displays personalized collection-based recommendations
 {% endcomment %}
 
-{% assign dummy_data = 'Category Item 1,Category Item 2,Category Item 3,Category Item 4,Category Item 5,Category Item 6|39.99,54.99,69.99,84.99,99.99,114.99|9b59b6,3498db,e74c3c,f39c12,2ecc71,1abc9c|Size: S|Size: M|Size: L|Size: XL,Color: Navy|Color: Black|Color: White,Size: 28|Size: 30|Size: 32|Size: 34,Color: Indigo|Color: Black|Color: Light Blue,Size: Small|Size: Medium|Size: Large,Color: Purple|Color: Pink|Color: Lavender,Size: 6|Size: 7|Size: 8|Size: 9,Color: Green|Color: Blue|Color: Teal|1,1,1,1,1,1'
-  | split: '|'
-%}
+<style>
+  .phoenix-extension {
+    --phoenix-card-bg: {{ block.settings.card_bg | default: '#ffffff' }};
+    --phoenix-card-border-radius: {{ block.settings.card_border_radius | default: 8 }}px;
+    --phoenix-title-color: {{ block.settings.title_color | default: '#1a202c' }};
+    --phoenix-price-color: {{ block.settings.price_color | default: '#2d3748' }};
+    --phoenix-button-bg: {{ block.settings.button_bg | default: '#000000' }};
+    --phoenix-button-text: {{ block.settings.button_text | default: '#ffffff' }};
+    --phoenix-button-border-radius: {{ block.settings.button_border_radius | default: 6 }}px;
+    --phoenix-pagination-color: {{ block.settings.pagination_color | default: '#000000' }};
+  }
+</style>
 
-{% comment %}
-  Smart Collection Block - Auto-detects context based on page type
-  Can be used on any page and will automatically use the correct context
-{% endcomment %}
+<div
+  class="phoenix-extension"
+  data-phoenix-component="product-carousel"
+  data-phoenix-props='
+    {
+      "limit": {{ block.settings.limit }},
+      "enable_autoplay": {{ block.settings.enable_autoplay }},
+      "autoplay_delay": {{ block.settings.autoplay_delay | times: 1000 }},
+      "show_arrows": {{ block.settings.show_arrows }},
+      "show_pagination": {{ block.settings.show_pagination }},
+      "context": "collection_page",
+      "product_ids": [],
+      "currency": "{{ shop.currency }}"
+    }
+  '
+  {% if collection %}
+    data-collection-id="{{ collection.id }}"
+  {% endif %}
+>
+  <div class="phoenix-loading">
+    <p>Loading recommendations…</p>
+  </div>
+</div>
 
-{% assign block_context = 'collection_page' %}
-{% if template.name == 'index' or template.name == 'page' %}
-  {% assign block_context = 'homepage' %}
-{% elsif template.name == 'cart' %}
-  {% assign block_context = 'cart' %}
-{% elsif template.name == 'product' %}
-  {% assign block_context = 'product_page' %}
-{% endif %}
-
-{% render 'recommendation-base', context: block_context, collection_id: collection.id, dummy_data: dummy_data %}
+<link rel="stylesheet" href="{{ 'phoenix.css' | asset_url }}">
+<script src="{{ 'phoenix.js' | asset_url }}" defer></script>
 
 {% schema %}
 {
@@ -32,38 +49,16 @@
   "target": "section",
   "tag": "section",
   "settings": [
-    { "type": "header", "content": "Section Heading" },
+    { "type": "header", "content": "Recommendations" },
     {
-      "type": "text",
-      "id": "heading",
-      "label": "Heading",
-      "default": "You might also like"
+      "type": "range",
+      "id": "limit",
+      "label": "Number of Products",
+      "min": 4,
+      "max": 8,
+      "step": 1,
+      "default": 6
     },
-    {
-      "type": "select",
-      "id": "heading_size",
-      "label": "Heading Size",
-      "options": [
-        { "value": "h1", "label": "H1" },
-        { "value": "h2", "label": "H2" },
-        { "value": "h3", "label": "H3" },
-        { "value": "h4", "label": "H4" }
-      ],
-      "default": "h3"
-    },
-    {
-      "type": "select",
-      "id": "heading_alignment",
-      "label": "Heading Alignment",
-      "options": [
-        { "value": "left", "label": "Left" },
-        { "value": "center", "label": "Center" },
-        { "value": "right", "label": "Right" }
-      ],
-      "default": "left"
-    },
-    { "type": "color", "id": "heading_color", "label": "Heading Color", "default": "#1e293b" },
-    { "type": "checkbox", "id": "show_heading", "label": "Show Heading", "default": true },
 
     { "type": "header", "content": "Card Styles" },
     {

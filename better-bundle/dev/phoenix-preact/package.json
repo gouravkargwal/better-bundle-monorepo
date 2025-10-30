@@ -1,0 +1,20 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:analyze": "vite build --mode analyze && open ./bundle-analysis.html",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@splidejs/splide": "^4.1.4",
+    "preact": "^10.26.9"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.2",
+    "rollup-plugin-visualizer": "^6.0.5",
+    "typescript": "^5.9.3",
+    "vite": "^7.0.4"
+  }
+}

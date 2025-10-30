@@ -7,6 +7,11 @@
     "generate": "shopify app generate",
     "dev": "dotenv -e .env.dev -- shopify app dev",
     "dev:tunnel": "dotenv -e .env.dev -- shopify app dev --tunnel-url https://4edae356409a.ngrok-free.app:3000",
+    "dev:phoenix": "concurrently \"npm run phoenix:watch\" \"npm run dev\"",
+    "dev:phoenix:tunnel": "concurrently \"npm run phoenix:watch\" \"npm run dev:tunnel\"",
+    "phoenix:watch": "cd dev/phoenix-react && npm run build:watch",
+    "phoenix:build": "cd dev/phoenix-react && npm run build",
+    "phoenix:dev": "cd dev/phoenix-react && npm run dev",
     "prod": "dotenv -e .env.prod -- shopify app dev",
     "deploy:dev": "dotenv -e .env.dev -- shopify app deploy --config shopify.app.dev.toml",
     "deploy:prod": "dotenv -e .env.prod -- shopify app deploy --config shopify.app.prod.toml",
@@ -38,6 +43,7 @@
     "@shopify/polaris": "^12.0.0",
     "@shopify/shopify-app-remix": "^3.7.0",
     "@shopify/shopify-app-session-storage-prisma": "^6.0.0",
+    "@splidejs/splide": "^4.1.4",
     "@types/redis": "^4.0.10",
     "currency-symbol-map": "^5.1.0",
     "dayjs": "^1.11.18",
@@ -61,16 +67,19 @@
     "@types/node": "^22.2.0",
     "@types/react": "^18.2.31",
     "@types/react-dom": "^18.2.14",
+    "concurrently": "^8.2.2",
     "dotenv-cli": "^10.0.0",
     "eslint": "^8.42.0",
     "eslint-config-prettier": "^10.0.1",
     "prettier": "^3.2.4",
     "prisma": "^6.16.3",
+    "rollup-plugin-visualizer": "^6.0.5",
     "typescript": "^5.2.2",
     "vite": "^6.2.2"
   },
   "workspaces": [
-    "extensions/*"
+    "extensions/*",
+    "dev/*"
   ],
   "trustedDependencies": [
     "@shopify/plugin-cloudflare"

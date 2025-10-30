@@ -1,103 +1,71 @@
 {% comment %}
-  Base recommendation snippet with all common functionality
-  Usage: {% render 'recommendation-base', context: 'product_page', product_id: product.id %}
+  React Recommendation Base Snippet
+  Usage: {% render 'recommendation-base', context: 'product_page', product_ids: [product.id] %}
+
+  All logic now handled by React components (Carousel.tsx, ProductCard.tsx)
+  This snippet just mounts the React app with proper props
 {% endcomment %}
 
-{{ 'swiper-bundle.min.css' | asset_url | stylesheet_tag }}
-<script src="{{ 'swiper-bundle.min.js' | asset_url }}" defer></script>
-<script src="{{ 'pino-browser.js' | asset_url }}" defer></script>
+{% comment %} Auto-detect context based on page type {% endcomment %}
+{% assign detected_context = context %}
+{% if template.name == 'index' or template.name == 'page' %}
+  {% assign detected_context = 'homepage' %}
+{% elsif template.name == 'product' %}
+  {% assign detected_context = 'product_page' %}
+{% elsif template.name == 'collection' %}
+  {% assign detected_context = 'collection_page' %}
+{% elsif template.name == 'cart' %}
+  {% assign detected_context = 'cart' %}
+{% endif %}
 
-<script>
-  window.enableAutoplay = {{ block.settings.enable_autoplay | default: true }};
-  window.autoplayDelay = {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }};
-  window.showArrows = {{ block.settings.show_arrows | default: true }};
-  window.showPagination = {{ block.settings.show_pagination | default: true }};
-  window.recommendationLimit = {{ block.settings.limit | default: 6 }};
-  window.designMode = {{ request.design_mode | json }};
-  window.shopDomain = {{ shop.permanent_domain | json }};
-  window.customerId = {{ customer.id | json }};
-  window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
-  // Smart context detection - override block context if needed
-  {% assign detected_context = context %}
-
-  {% comment %} Auto-detect context based on page type if context is 'cart' {% endcomment %}
-  {% if context == 'cart' %}
-    {% if template.name == 'index' or template.name == 'page' %}
-      {% assign detected_context = 'homepage' %}
-    {% elsif template.name == 'product' %}
-      {% assign detected_context = 'product_page' %}
-    {% elsif template.name == 'collection' %}
-      {% assign detected_context = 'collection_page' %}
-    {% endif %}
+{% comment %} Extract session ID from cart attributes {% endcomment %}
+{% assign session_id = null %}
+{% for attribute in cart.attributes %}
+  {% if attribute.first == 'bb_recommendation_session_id' %}
+    {% assign session_id = attribute.last %}
+    {% break %}
   {% endif %}
+{% endfor %}
 
-  window.context = '{{ detected_context }}';
+{% comment %} Prepare product IDs based on context {% endcomment %}
+{% assign context_product_ids = product_ids | default: '' %}
+{% if detected_context == 'cart' %}
+  {% assign context_product_ids = cart.items | map: 'product_id' | join: ',' %}
+{% elsif detected_context == 'product_page' and product %}
+  {% assign context_product_ids = product.id %}
+{% endif %}
 
-  // Add context-specific data from blocks
-  {% if detected_context == 'homepage' %}
-    window.visitorStrategy = '{{ block.settings.visitor_strategy | default: "auto" }}';
+<div
+  class="phoenix-extension"
+  data-phoenix-component="product-carousel"
+  data-phoenix-props='
+    {
+      "limit": {{ block.settings.limit | default: 6 }},
+      "enable_autoplay": {{ block.settings.enable_autoplay | default: true }},
+      "autoplay_delay": {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }},
+      "show_arrows": {{ block.settings.show_arrows | default: true }},
+      "show_pagination": {{ block.settings.show_pagination | default: true }},
+      "context": "{{ detected_context }}",
+      "product_ids": [{{ context_product_ids }}],
+      "currency": "{{ shop.currency }}",
+      "session_id": {{ session_id | json }}
+    }
+  '
+  {% if detected_context == 'product_page' and product %}
+    data-product-id="{{ product.id }}"
   {% endif %}
-
-  {% if detected_context == 'product_page' %}
-    window.productId = {{ product.id | json }};
+  {% if detected_context == 'collection_page' and collection %}
+    data-collection-id="{{ collection.id }}"
   {% endif %}
-
-  {% if detected_context == 'collection_page' %}
-    window.collectionId = {{ collection.id | json }};
-  {% endif %}
-
-  {% if product_id %}
-    window.productId = {{ product_id | json }};
-  {% endif %}
-
-  {% if collection_id %}
-    window.collectionId = {{ collection_id | json }};
-  {% endif %}
-
-  // Extract session ID from cart attributes
-  {% assign session_id = null %}
-  {% for attribute in cart.attributes %}
-    {% if attribute.first == 'bb_recommendation_session_id' %}
-      {% assign session_id = attribute.last %}
-      {% break %}
-    {% endif %}
-  {% endfor %}
-  window.sessionId = {{ session_id | json }};
-</script>
-
-<!-- Load our custom JavaScript files in correct order -->
-<script src="{{ 'config.js' | asset_url }}" defer></script>
-<script src="{{ 'analytics.js' | asset_url }}" defer></script>
-<!-- JWT Authentication (load synchronously before others) -->
-<script src="{{ 'jwtTokenManager.js' | asset_url }}"></script>
-<script src="{{ 'phoenixJWT.js' | asset_url }}" defer></script>
-<script src="{{ 'api.js' | asset_url }}" defer></script>
-<!-- Core modules (load in order) -->
-<script src="{{ 'variant-manager.js' | asset_url }}" defer></script>
-<script src="{{ 'dropdown-manager.js' | asset_url }}" defer></script>
-<script src="{{ 'swiper-manager.js' | asset_url }}" defer></script>
-<script src="{{ 'product-card-renderer.js' | asset_url }}" defer></script>
-<script src="{{ 'product-image-gallery.js' | asset_url }}" defer></script>
-<!-- Main product cards manager -->
-<script src="{{ 'product-cards.js' | asset_url }}" defer></script>
-<script src="{{ 'main.js' | asset_url }}" defer></script>
+  data-customer-id="{{ customer.id }}"
+  data-shop-domain="{{ shop.permanent_domain }}"
+>
+  <div class="phoenix-loading">
+    <p>Loading recommendations…</p>
+  </div>
+</div>
 
 {% render 'recommendation-styles' %}
 
-<div class="container better-bundle-recommendations">
-  {% if block.settings.show_heading and block.settings.heading != blank %}
-    <div class="section-heading">
-      <{{ block.settings.heading_size | default: 'h2' }}>
-        {{- block.settings.heading -}}
-      </{{ block.settings.heading_size | default: 'h2' }}>
-    </div>
-  {% endif %}
-  <div class="swiper">
-    <div class="swiper-wrapper">
-      {% render 'recommendation-products', context: context, dummy_data: dummy_data %}
-    </div>
-    <div class="swiper-button-next"></div>
-    <div class="swiper-button-prev"></div>
-    <div class="swiper-pagination"></div>
-  </div>
-</div>
+<link rel="stylesheet" href="{{ 'phoenix.css' | asset_url }}">
+<script src="{{ 'phoenix.js' | asset_url }}" defer></script>
