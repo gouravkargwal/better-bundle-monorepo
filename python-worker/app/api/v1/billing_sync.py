@@ -178,9 +178,14 @@ async def sync_billing_cycles_from_shopify(
                 if not subscription_status:
                     raise Exception("No data returned from Shopify API")
 
+                # Log the full response from Shopify
+                logger.info(
+                    f"📦 Shopify subscription data for {shop.shop_domain}: {subscription_status}"
+                )
+
                 # Extract cap amount and usage from Shopify response
-                subscription_data = subscription_status.get("subscription", {})
-                line_items = subscription_data.get("lineItems", [])
+                # subscription_status is already the subscription data (not nested)
+                line_items = subscription_status.get("lineItems", [])
 
                 if not line_items:
                     raise Exception("No line items in Shopify subscription")

@@ -241,7 +241,6 @@ class ShopifyUsageBillingServiceV2:
                             }
                         }
                         createdAt
-                        updatedAt
                     }
                 }
             }
@@ -299,7 +298,9 @@ class ShopifyUsageBillingServiceV2:
                 status=subscription_data["status"],
                 line_items=subscription_data["lineItems"],
                 created_at=subscription_data["createdAt"],
-                updated_at=subscription_data["updatedAt"],
+                updated_at=subscription_data.get(
+                    "updatedAt", subscription_data["createdAt"]
+                ),  # Fallback to createdAt
             )
 
         except Exception as e:
@@ -454,7 +455,6 @@ class ShopifyUsageBillingServiceV2:
                             }
                         }
                         createdAt
-                        updatedAt
                     }
                 }
             }
