@@ -10,5 +10,3 @@ export function formatPrice(amount: number, currency: string) {
   if (currency === "INR") out = out.replace("₹", "Rs. ");
   return out;
 }
-
-

@@ -75,14 +75,18 @@
 .phoenixCarousel .productCard {
   display: flex;
   flex-direction: column;
-  background: var(--phoenix-secondary);
-  border: 1px solid var(--phoenix-border);
-  border-radius: var(--phoenix-radius);
-  overflow: hidden;
-  transition: all 0.2s ease;
   width: 100%;
-  min-height: 320px;
-  margin: 0;
+  max-width: 100%;
+  min-height: 480px;
+  max-height: 600px;
+  background: var(--phoenix-card-bg);
+  border-radius: var(--phoenix-card-border-radius);
+  overflow: hidden;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  margin-top: 0.25rem;
+  transition: all 0.2s ease;
+  position: relative;
   box-sizing: border-box;
 }
 
