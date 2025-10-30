@@ -108,14 +108,14 @@ class JWTTokenManager {
    */
   getStoredToken() {
     try {
-      const token = localStorage.getItem(this.TOKEN_KEY);
-      const shopDomain = localStorage.getItem(this.SHOP_DOMAIN_KEY);
+      const token = sessionStorage.getItem(this.TOKEN_KEY);
+      const shopDomain = sessionStorage.getItem(this.SHOP_DOMAIN_KEY);
 
       if (!token || !shopDomain) return null;
 
       return {
         token,
-        expiresIn: parseInt(localStorage.getItem(this.TOKEN_EXPIRY_KEY) || '0'),
+        expiresIn: parseInt(sessionStorage.getItem(this.TOKEN_EXPIRY_KEY) || '0'),
         shopDomain,
         shopStatus: 'unknown',
         permissions: [],
@@ -130,11 +130,11 @@ class JWTTokenManager {
    */
   storeToken(tokenInfo) {
     try {
-      localStorage.setItem(this.TOKEN_KEY, tokenInfo.token);
+      sessionStorage.setItem(this.TOKEN_KEY, tokenInfo.token);
       // Convert expires_in (seconds) to timestamp
       const expiryTimestamp = Math.floor(Date.now() / 1000) + tokenInfo.expiresIn;
-      localStorage.setItem(this.TOKEN_EXPIRY_KEY, expiryTimestamp.toString());
-      localStorage.setItem(this.SHOP_DOMAIN_KEY, tokenInfo.shopDomain);
+      sessionStorage.setItem(this.TOKEN_EXPIRY_KEY, expiryTimestamp.toString());
+      sessionStorage.setItem(this.SHOP_DOMAIN_KEY, tokenInfo.shopDomain);
     } catch (error) {
       // Silently fail
     }
@@ -144,9 +144,9 @@ class JWTTokenManager {
    * Clear stored token
    */
   clearToken() {
-    localStorage.removeItem(this.TOKEN_KEY);
-    localStorage.removeItem(this.TOKEN_EXPIRY_KEY);
-    localStorage.removeItem(this.SHOP_DOMAIN_KEY);
+    sessionStorage.removeItem(this.TOKEN_KEY);
+    sessionStorage.removeItem(this.TOKEN_EXPIRY_KEY);
+    sessionStorage.removeItem(this.SHOP_DOMAIN_KEY);
   }
 
   /**

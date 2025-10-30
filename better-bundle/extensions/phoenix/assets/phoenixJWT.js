@@ -22,7 +22,7 @@ class PhoenixJWTManager {
         return;
       }
 
-      // Check localStorage first - no API call if token exists and is valid
+      // Check sessionStorage first - no API call if token exists and is valid
       const storedToken = this.jwtManager.getStoredToken();
       if (storedToken &&
         storedToken.token &&
@@ -31,7 +31,7 @@ class PhoenixJWTManager {
 
         this.currentToken = storedToken.token;
       } else {
-        // Only make API call if no valid token in localStorage
+        // Only make API call if no valid token in sessionStorage
         this.currentToken = await this.jwtManager.getValidToken(this.shopDomain);
         if (!this.currentToken) {
           // No token available, disable features
