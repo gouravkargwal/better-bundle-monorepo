@@ -427,7 +427,7 @@ class CommissionServiceV2:
         try:
             # Get commission record
             commission = await self.commission_repository.get_by_id(commission_id)
-
+            logger.info(f"Commission to record to Shopify: {commission}")
             if not commission:
                 logger.error(f"❌ Commission {commission_id} not found")
                 return {"success": False, "error": "commission_not_found"}

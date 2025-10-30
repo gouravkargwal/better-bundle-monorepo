@@ -26,6 +26,7 @@ from app.core.database.models import (
     TrialStatus,
     PurchaseAttribution,
 )
+from app.core.database.models.enums import BillingPhase, CommissionStatus
 from app.shared.helpers import now_utc
 from app.domains.billing.services.commission_service_v2 import (
     CommissionServiceV2,
@@ -217,12 +218,29 @@ class BillingServiceV2:
                 f"✅ Commission created: ${commission.commission_charged} charged, ${commission.commission_overflow} overflow (type: {commission.charge_type.value})"
             )
 
-            # Record with Shopify (only the charged amount)
-            if commission.commission_charged > 0:
-                await self.commission_service.record_commission_to_shopify(
+            # ✅ CRITICAL FIX: Always try to record to Shopify for PAID commissions
+            if (
+                commission.billing_phase == BillingPhase.PAID
+                and commission.commission_charged > 0
+                and commission.status == CommissionStatus.PENDING
+            ):
+
+                logger.info(f"🎯 Recording commission {commission.id} to Shopify...")
+
+                result = await self.commission_service.record_commission_to_shopify(
                     commission_id=commission.id,
                     shopify_billing_service=self.shopify_billing,
                 )
+
+                if result["success"]:
+                    logger.info(
+                        f"✅ Successfully recorded commission {commission.id} to Shopify"
+                    )
+                else:
+                    logger.error(
+                        f"❌ Failed to record commission {commission.id}: {result.get('error')}"
+                    )
+                    # Don't fail the entire flow, commission is saved and can be retried
 
     async def _complete_trial(
         self, shop_id: str, shop_subscription: ShopSubscription
