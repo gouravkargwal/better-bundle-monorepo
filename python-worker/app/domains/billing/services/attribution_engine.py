@@ -114,16 +114,6 @@ class AttributionEngine:
                 await self._store_attribution_result(result)  # ✅ Store rejected
                 return result
 
-            logger.info(
-                f"🔍 Starting attribution calculation for order {context.order_id}"
-            )
-            logger.info(
-                f"🔍 Context: shop_id={context.shop_id}, customer_id={context.customer_id}, session_id={context.session_id}"
-            )
-            logger.info(
-                f"🔍 Purchase amount: {context.purchase_amount}, Products: {len(context.purchase_products)}"
-            )
-
             # ✅ SCENARIO 15: Check for subscription cancellation
             if await self._is_subscription_cancelled(context):
                 logger.warning(
@@ -148,25 +138,14 @@ class AttributionEngine:
             interactions = await self._get_relevant_interactions(
                 context, attribution_window
             )
-            logger.info(
-                f"📊 Found {len(interactions)} interactions for order {context.order_id}"
-            )
 
             if not interactions:
-                logger.warning(f"⚠️ No interactions found for order {context.order_id}")
                 result = self._create_empty_attribution(context)
                 await self._store_attribution_result(result)  # ✅ Store rejected
                 return result
 
-            # 3. Calculate attribution breakdown
-            logger.info(
-                f"🧮 Calculating attribution breakdown for {len(interactions)} interactions"
-            )
             attribution_breakdown = self._calculate_attribution_breakdown(
                 context, interactions
-            )
-            logger.info(
-                f"💰 Generated {len(attribution_breakdown)} attribution breakdown items"
             )
 
             # 4. Create attribution result
@@ -182,9 +161,6 @@ class AttributionEngine:
             elif total_attributed_revenue == 0 and not attribution_breakdown:
                 # No attribution-eligible interactions found - do NOT attribute any revenue
                 total_attributed_revenue = Decimal("0.00")
-                logger.info(
-                    f"💰 No attribution-eligible interactions found, attributing $0.00 (no extension interactions)"
-                )
 
             result = AttributionResult(
                 order_id=context.order_id,
@@ -365,10 +341,6 @@ class AttributionEngine:
 
         start_time = context.purchase_time - attribution_window
 
-        logger.info(
-            f"Searching interactions from {start_time} to {context.purchase_time}"
-        )
-
         try:
             # Use provided session or create new context
             if self.session:
@@ -394,33 +366,18 @@ class AttributionEngine:
         Returns:
             List of attribution breakdowns
         """
-        logger.info(
-            f"🧮 Starting attribution breakdown calculation for {len(interactions)} interactions"
-        )
+
         breakdowns = []
 
         # Group interactions by product
         product_interactions = self._group_interactions_by_product(interactions)
-        logger.info(
-            f"📦 Grouped interactions into {len(product_interactions)} product buckets"
-        )
 
         # Calculate attribution for each product in the purchase
-        logger.info(
-            f"🛒 Processing {len(context.purchase_products)} products from purchase"
-        )
-        logger.info(f"🔍 Purchase products data: {context.purchase_products}")
-
         for product in context.purchase_products:
             product_id = product.get("id")
             unit_price = Decimal(str(product.get("price", 0)))
             quantity = int(product.get("quantity", 1))
             product_amount = unit_price * quantity
-
-            logger.info(
-                f"🔍 Processing product {product_id} with unit price ${unit_price}, "
-                f"quantity {quantity}, total amount ${product_amount}"
-            )
 
             if not product_id or product_amount <= 0:
                 logger.warning(
@@ -433,11 +390,6 @@ class AttributionEngine:
 
             # 🆕 NEW: If no recommendation interactions found, try journey-based matching
             if not product_interaction_list:
-                logger.info(
-                    f"🔍 No direct recommendation interactions for {product_id}, "
-                    f"attempting journey-based matching"
-                )
-
                 # Use journey-based matching to find attribution
                 journey = self._build_product_journey(
                     product_id=product_id,
@@ -1357,11 +1309,6 @@ class AttributionEngine:
                 window_type, self.attribution_windows["standard"]
             )
 
-            logger.info(
-                f"🕒 Attribution window determined: {window_type} ({window}) "
-                f"for purchase value ${total_value}"
-            )
-
             return window
 
         except Exception as e:
@@ -1600,9 +1547,6 @@ class AttributionEngine:
 
         # Skip attribution if no session_id (we didn't influence this purchase)
         if not result.session_id:
-            logger.info(
-                f"No session_id for order {result.order_id} - we didn't influence this purchase, skipping attribution"
-            )
             return None
 
         # Create new attribution record

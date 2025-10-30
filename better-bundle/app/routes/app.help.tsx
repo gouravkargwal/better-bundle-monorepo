@@ -5,73 +5,128 @@ import {
   BlockStack,
   Text,
   Link as PolarisLink,
+  Badge,
+  InlineStack,
+  Box,
+  Button,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { useLoaderData } from "@remix-run/react";
 
+const SUPPORT_CONFIG = {
+  email: "gouravkargwal@betterbundle.site",
+  phone: "+917023074548",
+  supportHours: "Mon–Sat, 9am–6pm UTC",
+  responseTime: "Usually replies within a few hours",
+};
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
-
-  const email = process.env.SUPPORT_EMAIL ?? "support@betterbundle.app";
-  const docsUrl =
-    process.env.SUPPORT_DOCS_URL ?? "https://docs.betterbundle.app";
-  // E.164 without the leading +, e.g. 14155551234
-  const whatsapp = process.env.SUPPORT_WHATSAPP_NUMBER ?? "";
-  const supportHours = process.env.SUPPORT_HOURS ?? "Mon–Fri, 9am–6pm UTC";
-  const responseTime =
-    process.env.SUPPORT_RESPONSE_TIME ?? "Usually replies within a few hours";
-
-  return json({ email, docsUrl, whatsapp, supportHours, responseTime });
+  return json(SUPPORT_CONFIG);
 };
 
 export default function HelpPage() {
-  const { email, docsUrl, whatsapp, supportHours, responseTime } =
+  const { email, phone, supportHours, responseTime } =
     useLoaderData<typeof loader>();
+
+  const whatsappLink = `https://wa.me/${phone.replace(/\D/g, "")}?text=Hello%20BetterBundle%20support`;
+
   return (
     <Page>
       <TitleBar title="Help & Support" />
       <BlockStack gap="400">
+        {/* Contact Methods Section */}
         <Card>
           <BlockStack gap="300">
-            <Text as="h2" variant="headingMd">
-              Need help?
-            </Text>
-            <Text as="p" variant="bodyMd">
-              We’re here to help you get the most out of BetterBundle. Reach out
-              and we’ll respond promptly.
-            </Text>
-            <Text as="p" variant="bodyMd">
-              Email:{" "}
-              <PolarisLink
-                url={`mailto:${email}?subject=BetterBundle%20Support`}
-              >
-                {email}
-              </PolarisLink>
-            </Text>
-            <Text as="p" variant="bodyMd">
-              Documentation:{" "}
-              <PolarisLink url={docsUrl} external>
-                {docsUrl.replace(/^https?:\/\//, "")}
-              </PolarisLink>
-            </Text>
-            {whatsapp ? (
-              <Text as="p" variant="bodyMd">
-                WhatsApp:{" "}
-                <PolarisLink
-                  url={`https://wa.me/${whatsapp}?text=Hello%20BetterBundle%20support`}
-                  external
-                >
-                  Message us on WhatsApp
-                </PolarisLink>
+            <Box>
+              <Text as="h2" variant="headingMd">
+                Get in Touch
               </Text>
-            ) : null}
-            <Text as="p" variant="bodySm">
-              {responseTime}
-            </Text>
-            <Text as="p" variant="bodySm">
-              Support hours: {supportHours}
-            </Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Choose your preferred way to reach us
+              </Text>
+            </Box>
+
+            {/* Email */}
+            <Box
+              borderRadius="200"
+              borderWidth="1"
+              padding="300"
+              borderColor="border"
+            >
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="100">
+                  <Text as="h3" variant="bodyLg" fontWeight="semibold">
+                    Email Support
+                  </Text>
+                  <PolarisLink
+                    url={`mailto:${email}?subject=BetterBundle%20Support`}
+                    removeUnderline
+                  >
+                    <Text variant="bodyMd" as="span">
+                      {email}
+                    </Text>
+                  </PolarisLink>
+                </BlockStack>
+                <Badge tone="info">Recommended</Badge>
+              </InlineStack>
+            </Box>
+
+            {/* WhatsApp */}
+            <Box
+              borderRadius="200"
+              borderWidth="1"
+              padding="300"
+              borderColor="border"
+            >
+              <BlockStack gap="200">
+                <Text as="h3" variant="bodyLg" fontWeight="semibold">
+                  WhatsApp
+                </Text>
+
+                {/* Display Phone Number */}
+                <Box>
+                  <Text variant="bodyMd" as="span" tone="subdued">
+                    {phone}
+                  </Text>
+                </Box>
+
+                {/* WhatsApp Button/Link */}
+                <Box>
+                  <a
+                    href={whatsappLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ textDecoration: "none" }}
+                  >
+                    <Button variant="primary" size="medium">
+                      Message on WhatsApp
+                    </Button>
+                  </a>
+                </Box>
+              </BlockStack>
+            </Box>
+
+            {/* Support Info */}
+            <Box
+              borderRadius="200"
+              backgroundColor="bg-surface-secondary"
+              padding="300"
+            >
+              <InlineStack gap="300">
+                <BlockStack gap="100" flex="fill">
+                  <Text as="p" variant="bodySm" fontWeight="semibold">
+                    {responseTime}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100" flex="fill">
+                  <Text as="p" variant="bodySm">
+                    Hours: {supportHours}
+                  </Text>
+                </BlockStack>
+              </InlineStack>
+            </Box>
           </BlockStack>
         </Card>
       </BlockStack>

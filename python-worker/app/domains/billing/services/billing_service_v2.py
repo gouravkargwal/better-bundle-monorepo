@@ -54,15 +54,10 @@ class BillingServiceV2:
         """Process purchase attribution and handle billing based on subscription status - TRANSACTION SAFE."""
         try:
             shop_id = purchase_event.shop_id
-            logger.info(
-                f"🛒 Processing purchase {purchase_event.order_id} for shop {shop_id}"
-            )
 
             # ✅ IDEMPOTENCY: Check if purchase already processed
             if await self._is_purchase_already_processed(purchase_event):
-                logger.info(
-                    f"Purchase {purchase_event.order_id} already processed, skipping"
-                )
+
                 return await self._get_existing_attribution_result(purchase_event)
 
             # ✅ TRANSACTION: Wrap all operations in a single transaction
@@ -72,10 +67,6 @@ class BillingServiceV2:
 
                 # Skip processing if no revenue to attribute
                 if attribution_result.total_attributed_revenue <= 0:
-                    logger.info(
-                        f"⏭️ Skipping billing processing for purchase {purchase_event.order_id}: "
-                        f"no revenue to attribute (${attribution_result.total_attributed_revenue})"
-                    )
                     return attribution_result
 
                 # 2. Get subscription and check trial completion
@@ -91,9 +82,6 @@ class BillingServiceV2:
 
                 # ✅ ATOMIC: Commit all changes together
                 await self.session.commit()
-                logger.info(
-                    f"✅ Successfully processed purchase {purchase_event.order_id}"
-                )
 
                 return attribution_result
 
@@ -129,10 +117,6 @@ class BillingServiceV2:
                 shop_id, shop_subscription, attributed_revenue, purchase_event
             )
 
-            # ✅ Trial completion is now handled in commission service
-            # No need to update trial revenue separately - it's calculated dynamically
-
-            # Log trial progress
             await self._log_trial_progress(shop_id, shop_subscription.id)
 
         except Exception as e:
@@ -144,9 +128,6 @@ class BillingServiceV2:
             not hasattr(purchase_event, "attribution_id")
             or not purchase_event.attribution_id
         ):
-            logger.info(
-                f"No attribution_id on event for order {purchase_event.order_id} → skipping"
-            )
             return False
         return True
 
@@ -198,14 +179,7 @@ class BillingServiceV2:
             )
         )
 
-        logger.info(
-            f"📊 Trial progress: ${actual_revenue}/${trial.threshold_amount} (${trial.commission_saved} saved)"
-        )
-
         if trial.is_threshold_reached(actual_revenue):
-            logger.info(
-                f"🎉 Trial threshold reached for shop {shop_id}! Transitioning to paid phase..."
-            )
             shop_subscription = await self.billing_repository.get_shop_subscription(
                 shop_id
             )
@@ -220,8 +194,6 @@ class BillingServiceV2:
     ) -> None:
         """Handle purchase during paid phase with overflow tracking."""
         try:
-            logger.info(f"💳 Paid purchase: ${attributed_revenue} for shop {shop_id}")
-
             # Skip if no attribution ID
             if not self._has_attribution_id(purchase_event):
                 return
@@ -300,13 +272,6 @@ class BillingServiceV2:
             if not existing_attribution:
                 return False  # No attribution record, need to process
 
-            logger.info(
-                f"🔍 Checking for new line items in order {purchase_event.order_id}:"
-            )
-            logger.info(
-                f"   - Existing attribution created_at: {existing_attribution.created_at}"
-            )
-
             # ✅ FIX: LineItemData.order_id is a FK to OrderData.id (UUID), not Shopify order ID
             # First, get the OrderData record to find its UUID
             from app.core.database.models.order_data import OrderData
@@ -323,8 +288,6 @@ class BillingServiceV2:
                 )
                 return False  # If no order record, process it
 
-            logger.info(f"✅ Found order record ID: {order_record_id}")
-
             # Check if new line items were added since last attribution
             # Get the count of line items that were created after the attribution
             line_items_query = select(func.count(LineItemData.id)).where(
@@ -334,33 +297,9 @@ class BillingServiceV2:
             line_items_result = await self.session.execute(line_items_query)
             new_line_items_count = line_items_result.scalar() or 0
 
-            # Also get details of all line items for debugging
-            all_items_query = (
-                select(LineItemData.id, LineItemData.title, LineItemData.created_at)
-                .where(LineItemData.order_id == order_record_id)
-                .order_by(LineItemData.created_at.asc())
-            )
-            all_items_result = await self.session.execute(all_items_query)
-            all_items = all_items_result.fetchall()
-
-            logger.info(f"   - Total line items in order: {len(all_items)}")
-            for idx, (item_id, title, item_created_at) in enumerate(all_items, 1):
-                is_new = item_created_at > existing_attribution.created_at
-                logger.info(
-                    f"   - Item {idx}: {title[:50]} | created_at={item_created_at} | "
-                    f"is_new={is_new}"
-                )
-
             if new_line_items_count > 0:
-                logger.info(
-                    f"🔄 Order {purchase_event.order_id} has {new_line_items_count} new line items "
-                    f"since last attribution, re-processing"
-                )
                 return False  # New line items added, need to re-process
 
-            logger.info(
-                f"⏭️ Order {purchase_event.order_id} already processed with no new line items, skipping"
-            )
             return True  # No new line items, skip processing
 
         except Exception as e:
@@ -379,11 +318,6 @@ class BillingServiceV2:
             from sqlalchemy import select, func
             from app.core.database.models.order_data import LineItemData
 
-            logger.info(
-                f"🔍 Checking for post-purchase line items in order {order_id}, "
-                f"order_created_at={order_created_at}"
-            )
-
             # ✅ FIX: LineItemData.order_id is a FK to OrderData.id (UUID), not Shopify order ID
             # First, get the OrderData record to find its UUID
             from app.core.database.models.order_data import OrderData
@@ -398,34 +332,8 @@ class BillingServiceV2:
                 logger.warning(f"❌ Order record not found for order_id {order_id}")
                 return False
 
-            logger.info(f"✅ Found order record ID: {order_record_id}")
-
-            # Now get ALL line items using the order record's UUID
-            all_line_items_query = (
-                select(LineItemData.id, LineItemData.title, LineItemData.created_at)
-                .where(LineItemData.order_id == order_record_id)
-                .order_by(LineItemData.created_at.asc())
-            )
-
-            all_items_result = await self.session.execute(all_line_items_query)
-            all_line_items = all_items_result.fetchall()
-
-            logger.info(
-                f"📦 Order {order_id} has {len(all_line_items)} total line items:"
-            )
-            for idx, (item_id, product_title, item_created_at) in enumerate(
-                all_line_items, 1
-            ):
-                time_diff = (item_created_at - order_created_at).total_seconds()
-                logger.info(
-                    f"   {idx}. {product_title[:50]} | "
-                    f"created_at={item_created_at} | "
-                    f"time_diff={time_diff:.1f}s"
-                )
-
             # Count line items created after order creation (with 5-second buffer)
             cutoff_time = order_created_at + timedelta(seconds=5)
-            logger.info(f"🕒 Cutoff time for post-purchase detection: {cutoff_time}")
 
             line_items_query = select(func.count(LineItemData.id)).where(
                 LineItemData.order_id == str(order_id),
@@ -440,12 +348,6 @@ class BillingServiceV2:
                     f"(created >{cutoff_time})"
                 )
                 return True
-            else:
-                logger.info(
-                    f"❌ Order {order_id} has NO post-purchase line items "
-                    f"(all items created before {cutoff_time})"
-                )
-
             return False
 
         except Exception as e:
@@ -475,11 +377,6 @@ class BillingServiceV2:
             from sqlalchemy import select, func, and_, or_
             from app.core.database.models.user_interaction import UserInteraction
             from app.domains.analytics.models.interaction import InteractionType
-
-            logger.info(
-                f"🔍 Checking for post-purchase interactions between "
-                f"{order_created_at} and {order_updated_at}"
-            )
 
             # Look for Apollo interactions that indicate post-purchase recommendations
             post_purchase_interaction_types = [
@@ -513,10 +410,6 @@ class BillingServiceV2:
                 )
                 return True
             else:
-                logger.info(
-                    f"❌ No post-purchase Apollo interactions found "
-                    f"between {order_created_at} and {order_updated_at}"
-                )
                 return False
 
         except Exception as e:
@@ -551,9 +444,29 @@ class BillingServiceV2:
 
             if existing:
                 # Convert existing attribution to AttributionResult
+                import json
+
+                # ✅ FIX: Helper function to parse JSON fields that might be strings
+                def parse_json_field(field_value, field_name, default=None):
+                    if field_value is None:
+                        return default if default is not None else {}
+                    if isinstance(field_value, str):
+                        try:
+                            return json.loads(field_value)
+                        except json.JSONDecodeError:
+                            logger.error(
+                                f"Failed to parse {field_name} as JSON: {field_value}"
+                            )
+                            return default if default is not None else {}
+                    return field_value
+
                 attribution_breakdown = []
-                if existing.attribution_weights:
-                    for weight_data in existing.attribution_weights:
+                weights_data = parse_json_field(
+                    existing.attribution_weights, "attribution_weights", []
+                )
+
+                for weight_data in weights_data:
+                    if isinstance(weight_data, dict):
                         attribution_breakdown.append(
                             AttributionBreakdown(
                                 extension_type=weight_data.get("extension_type"),
@@ -567,6 +480,11 @@ class BillingServiceV2:
                             )
                         )
 
+                # Parse metadata field
+                metadata = parse_json_field(
+                    existing.attribution_metadata, "attribution_metadata", {}
+                )
+
                 return AttributionResult(
                     order_id=int(purchase_event.order_id),
                     shop_id=purchase_event.shop_id,
@@ -577,7 +495,7 @@ class BillingServiceV2:
                     attribution_type=AttributionType.CROSS_EXTENSION,
                     status=AttributionStatus.CALCULATED,
                     calculated_at=existing.created_at,
-                    metadata=existing.attribution_metadata or {},
+                    metadata=metadata,
                 )
             else:
                 # Fallback - create empty result
@@ -656,23 +574,9 @@ class BillingServiceV2:
         # Use updated_at only if there are actual post-purchase line item additions
         purchase_time = purchase_event.created_at
 
-        logger.info(f"🔍 Attribution calculation for order {purchase_event.order_id}:")
-        logger.info(f"   - created_at: {purchase_event.created_at}")
-        logger.info(f"   - updated_at: {purchase_event.updated_at}")
-        logger.info(f"   - has updated_at: {purchase_event.updated_at is not None}")
-
         if purchase_event.updated_at:
-            time_diff = (
-                purchase_event.updated_at - purchase_event.created_at
-            ).total_seconds()
-            logger.info(
-                f"   - time difference (updated - created): {time_diff:.1f} seconds"
-            )
 
             # Check if there are post-purchase interactions (Apollo recommendations)
-            logger.info(
-                f"🔍 Checking if order {purchase_event.order_id} has post-purchase interactions..."
-            )
             has_post_purchase_interactions = await self._has_post_purchase_interactions(
                 purchase_event.shop_id,
                 purchase_event.customer_id,
@@ -687,18 +591,6 @@ class BillingServiceV2:
                     f"using updated_at ({purchase_event.updated_at}) for attribution"
                 )
                 purchase_time = purchase_event.updated_at
-            else:
-                logger.info(
-                    f"❌ Order {purchase_event.order_id} has NO post-purchase interactions, "
-                    f"using created_at ({purchase_event.created_at}) for attribution"
-                )
-        else:
-            logger.info(
-                f"ℹ️ Order {purchase_event.order_id} has no updated_at, "
-                f"using created_at ({purchase_event.created_at}) for attribution"
-            )
-
-        logger.info(f"🎯 Final purchase_time for attribution: {purchase_time}")
 
         context = AttributionContext(
             shop_id=purchase_event.shop_id,
@@ -713,9 +605,6 @@ class BillingServiceV2:
         attribution_result = await self.attribution_engine.calculate_attribution(
             context
         )
-        logger.info(
-            f"💰 Attributed revenue: ${attribution_result.total_attributed_revenue} (purchase_time: {purchase_time})"
-        )
         return attribution_result
 
     async def _process_billing_by_status(
@@ -727,9 +616,6 @@ class BillingServiceV2:
     ) -> None:
         """Process billing based on subscription status."""
         if not purchase_event.session_id:
-            logger.info(
-                f"No session_id for order {purchase_event.order_id} → skipping billing"
-            )
             return
 
         if not shop_subscription:

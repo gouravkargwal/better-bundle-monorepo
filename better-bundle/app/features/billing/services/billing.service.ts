@@ -160,7 +160,7 @@ export class BillingService {
   }
 
   /**
-   * Get Shopify subscription status via API - Real-time status checking
+   * Get real-time Shopify subscription status via GraphQL API
    */
   static async getShopifySubscriptionStatus(
     shopId: string,
@@ -174,7 +174,7 @@ export class BillingService {
     currency?: string;
   } | null> {
     try {
-      // Find the Shopify subscription record
+      // First, check if we have any subscription records to query
       const shopifySub = await prisma.shopify_subscriptions.findFirst({
         where: {
           shop_subscriptions: {
@@ -187,20 +187,140 @@ export class BillingService {
       });
 
       if (!shopifySub?.shopify_subscription_id) {
+        // No subscription exists, check for active subscriptions via currentAppInstallation
+        const currentInstallationQuery = `
+        query {
+          currentAppInstallation {
+            activeSubscriptions {
+              id
+              name
+              status
+              test
+              currentPeriodEnd
+              lineItems {
+                plan {
+                  pricingDetails {
+                    ... on AppUsagePricing {
+                      cappedAmount {
+                        amount
+                        currencyCode
+                      }
+                      balanceUsed {
+                        amount
+                        currencyCode
+                      }
+                      terms
+                    }
+                    ... on AppRecurringPricing {
+                      price {
+                        amount
+                        currencyCode
+                      }
+                      interval
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      `;
+
+        const response = await admin.graphql(currentInstallationQuery);
+        const data = await response.json();
+
+        if (
+          data.data?.currentAppInstallation?.activeSubscriptions?.length > 0
+        ) {
+          const subscription =
+            data.data.currentAppInstallation.activeSubscriptions[0];
+          const lineItem = subscription.lineItems[0];
+          const pricingDetails = lineItem?.plan?.pricingDetails;
+
+          return {
+            status: subscription.status,
+            subscriptionId: subscription.id,
+            currentUsage: pricingDetails?.balanceUsed?.amount || 0,
+            cappedAmount: pricingDetails?.cappedAmount?.amount || 0,
+            currency:
+              pricingDetails?.cappedAmount?.currencyCode ||
+              pricingDetails?.price?.currencyCode ||
+              "USD",
+          };
+        }
+
         return null;
       }
 
-      // Since Shopify GraphQL API doesn't provide direct query for app subscriptions,
-      // we'll return data from our database record
-      // Real-time status updates come via webhooks
+      // Query specific subscription by ID for real-time status
+      const subscriptionQuery = `
+      query($id: ID!) {
+        node(id: $id) {
+          ... on AppSubscription {
+            id
+            name
+            status
+            test
+            currentPeriodEnd
+            lineItems {
+              plan {
+                pricingDetails {
+                  ... on AppUsagePricing {
+                    cappedAmount {
+                      amount
+                      currencyCode
+                    }
+                    balanceUsed {
+                      amount
+                      currencyCode
+                    }
+                    terms
+                  }
+                  ... on AppRecurringPricing {
+                    price {
+                      amount
+                      currencyCode
+                    }
+                    interval
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+      const response = await admin.graphql(subscriptionQuery, {
+        variables: {
+          id: shopifySub.shopify_subscription_id,
+        },
+      });
+
+      const data = await response.json();
+
+      if (data.errors) {
+        console.error("GraphQL errors:", data.errors);
+        return null;
+      }
+
+      const subscription = data.data?.node;
+      if (!subscription) {
+        return null;
+      }
+
+      const lineItem = subscription.lineItems[0];
+      const pricingDetails = lineItem?.plan?.pricingDetails;
 
       return {
-        status: shopifySub.status,
-        subscriptionId: shopifySub.shopify_subscription_id,
-        confirmationUrl: shopifySub.confirmation_url || undefined,
-        currentUsage: 0, // Will be updated via webhooks
-        cappedAmount: 0, // Will be updated via webhooks
-        currency: "USD", // Default currency
+        status: subscription.status,
+        subscriptionId: subscription.id,
+        currentUsage: pricingDetails?.balanceUsed?.amount || 0,
+        cappedAmount: pricingDetails?.cappedAmount?.amount || 0,
+        currency:
+          pricingDetails?.cappedAmount?.currencyCode ||
+          pricingDetails?.price?.currencyCode ||
+          "USD",
       };
     } catch (error) {
       console.error("Error getting Shopify subscription status:", error);
