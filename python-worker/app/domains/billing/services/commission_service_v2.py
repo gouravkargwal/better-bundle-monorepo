@@ -62,8 +62,20 @@ class CommissionServiceV2:
             shop_subscription = await self.billing_repository.get_shop_subscription(
                 shop_id
             )
+            logger.info(
+                f"💰 Purchase attribution: {purchase_attr}---------------------->"
+            )
+            logger.info(
+                f"💰 Shop subscription: {shop_subscription}---------------------->"
+            )
+            effective_commission_rate = shop_subscription.effective_commission_rate
+            logger.info(
+                f"💰 Effective commission rate: {effective_commission_rate}---------------------->"
+            )
+            total_revenue = purchase_attr.total_revenue
+            logger.info(f"💰 Total revenue: {total_revenue}---------------------->")
             commission_data = self._calculate_commission(
-                purchase_attr, shop_subscription
+                total_revenue, effective_commission_rate
             )
             if commission_data["attributed_revenue"] <= 0:
                 logger.info(
@@ -596,16 +608,15 @@ class CommissionServiceV2:
     # ============= HELPER METHODS =============
 
     def _calculate_commission(
-        self, purchase_attr: PurchaseAttribution, shop_subscription: ShopSubscription
+        self, total_revenue: Decimal, effective_commission_rate: Decimal
     ) -> Dict[str, Decimal]:
         """Calculate commission data using subscription's pricing tier."""
-        attributed_revenue = Decimal(str(purchase_attr.total_revenue))
-        commission_rate = shop_subscription.effective_commission_rate
-        commission_earned = attributed_revenue * commission_rate
+
+        commission_earned = total_revenue * effective_commission_rate
 
         return {
-            "attributed_revenue": attributed_revenue,
-            "commission_rate": commission_rate,
+            "attributed_revenue": total_revenue,
+            "commission_rate": effective_commission_rate,
             "commission_earned": commission_earned,
         }
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select, and_, or_, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.shared.helpers import now_utc
 from app.core.database.models import (
@@ -266,13 +266,17 @@ class BillingRepositoryV2:
             await self.session.rollback()
             return None
 
-    async def get_shop_subscription(self, shop_id: str) -> Optional[ShopSubscription]:
-        """Get active shop subscription for a shop"""
-        query = select(ShopSubscription).where(
-            and_(
-                ShopSubscription.shop_id == shop_id,
-                ShopSubscription.is_active == True,
+    async def get_shop_subscription(self, shop_id: str) -> ShopSubscription:
+        """Get shop subscription with all required relationships loaded."""
+        query = (
+            select(ShopSubscription)
+            .options(
+                # Load whatever relationships effective_commission_rate needs
+                selectinload(ShopSubscription.pricing_tier),
+                joinedload(ShopSubscription.shop),  # if needed
             )
+            .where(ShopSubscription.shop_id == shop_id)
+            .where(ShopSubscription.is_active == True)
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
@@ -403,7 +407,7 @@ class BillingRepositoryV2:
                 return False
 
             # ✅ GUARD: Only check for trial subscriptions
-            if not subscription.is_trial:
+            if not subscription.subscription_type == SubscriptionType.TRIAL:
                 logger.debug(
                     f"Subscription {subscription.id} is not a trial, skipping completion check"
                 )
