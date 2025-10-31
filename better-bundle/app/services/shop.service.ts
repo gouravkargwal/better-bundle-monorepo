@@ -39,10 +39,15 @@ const getShopInfoFromShopify = async (admin: any) => {
 };
 
 const getShop = async (shopDomain: string) => {
-  const shop = await prisma.shops.findUnique({
-    where: { shop_domain: shopDomain },
-  });
-  return shop;
+  try {
+    const shop = await prisma.shops.findUnique({
+      where: { shop_domain: shopDomain },
+    });
+    return shop;
+  } catch (error) {
+    logger.error({ error }, "Error getting shop");
+    return null;
+  }
 };
 
 const getShopOnboardingCompleted = async (shopDomain: string) => {

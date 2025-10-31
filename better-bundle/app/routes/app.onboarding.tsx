@@ -9,21 +9,34 @@ import { OnboardingPage } from "../features/onboarding/components/OnboardingPage
 import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const {
-    session,
-    redirect: authRedirect,
-    admin,
-  } = await authenticate.admin(request);
-  const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
+  try {
+    const {
+      session,
+      redirect: authRedirect,
+      admin,
+    } = await authenticate.admin(request);
+    const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
 
-  if (onboardingCompleted) {
-    throw authRedirect("/app");
+    if (onboardingCompleted) {
+      throw authRedirect("/app");
+    }
+
+    const onboardingService = new OnboardingService();
+    const data = await onboardingService.getOnboardingData(session.shop, admin);
+
+    return json(data);
+  } catch (error) {
+    logger.error({ error }, "Failed to load onboarding data");
+    return json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to load onboarding data",
+      },
+      { status: 500 },
+    );
   }
-
-  const onboardingService = new OnboardingService();
-  const data = await onboardingService.getOnboardingData(session.shop, admin);
-
-  return json(data);
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {

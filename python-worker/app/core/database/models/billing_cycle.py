@@ -91,11 +91,6 @@ class BillingCycle(BaseModel):
     shop_subscription = relationship(
         "ShopSubscription", back_populates="billing_cycles"
     )
-    cycle_adjustments = relationship(
-        "BillingCycleAdjustment",
-        back_populates="billing_cycle",
-        cascade="all, delete-orphan",
-    )
     commission_records = relationship(
         "CommissionRecord", back_populates="billing_cycle"
     )

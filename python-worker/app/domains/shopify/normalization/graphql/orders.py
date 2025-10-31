@@ -108,7 +108,9 @@ class GraphQLOrderAdapter(BaseAdapter):
                     currency_code = shop_money.get("currency_code")
 
             # Map custom_attributes (array of {key, value}) into a dict for properties
-            custom_attrs = node.get("custom_attributes") or []
+            custom_attrs = (
+                node.get("custom_attributes") or node.get("customAttributes") or []
+            )
             props_dict: Dict[str, Any] = {}
             try:
                 for attr in custom_attrs:
@@ -173,24 +175,17 @@ class GraphQLOrderAdapter(BaseAdapter):
             order_id=entity_id,
             created_at=created_at,
             updated_at=updated_at,
-            currency_code=payload.get("currency_code"),  # Updated to snake_case
-            presentment_currency_code=payload.get(
-                "presentment_currency_code"
-            ),  # Updated to snake_case
+            currency_code=payload.get("currency_code"),
+            presentment_currency_code=payload.get("presentment_currency_code"),
             total_amount=total_amount,
             subtotal_amount=subtotal_amount,
             total_tax_amount=total_tax_amount,
             total_shipping_amount=total_shipping_amount,
             total_refunded_amount=total_refunded_amount,
             total_outstanding_amount=total_outstanding_amount,
-            order_date=_parse_iso(payload.get("created_at"))
-            or created_at,  # Updated to snake_case
-            processed_at=_parse_iso(
-                payload.get("processed_at")
-            ),  # Updated to snake_case
-            cancelled_at=_parse_iso(
-                payload.get("cancelled_at")
-            ),  # Updated to snake_case
+            order_date=_parse_iso(payload.get("created_at")) or created_at,
+            processed_at=_parse_iso(payload.get("processed_at")),
+            cancelled_at=_parse_iso(payload.get("cancelled_at")),
             confirmed=payload.get("confirmed", False),
             test=payload.get("test", False),
             order_name=payload.get("name"),
@@ -200,18 +195,11 @@ class GraphQLOrderAdapter(BaseAdapter):
             fulfillment_status=payload.get("fulfillment_status") or None,
             customer_id=customer_id,
             tags=tags,
-            note_attributes=payload.get("customAttributes")
-            or [],  # GraphQL uses customAttributes for note_attributes
+            note_attributes=payload.get("customAttributes") or [],
             line_items=line_items,
-            billing_address=self._convert_address_ids(
-                payload.get("billing_address")
-            ),  # Updated to snake_case
-            shipping_address=self._convert_address_ids(
-                payload.get("shipping_address")
-            ),  # Updated to snake_case
-            discount_applications=(
-                payload.get("discount_applications", {}) or {}
-            ).get(  # Updated to snake_case
+            billing_address=self._convert_address_ids(payload.get("billing_address")),
+            shipping_address=self._convert_address_ids(payload.get("shipping_address")),
+            discount_applications=(payload.get("discount_applications", {}) or {}).get(
                 "edges", []
             ),
             metafields=self._process_metafields(payload.get("metafields", {})),

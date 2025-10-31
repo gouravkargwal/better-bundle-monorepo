@@ -563,3 +563,44 @@ class BillingRepositoryV2:
         except Exception as e:
             logger.error(f"Error getting shops for billing: {e}")
             return []
+
+    async def get_subscription_trial(self, shop_id: str) -> Optional[ShopSubscription]:
+        """
+        Return the currently active TRIAL subscription for a shop.
+        """
+        try:
+            query = (
+                select(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
+                        ShopSubscription.is_active.is_(True),
+                        ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                    )
+                )
+                .limit(1)
+            )
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error fetching active trial for shop {shop_id}: {e}")
+            return None
+
+    async def get_subscription_trial_by_id(
+        self, subscription_id: str
+    ) -> Optional[ShopSubscription]:
+        """
+        Return the TRIAL subscription by its subscription primary ID.
+        """
+        try:
+            query = (
+                select(ShopSubscription)
+                .where(ShopSubscription.id == subscription_id)
+                .limit(1)
+            )
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error fetching trial by id {subscription_id}: {e}")
+            return None

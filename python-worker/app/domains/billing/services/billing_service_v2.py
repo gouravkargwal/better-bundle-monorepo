@@ -143,7 +143,7 @@ class BillingServiceV2:
         purchase_event: PurchaseEvent,
     ) -> None:
         """Create trial commission record."""
-        trial = await self.billing_repository.get_subscription_trial(
+        trial = await self.billing_repository.get_subscription_trial_by_id(
             shop_subscription.id
         )
         if not trial:
@@ -174,7 +174,9 @@ class BillingServiceV2:
 
     async def _log_trial_progress(self, shop_id: str, subscription_id: str) -> None:
         """Log trial progress and check for completion."""
-        trial = await self.billing_repository.get_subscription_trial(subscription_id)
+        trial = await self.billing_repository.get_subscription_trial_by_id(
+            subscription_id
+        )
 
         # Calculate actual revenue from commission records
         actual_revenue = (
@@ -560,7 +562,7 @@ class BillingServiceV2:
 
         try:
             # Get trial
-            trial = await self.billing_repository.get_subscription_trial(
+            trial = await self.billing_repository.get_subscription_trial_by_id(
                 shop_subscription.id
             )
             if not trial or trial.status != TrialStatus.ACTIVE or trial.completed_at:

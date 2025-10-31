@@ -5,32 +5,42 @@ import logger from "app/utils/logger";
 
 export class OnboardingService {
   async getOnboardingData(shopDomain: string, admin: any) {
-    // Get shop info from Shopify
-    const shopData = await this.getShopInfoFromShopify(admin);
+    try {
+      // Get shop info from Shopify
+      const shopData = await this.getShopInfoFromShopify(admin);
 
-    // Get pricing tier configuration
-    const pricingTier = await this.getPricingTierConfig(
-      shopDomain,
-      shopData.currencyCode,
-    );
+      // Get pricing tier configuration
+      const pricingTier = await this.getPricingTierConfig(
+        shopDomain,
+        shopData.currencyCode,
+      );
 
-    return {
-      pricingTier,
-    };
+      return {
+        pricingTier,
+      };
+    } catch (error) {
+      logger.error({ error }, "Error getting onboarding data");
+      throw new Error("Failed to get onboarding data");
+    }
   }
 
   async completeOnboarding(session: any, admin: any) {
-    // Get shop data from Shopify
-    const shopData = await this.getShopInfoFromShopify(admin);
+    try {
+      // Get shop data from Shopify
+      const shopData = await this.getShopInfoFromShopify(admin);
 
-    // Complete onboarding in transaction
-    await this.completeOnboardingTransaction(session, shopData);
+      // Complete onboarding in transaction
+      await this.completeOnboardingTransaction(session, shopData);
 
-    // Activate web pixel
-    await this.activateWebPixel(admin, session.shop);
+      // Activate web pixel
+      await this.activateWebPixel(admin, session.shop);
 
-    // Trigger analysis
-    await this.triggerAnalysis(session.shop);
+      // Trigger analysis
+      await this.triggerAnalysis(session.shop);
+    } catch (error) {
+      logger.error({ error }, "Error completing onboarding");
+      throw new Error("Failed to complete onboarding");
+    }
   }
 
   private async getShopInfoFromShopify(admin: any) {
@@ -69,90 +79,105 @@ export class OnboardingService {
   }
 
   private async getPricingTierConfig(shopDomain: string, currencyCode: string) {
-    // Get default subscription plan
-    const defaultPlan = await prisma.subscription_plans.findFirst({
-      where: {
-        is_active: true,
-        is_default: true,
-      },
-    });
+    try {
+      // Get default subscription plan
+      const defaultPlan = await prisma.subscription_plans.findFirst({
+        where: {
+          is_active: true,
+          is_default: true,
+        },
+      });
 
-    if (!defaultPlan) {
-      throw new Error("No default subscription plan found");
+      if (!defaultPlan) {
+        throw new Error("No default subscription plan found");
+      }
+
+      // Get pricing tier for currency
+      const pricingTier = await prisma.pricing_tiers.findFirst({
+        where: {
+          subscription_plan_id: defaultPlan.id,
+          currency: currencyCode,
+          is_active: true,
+          is_default: true,
+        },
+      });
+
+      if (!pricingTier) {
+        throw new Error(`No pricing tier found for currency: ${currencyCode}`);
+      }
+
+      return {
+        symbol: getCurrencySymbol(currencyCode),
+        threshold_amount: pricingTier.trial_threshold_amount,
+      };
+    } catch (error) {
+      logger.error({ error }, "Error getting pricing tier configuration");
+      throw new Error("Failed to get pricing tier configuration");
     }
-
-    // Get pricing tier for currency
-    const pricingTier = await prisma.pricing_tiers.findFirst({
-      where: {
-        subscription_plan_id: defaultPlan.id,
-        currency: currencyCode,
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!pricingTier) {
-      throw new Error(`No pricing tier found for currency: ${currencyCode}`);
-    }
-
-    return {
-      symbol: getCurrencySymbol(currencyCode),
-      threshold_amount: pricingTier.trial_threshold_amount,
-    };
   }
 
   private async completeOnboardingTransaction(session: any, shopData: any) {
     return await prisma.$transaction(async (tx) => {
-      // Create or update shop
-      const shop = await this.createOrUpdateShop(session, shopData, tx);
+      try {
+        // Create or update shop
+        const shop = await this.createOrUpdateShop(session, shopData, tx);
 
-      // Activate trial billing plan
-      await this.activateTrialBillingPlan(session.shop, shop, tx);
+        // Activate trial billing plan
+        await this.activateTrialBillingPlan(session.shop, shop, tx);
 
-      // Mark onboarding as completed
-      await this.markOnboardingCompleted(session.shop, tx);
+        // Mark onboarding as completed
+        await this.markOnboardingCompleted(session.shop, tx);
 
-      return shop;
+        return shop;
+      } catch (error) {
+        logger.error({ error }, "Error completing onboarding transaction");
+        throw new Error("Failed to complete onboarding transaction");
+      }
     });
   }
 
   private async createOrUpdateShop(session: any, shopData: any, tx: any) {
-    // Check if this is a reinstall
-    const existingShop = await tx.shops.findUnique({
-      where: { shop_domain: shopData.myshopifyDomain },
-    });
+    try {
+      // Check if this is a reinstall
+      const existingShop = await tx.shops.findUnique({
+        where: { shop_domain: shopData.myshopifyDomain },
+      });
 
-    const isReinstall = existingShop && !existingShop.is_active;
+      const isReinstall = existingShop && !existingShop.is_active;
 
-    return await tx.shops.upsert({
-      where: { shop_domain: shopData.myshopifyDomain },
-      update: {
-        access_token: session.accessToken,
-        currency_code: shopData.currencyCode,
-        email: shopData.email,
-        plan_type: shopData.plan.displayName,
-        is_active: true,
-        shopify_plus:
-          shopData.plan.displayName.includes("Plus") ||
-          shopData.plan.displayName.includes("plus"),
-        // For reinstalls, preserve onboarding status if it was completed
-        ...(isReinstall && existingShop.onboarding_completed
-          ? {}
-          : { onboarding_completed: false }),
-      },
-      create: {
-        shop_domain: shopData.myshopifyDomain,
-        access_token: session.accessToken,
-        currency_code: shopData.currencyCode,
-        email: shopData.email,
-        plan_type: shopData.plan.displayName,
-        is_active: true,
-        onboarding_completed: false,
-        shopify_plus:
-          shopData.plan.displayName.includes("Plus") ||
-          shopData.plan.displayName.includes("plus"),
-      },
-    });
+      return await tx.shops.upsert({
+        where: { shop_domain: shopData.myshopifyDomain },
+        update: {
+          access_token: session.accessToken,
+          currency_code: shopData.currencyCode,
+          email: shopData.email,
+          plan_type: shopData.plan.displayName,
+          is_active: true,
+          shopify_plus:
+            shopData.plan.displayName.includes("Plus") ||
+            shopData.plan.displayName.includes("plus"),
+          // For reinstalls, preserve onboarding status if it was completed
+          ...(isReinstall && existingShop.onboarding_completed
+            ? {}
+            : { onboarding_completed: false }),
+        },
+        create: {
+          shop_domain: shopData.myshopifyDomain,
+          access_token: session.accessToken,
+          currency_code: shopData.currencyCode,
+          email: shopData.email,
+          plan_type: shopData.plan.displayName,
+          is_active: true,
+          onboarding_completed: false,
+          shopify_plus:
+            shopData.plan.displayName.includes("Plus") ||
+            shopData.plan.displayName.includes("plus"),
+        },
+      });
+    } catch (error) {
+      logger.error({ error }, "Error creating or updating shop");
+      throw new Error("Failed to create or update shop");
+    }
   }
 
   private async activateTrialBillingPlan(
@@ -160,69 +185,76 @@ export class OnboardingService {
     shopRecord: any,
     tx: any,
   ) {
-    // Get default subscription plan
-    const defaultPlan = await tx.subscription_plans.findFirst({
-      where: {
-        is_active: true,
-        is_default: true,
-      },
-    });
+    try {
+      // Get default subscription plan
+      const defaultPlan = await tx.subscription_plans.findFirst({
+        where: {
+          is_active: true,
+          is_default: true,
+        },
+      });
 
-    if (!defaultPlan) {
-      throw new Error("No default subscription plan found");
-    }
+      if (!defaultPlan) {
+        throw new Error("No default subscription plan found");
+      }
 
-    // Get pricing tier for shop's currency
-    const pricingTier = await tx.pricing_tiers.findFirst({
-      where: {
-        subscription_plan_id: defaultPlan.id,
-        currency: shopRecord.currency_code,
-        is_active: true,
-        is_default: true,
-      },
-    });
+      // Get pricing tier for shop's currency
+      const pricingTier = await tx.pricing_tiers.findFirst({
+        where: {
+          subscription_plan_id: defaultPlan.id,
+          currency: shopRecord.currency_code,
+          is_active: true,
+          is_default: true,
+        },
+      });
 
-    if (!pricingTier) {
-      throw new Error(
-        `No pricing tier found for currency: ${shopRecord.currency_code}`,
+      if (!pricingTier) {
+        throw new Error(
+          `No pricing tier found for currency: ${shopRecord.currency_code}`,
+        );
+      }
+
+      // Create shop subscription (TRIAL status)
+      const shopSubscription = await tx.shop_subscriptions.create({
+        data: {
+          shop_id: shopRecord.id,
+          subscription_plan_id: defaultPlan.id,
+          pricing_tier_id: pricingTier.id,
+          subscription_type: "TRIAL",
+          status: "TRIAL",
+          started_at: new Date(),
+          is_active: true,
+          auto_renew: true,
+        },
+      });
+
+      return shopSubscription;
+    } catch (error: any) {
+      logger.error(
+        {
+          err: {
+            name: error?.name,
+            code: error?.code,
+            message: error?.message,
+            meta: error?.meta,
+          },
+        },
+        "Error activating trial billing plan",
       );
+      throw new Error("Failed to activate trial billing plan");
     }
-
-    // Create shop subscription (TRIAL status)
-    const shopSubscription = await tx.shop_subscriptions.create({
-      data: {
-        shop_id: shopRecord.id,
-        subscription_plan_id: defaultPlan.id,
-        pricing_tier_id: pricingTier.id,
-        status: "TRIAL",
-        start_date: new Date(),
-        is_active: true,
-        auto_renew: true,
-      },
-    });
-
-    // Create subscription trial
-    const subscriptionTrial = await tx.subscription_trials.create({
-      data: {
-        shop_subscription_id: shopSubscription.id,
-        threshold_amount: pricingTier.trial_threshold_amount,
-        status: "ACTIVE",
-        started_at: new Date(),
-        commission_saved: 0.0,
-      },
-    });
-
-    return {
-      shop_subscription: shopSubscription,
-      subscription_trial: subscriptionTrial,
-    };
   }
 
   private async markOnboardingCompleted(shopDomain: string, tx: any) {
-    await tx.shops.update({
-      where: { shop_domain: shopDomain },
-      data: { onboarding_completed: true },
-    });
+    try {
+      await tx.shops.update({
+        where: { shop_domain: shopDomain },
+        data: { onboarding_completed: true },
+      });
+    } catch (error) {
+      logger.error({ error }, "Error marking onboarding completed");
+      throw new Error("Failed to mark onboarding completed");
+    }
   }
 
   private async activateWebPixel(admin: any, shopDomain: string) {

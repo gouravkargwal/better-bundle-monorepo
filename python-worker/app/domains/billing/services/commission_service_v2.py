@@ -669,10 +669,9 @@ class CommissionServiceV2:
     ) -> Optional[CommissionRecord]:
         """Create commission based on subscription type and status."""
 
-        # Check subscription type AND ensure it's active
         if (
             shop_subscription.subscription_type == SubscriptionType.TRIAL
-            and shop_subscription.status == SubscriptionStatus.ACTIVE
+            and shop_subscription.status == SubscriptionStatus.TRIAL
         ):
             return await self._create_trial_commission(
                 shop_id,

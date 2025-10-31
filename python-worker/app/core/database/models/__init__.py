@@ -141,7 +141,6 @@ __all__ = [
     "PricingTier",
     "ShopSubscription",
     "BillingCycle",
-    "BillingCycleAdjustment",
     "CommissionRecord",
     # Trial configuration models
     # Extension models

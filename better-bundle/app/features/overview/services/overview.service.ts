@@ -58,14 +58,11 @@ export class OverviewService {
         subscription_plan_id: true,
         pricing_tier_id: true,
         status: true,
-        start_date: true,
-        end_date: true,
+        started_at: true,
+        expires_at: true,
         is_active: true,
         auto_renew: true,
-        subscription_metadata: true,
-        activated_at: true,
-        suspended_at: true,
-        cancelled_at: true,
+        shop_subscription_metadata: true,
       },
     });
 
@@ -207,7 +204,7 @@ export class OverviewService {
               activePlan.pricing_tiers?.trial_threshold_amount || 0,
             currency: activePlan.pricing_tiers?.currency || currencyCode,
             status: activePlan.status,
-            startDate: activePlan.start_date,
+            startDate: activePlan.started_at,
             isActive: activePlan.is_active,
           }
         : null,
@@ -317,11 +314,6 @@ export class OverviewService {
         const stats = orderStats.get(orderId);
         stats.revenue += Number(record.attributed_revenue) || 0;
         stats.orders += 1;
-      });
-
-      // Calculate conversion rates
-      const totalOrders = await prisma.order_data.count({
-        where: { shop_id: shopId },
       });
 
       // Calculate total revenue for percentage calculation

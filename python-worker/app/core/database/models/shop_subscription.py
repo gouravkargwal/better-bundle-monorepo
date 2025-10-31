@@ -92,9 +92,6 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     # Keep operational relationships
     billing_cycles = relationship("BillingCycle", back_populates="shop_subscription")
-    commission_records = relationship(
-        "CommissionRecord", back_populates="shop_subscription"
-    )
 
     # ===== SMART PROPERTIES USING PRICING TIER =====
 

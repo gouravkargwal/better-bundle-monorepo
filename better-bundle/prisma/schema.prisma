@@ -8,54 +8,25 @@ datasource db {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model billing_cycle_adjustments {
-  billing_cycle_id    String                 @db.VarChar(255)
-  old_cap_amount      Decimal                @db.Decimal(10, 2)
-  new_cap_amount      Decimal                @db.Decimal(10, 2)
-  adjustment_amount   Decimal                @db.Decimal(10, 2)
-  adjustment_reason   adjustment_reason_enum
-  reason_description  String?
-  adjusted_by         String?                @db.VarChar(255)
-  adjusted_by_type    String?                @db.VarChar(50)
-  adjustment_metadata String?                @db.VarChar(1000)
-  adjusted_at         DateTime               @db.Timestamptz(6)
-  id                  String                 @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at          DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at          DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  billing_cycles      billing_cycles         @relation(fields: [billing_cycle_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([adjusted_at], map: "ix_billing_cycle_adjustment_at")
-  @@index([adjusted_by], map: "ix_billing_cycle_adjustment_by")
-  @@index([billing_cycle_id], map: "ix_billing_cycle_adjustment_cycle")
-  @@index([adjustment_reason], map: "ix_billing_cycle_adjustment_reason")
-  @@index([adjusted_by_type], map: "ix_billing_cycle_adjustment_type")
-  @@index([adjusted_at], map: "ix_billing_cycle_adjustments_adjusted_at")
-  @@index([adjusted_by], map: "ix_billing_cycle_adjustments_adjusted_by")
-  @@index([adjustment_reason], map: "ix_billing_cycle_adjustments_adjustment_reason")
-  @@index([billing_cycle_id], map: "ix_billing_cycle_adjustments_billing_cycle_id")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model billing_cycles {
-  shop_subscription_id      String                      @db.VarChar(255)
-  cycle_number              Int
-  start_date                DateTime                    @db.Timestamptz(6)
-  end_date                  DateTime                    @db.Timestamptz(6)
-  initial_cap_amount        Decimal                     @db.Decimal(10, 2)
-  current_cap_amount        Decimal                     @db.Decimal(10, 2)
-  usage_amount              Decimal                     @db.Decimal(10, 2)
-  commission_count          Int
-  status                    billing_cycle_status_enum
-  activated_at              DateTime?                   @db.Timestamptz(6)
-  completed_at              DateTime?                   @db.Timestamptz(6)
-  cancelled_at              DateTime?                   @db.Timestamptz(6)
-  cycle_metadata            String?                     @db.VarChar(1000)
-  id                        String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at                DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  billing_cycle_adjustments billing_cycle_adjustments[]
-  shop_subscriptions        shop_subscriptions          @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  commission_records        commission_records[]
+  shop_subscription_id String                    @db.VarChar(255)
+  cycle_number         Int
+  start_date           DateTime                  @db.Timestamptz(6)
+  end_date             DateTime                  @db.Timestamptz(6)
+  initial_cap_amount   Decimal                   @db.Decimal(10, 2)
+  current_cap_amount   Decimal                   @db.Decimal(10, 2)
+  usage_amount         Decimal                   @db.Decimal(10, 2)
+  commission_count     Int
+  status               billing_cycle_status_enum
+  activated_at         DateTime?                 @db.Timestamptz(6)
+  completed_at         DateTime?                 @db.Timestamptz(6)
+  cancelled_at         DateTime?                 @db.Timestamptz(6)
+  cycle_metadata       String?                   @db.VarChar(1000)
+  id                   String                    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at           DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at           DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions   shop_subscriptions        @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  commission_records   commission_records[]
 
   @@unique([shop_subscription_id, status], map: "ix_billing_cycle_unique_active")
   @@index([shop_subscription_id, status], map: "ix_billing_cycle_active")
@@ -71,45 +42,6 @@ model billing_cycles {
   @@index([shop_subscription_id], map: "ix_billing_cycles_shop_subscription_id")
   @@index([start_date], map: "ix_billing_cycles_start_date")
   @@index([status], map: "ix_billing_cycles_status")
-}
-
-model billing_invoices {
-  shop_subscription_id String              @db.VarChar(255)
-  shopify_invoice_id   String              @unique(map: "ix_billing_invoices_shopify_invoice_id") @db.VarChar(255)
-  invoice_number       String?             @db.VarChar(100)
-  amount_due           Decimal             @db.Decimal(10, 2)
-  amount_paid          Decimal             @db.Decimal(10, 2)
-  total_amount         Decimal             @db.Decimal(10, 2)
-  currency             String              @db.VarChar(3)
-  invoice_date         DateTime            @db.Timestamptz(6)
-  due_date             DateTime?           @db.Timestamptz(6)
-  paid_at              DateTime?           @db.Timestamptz(6)
-  status               invoice_status_enum
-  description          String?
-  line_items           Json?               @db.Json
-  shopify_response     Json?               @db.Json
-  payment_method       String?             @db.VarChar(100)
-  payment_reference    String?             @db.VarChar(255)
-  failure_reason       String?             @db.VarChar(500)
-  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at           DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_subscriptions   shop_subscriptions  @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([currency], map: "ix_billing_invoice_currency")
-  @@index([invoice_date], map: "ix_billing_invoice_date")
-  @@index([due_date], map: "ix_billing_invoice_due_date")
-  @@index([paid_at], map: "ix_billing_invoice_paid_at")
-  @@index([shopify_invoice_id], map: "ix_billing_invoice_shopify_id")
-  @@index([status], map: "ix_billing_invoice_status")
-  @@index([shop_subscription_id], map: "ix_billing_invoice_subscription")
-  @@index([currency], map: "ix_billing_invoices_currency")
-  @@index([due_date], map: "ix_billing_invoices_due_date")
-  @@index([invoice_date], map: "ix_billing_invoices_invoice_date")
-  @@index([invoice_number], map: "ix_billing_invoices_invoice_number")
-  @@index([paid_at], map: "ix_billing_invoices_paid_at")
-  @@index([shop_subscription_id], map: "ix_billing_invoices_shop_subscription_id")
-  @@index([status], map: "ix_billing_invoices_status")
 }
 
 model collection_data {
@@ -767,81 +699,44 @@ model sessions {
 }
 
 model shop_subscriptions {
-  subscription_plan_id   String                   @db.VarChar(255)
-  pricing_tier_id        String                   @db.VarChar(255)
-  status                 subscription_status_enum
-  start_date             DateTime                 @db.Timestamptz(6)
-  end_date               DateTime?                @db.Timestamptz(6)
-  is_active              Boolean
-  auto_renew             Boolean
-  subscription_metadata  String?                  @db.VarChar(2000)
-  user_chosen_cap_amount Decimal?                 @db.Decimal(10, 2)
-  activated_at           DateTime?                @db.Timestamptz(6)
-  suspended_at           DateTime?                @db.Timestamptz(6)
-  cancelled_at           DateTime?                @db.Timestamptz(6)
-  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at             DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at             DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                String                   @unique(map: "uq_shop_subscription_active") @db.VarChar
-  billing_cycles         billing_cycles[]
-  billing_invoices       billing_invoices[]
-  pricing_tiers          pricing_tiers            @relation(fields: [pricing_tier_id], references: [id], onUpdate: NoAction)
-  shops                  shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  subscription_plans     subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
-  shopify_subscriptions  shopify_subscriptions?
-  subscription_trials    subscription_trials?
+  subscription_type          subscription_type_enum
+  status                     subscription_status_enum
+  subscription_plan_id       String                   @db.VarChar(255)
+  pricing_tier_id            String                   @db.VarChar(255)
+  trial_threshold_override   Decimal?                 @db.Decimal(10, 2)
+  trial_duration_days        Int?
+  user_chosen_cap_amount     Decimal?                 @db.Decimal(10, 2)
+  auto_renew                 Boolean
+  shopify_subscription_id    String?                  @db.VarChar(255)
+  shopify_line_item_id       String?                  @db.VarChar(255)
+  shopify_status             String?                  @db.VarChar(50)
+  confirmation_url           String?
+  started_at                 DateTime                 @db.Timestamptz(6)
+  completed_at               DateTime?                @db.Timestamptz(6)
+  cancelled_at               DateTime?                @db.Timestamptz(6)
+  expires_at                 DateTime?                @db.Timestamptz(6)
+  is_active                  Boolean
+  shop_subscription_metadata Json?
+  id                         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                    String                   @db.VarChar
+  billing_cycles             billing_cycles[]
+  pricing_tiers              pricing_tiers            @relation(fields: [pricing_tier_id], references: [id], onUpdate: NoAction)
+  shops                      shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscription_plans         subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
 
-  @@index([is_active], map: "ix_shop_subscription_active")
-  @@index([start_date, end_date], map: "ix_shop_subscription_dates")
-  @@index([subscription_plan_id], map: "ix_shop_subscription_plan")
-  @@index([shop_id], map: "ix_shop_subscription_shop")
-  @@index([status], map: "ix_shop_subscription_status")
-  @@index([pricing_tier_id], map: "ix_shop_subscription_tier")
-  @@index([activated_at], map: "ix_shop_subscriptions_activated_at")
   @@index([cancelled_at], map: "ix_shop_subscriptions_cancelled_at")
-  @@index([end_date], map: "ix_shop_subscriptions_end_date")
   @@index([is_active], map: "ix_shop_subscriptions_is_active")
   @@index([pricing_tier_id], map: "ix_shop_subscriptions_pricing_tier_id")
   @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
-  @@index([start_date], map: "ix_shop_subscriptions_start_date")
   @@index([status], map: "ix_shop_subscriptions_status")
   @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
-  @@index([suspended_at], map: "ix_shop_subscriptions_suspended_at")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model shopify_subscriptions {
-  shop_subscription_id    String                           @unique(map: "ix_shopify_subscriptions_shop_subscription_id") @db.VarChar(255)
-  shopify_subscription_id String                           @unique(map: "ix_shopify_subscriptions_shopify_subscription_id") @db.VarChar(255)
-  shopify_line_item_id    String?                          @db.VarChar(255)
-  status                  shopify_subscription_status_enum
-  confirmation_url        String?
-  return_url              String?
-  created_at              DateTime?                        @db.Timestamptz(6)
-  activated_at            DateTime?                        @db.Timestamptz(6)
-  cancelled_at            DateTime?                        @db.Timestamptz(6)
-  shopify_response        String?
-  shopify_metadata        String?
-  last_error              String?
-  last_error_at           DateTime?                        @db.Timestamptz(6)
-  error_count             String                           @db.VarChar(10)
-  id                      String                           @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  updated_at              DateTime                         @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_subscriptions      shop_subscriptions               @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([activated_at], map: "ix_shopify_subscription_activated")
-  @@index([cancelled_at], map: "ix_shopify_subscription_cancelled")
-  @@index([created_at], map: "ix_shopify_subscription_created")
-  @@index([last_error_at], map: "ix_shopify_subscription_error")
-  @@index([shopify_subscription_id], map: "ix_shopify_subscription_shopify_id")
-  @@index([status], map: "ix_shopify_subscription_status")
-  @@index([shop_subscription_id], map: "ix_shopify_subscription_subscription")
-  @@index([activated_at], map: "ix_shopify_subscriptions_activated_at")
-  @@index([cancelled_at], map: "ix_shopify_subscriptions_cancelled_at")
-  @@index([created_at], map: "ix_shopify_subscriptions_created_at")
-  @@index([last_error_at], map: "ix_shopify_subscriptions_last_error_at")
-  @@index([shopify_line_item_id], map: "ix_shopify_subscriptions_shopify_line_item_id")
-  @@index([status], map: "ix_shopify_subscriptions_status")
+  @@index([completed_at], map: "ix_shop_subscriptions_completed_at")
+  @@index([expires_at], map: "ix_shop_subscriptions_expires_at")
+  @@index([shopify_subscription_id], map: "ix_shop_subscriptions_shopify_subscription_id")
+  @@index([started_at], map: "ix_shop_subscriptions_started_at")
+  @@index([subscription_type], map: "ix_shop_subscriptions_subscription_type")
 }
 
 model shops {
@@ -879,7 +774,7 @@ model shops {
   raw_products               raw_products[]
   search_product_features    search_product_features[]
   session_features           session_features[]
-  shop_subscriptions         shop_subscriptions?
+  shop_subscriptions         shop_subscriptions[]
   user_features              user_features[]
   user_identity_links        user_identity_links[]
   user_interactions          user_interactions[]
@@ -918,32 +813,6 @@ model subscription_plans {
   @@index([is_active], map: "ix_subscription_plans_is_active")
   @@index([is_default], map: "ix_subscription_plans_is_default")
   @@index([plan_type], map: "ix_subscription_plans_plan_type")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model subscription_trials {
-  shop_subscription_id String             @unique(map: "ix_subscription_trials_shop_subscription_id") @db.VarChar(255)
-  threshold_amount     Decimal            @db.Decimal(10, 2)
-  trial_duration_days  String?            @db.VarChar(10)
-  commission_saved     Decimal            @db.Decimal(10, 2)
-  status               trial_status_enum
-  started_at           DateTime           @db.Timestamptz(6)
-  completed_at         DateTime?          @db.Timestamptz(6)
-  expired_at           DateTime?          @db.Timestamptz(6)
-  trial_metadata       String?            @db.VarChar(1000)
-  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at           DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at           DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_subscriptions   shop_subscriptions @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([completed_at], map: "ix_subscription_trial_completed")
-  @@index([started_at], map: "ix_subscription_trial_started")
-  @@index([status], map: "ix_subscription_trial_status")
-  @@index([shop_subscription_id], map: "ix_subscription_trial_subscription")
-  @@index([completed_at], map: "ix_subscription_trials_completed_at")
-  @@index([expired_at], map: "ix_subscription_trials_expired_at")
-  @@index([started_at], map: "ix_subscription_trials_started_at")
-  @@index([status], map: "ix_subscription_trials_status")
 }
 
 model user_features {
@@ -1059,6 +928,34 @@ model user_sessions {
   @@index([status], map: "ix_user_sessions_status")
 }
 
+model feedback {
+  feedback_type String   @db.VarChar(256)
+  user_id       String   @db.VarChar(256)
+  item_id       String   @db.VarChar(256)
+  time_stamp    DateTime @db.Timestamptz(6)
+  comment       String   @default("")
+
+  @@id([feedback_type, user_id, item_id])
+  @@index([item_id], map: "item_id_index")
+  @@index([user_id], map: "user_id_index")
+}
+
+model items {
+  item_id    String   @id @db.VarChar(256)
+  is_hidden  Boolean  @default(false)
+  categories Json     @default("[]") @db.Json
+  time_stamp DateTime @db.Timestamptz(6)
+  labels     Json     @default("[]") @db.Json
+  comment    String   @default("")
+}
+
+model users {
+  user_id   String @id @db.VarChar(256)
+  labels    Json   @default("[]") @db.Json
+  subscribe Json   @default("[]") @db.Json
+  comment   String @default("")
+}
+
 enum adjustment_reason_enum {
   CAP_INCREASE
   PLAN_UPGRADE
@@ -1138,4 +1035,9 @@ enum trial_status_enum {
   COMPLETED
   EXPIRED
   CANCELLED
+}
+
+enum subscription_type_enum {
+  TRIAL
+  PAID
 }

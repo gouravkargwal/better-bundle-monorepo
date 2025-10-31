@@ -145,24 +145,6 @@ PORT = config("PORT", default=8000, cast=int)
 HOST = config("HOST", default="0.0.0.0")
 
 
-# Database Migration Settings
-# IMPORTANT: Django should NOT create business tables - they already exist from Python worker
-# But allow Django's own auth tables to be created
-class DisableMigrations:
-    def __contains__(self, item):
-        return True
-
-    def __getitem__(self, item):
-        # Allow Django's built-in apps to have migrations
-        if item in ["auth", "contenttypes", "sessions", "admin"]:
-            return None
-        # Disable migrations for business apps
-        return None
-
-
-MIGRATION_MODULES = DisableMigrations()
-
-
 # CRITICAL: Prevent Django from creating business tables
 # This ensures Django only reads from existing tables created by Python worker
 # But allows Django's own auth tables to be created

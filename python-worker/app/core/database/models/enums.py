@@ -145,6 +145,7 @@ class SubscriptionStatus(Enum):
     CANCELLED = "CANCELLED"  # Cancelled by user/system
     SUSPENDED = "SUSPENDED"  # Temporarily suspended
     EXPIRED = "EXPIRED"  # Naturally expired
+    TRIAL = "TRIAL"  # Trial in progress
 
 
 class BillingCycleStatus(str, Enum):

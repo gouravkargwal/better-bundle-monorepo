@@ -353,8 +353,9 @@ export async function createShopSubscription(
         shop_id: shopId,
         subscription_plan_id: defaultPlan.id,
         pricing_tier_id: defaultPricingTier.id,
+        subscription_type: "TRIAL",
         status: "TRIAL",
-        start_date: new Date(),
+        started_at: new Date(),
         is_active: true,
         auto_renew: true,
         user_chosen_cap_amount: defaultPricingTier.trial_threshold_amount,
@@ -377,8 +378,19 @@ export async function createShopSubscription(
       shop_subscription: shopSubscription,
       subscription_trial: subscriptionTrial,
     };
-  } catch (error) {
-    logger.error({ error, shopId }, "Error creating shop subscription");
+  } catch (error: any) {
+    logger.error(
+      {
+        shopId,
+        err: {
+          name: error?.name,
+          code: error?.code,
+          message: error?.message,
+          meta: error?.meta,
+        },
+      },
+      "Error creating shop subscription",
+    );
     throw error;
   }
 }

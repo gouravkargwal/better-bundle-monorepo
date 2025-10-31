@@ -88,7 +88,6 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
               is_active: true,
             },
             include: {
-              subscription_trials: true,
               billing_cycles: {
                 where: { status: "ACTIVE" },
                 orderBy: { cycle_number: "desc" },
