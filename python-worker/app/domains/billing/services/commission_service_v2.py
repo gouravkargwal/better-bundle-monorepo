@@ -51,31 +51,20 @@ class CommissionServiceV2:
     ) -> Optional[CommissionRecord]:
         """Create commission record for a purchase attribution."""
         try:
-            # Check if already exists
-            existing = await self._get_existing_commission(purchase_attribution_id)
-            if existing:
-                return existing
-
-            # Get required data
-            purchase_attr = await self._get_purchase_attribution(
+            existing = await self.commission_repository.get_by_purchase_attribution_id(
                 purchase_attribution_id
             )
-            if not purchase_attr:
-                return None
-
+            if existing:
+                return existing
+            purchase_attr = await self.purchase_attribution_repository.get_by_id(
+                purchase_attribution_id
+            )
             shop_subscription = await self.billing_repository.get_shop_subscription(
                 shop_id
             )
-            if not shop_subscription:
-                logger.error(f"❌ No subscription for shop {shop_id}")
-                return None
-
-            # Calculate commission using pricing tier
             commission_data = self._calculate_commission(
                 purchase_attr, shop_subscription
             )
-
-            # Skip creating commission if no revenue to attribute
             if commission_data["attributed_revenue"] <= 0:
                 logger.info(
                     f"⏭️ Skipping commission creation for attribution {purchase_attribution_id}: "
@@ -83,7 +72,6 @@ class CommissionServiceV2:
                 )
                 return None
 
-            # Create commission based on subscription type and status
             commission = await self._create_commission_by_type(
                 shop_id,
                 purchase_attribution_id,
@@ -606,44 +594,6 @@ class CommissionServiceV2:
             }
 
     # ============= HELPER METHODS =============
-
-    async def _get_existing_commission(
-        self, purchase_attribution_id: str
-    ) -> Optional[CommissionRecord]:
-        """Get existing commission if it exists."""
-        try:
-            existing = await self.commission_repository.get_by_purchase_attribution_id(
-                purchase_attribution_id
-            )
-
-            if existing:
-                logger.info(
-                    f"✅ Commission already exists for purchase {purchase_attribution_id}"
-                )
-
-            return existing
-        except Exception as e:
-            logger.error(f"Error getting existing commission: {e}")
-            return None
-
-    async def _get_purchase_attribution(
-        self, purchase_attribution_id: str
-    ) -> Optional[PurchaseAttribution]:
-        """Get purchase attribution by ID."""
-        try:
-            purchase_attr = await self.purchase_attribution_repository.get_by_id(
-                purchase_attribution_id
-            )
-
-            if not purchase_attr:
-                logger.error(
-                    f"❌ Purchase attribution {purchase_attribution_id} not found"
-                )
-
-            return purchase_attr
-        except Exception as e:
-            logger.error(f"Error getting purchase attribution: {e}")
-            return None
 
     def _calculate_commission(
         self, purchase_attr: PurchaseAttribution, shop_subscription: ShopSubscription

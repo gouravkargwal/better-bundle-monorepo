@@ -268,61 +268,41 @@ class BillingRepositoryV2:
 
     async def get_shop_subscription(self, shop_id: str) -> Optional[ShopSubscription]:
         """Get active shop subscription for a shop"""
-        try:
-            query = (
-                select(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.is_active == True,
-                    )
-                )
-                .options(
-                    selectinload(ShopSubscription.subscription_plan),
-                    selectinload(ShopSubscription.pricing_tier),
-                )
-                .order_by(ShopSubscription.created_at.desc())
+        query = select(ShopSubscription).where(
+            and_(
+                ShopSubscription.shop_id == shop_id,
+                ShopSubscription.is_active == True,
             )
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"Error getting shop subscription for shop {shop_id}: {e}")
-            return None
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def get_shop_subscription_by_id(
         self, subscription_id: str
     ) -> Optional[ShopSubscription]:
         """Get shop subscription by ID"""
-        try:
-            query = (
-                select(ShopSubscription)
-                .where(ShopSubscription.id == subscription_id)
-                .options(
-                    selectinload(ShopSubscription.subscription_plan),
-                    selectinload(ShopSubscription.pricing_tier),
-                )
+        query = (
+            select(ShopSubscription)
+            .where(ShopSubscription.id == subscription_id)
+            .options(
+                selectinload(ShopSubscription.subscription_plan),
+                selectinload(ShopSubscription.pricing_tier),
             )
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"Error getting shop subscription {subscription_id}: {e}")
-            return None
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
 
     async def update_shop_subscription_status(
         self, subscription_id: str, status: SubscriptionStatus
     ) -> bool:
         """Update shop subscription status"""
-        try:
-            query = (
-                update(ShopSubscription)
-                .where(ShopSubscription.id == subscription_id)
-                .values(status=status, updated_at=now_utc())
-            )
-            result = await self.session.execute(query)
-            return result.rowcount > 0
-        except Exception as e:
-            logger.error(f"Error updating shop subscription status: {e}")
-            return False
+        query = (
+            update(ShopSubscription)
+            .where(ShopSubscription.id == subscription_id)
+            .values(status=status, updated_at=now_utc())
+        )
+        result = await self.session.execute(query)
+        return result.rowcount > 0
 
     async def complete_trial_subscription(
         self, shop_id: str, actual_revenue: Decimal
