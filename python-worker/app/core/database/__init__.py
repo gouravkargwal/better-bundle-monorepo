@@ -11,10 +11,6 @@ from .engine import (
     check_engine_health,
     get_database_url,
     get_engine_context,
-    # Backward compatibility functions
-    get_database as get_sqlalchemy_database,
-    close_database as close_sqlalchemy_database,
-    check_database_health as check_sqlalchemy_database_health,
 )
 
 from .session import (

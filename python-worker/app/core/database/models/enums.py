@@ -130,18 +130,21 @@ class SubscriptionPlanType(str, Enum):
     HYBRID = "hybrid"
 
 
-class SubscriptionStatus(str, Enum):
-    """Shop subscription status"""
+class SubscriptionType(Enum):
+    """Type of subscription"""
 
-    TRIAL = "trial"  # In trial period
-    PENDING_APPROVAL = (
-        "pending_approval"  # Trial ended, waiting for subscription approval
-    )
-    TRIAL_COMPLETED = "trial_completed"  # Trial done, awaiting user setup
-    ACTIVE = "active"  # Active subscription
-    SUSPENDED = "suspended"  # Suspended (payment issues, etc.)
-    CANCELLED = "cancelled"  # Cancelled by user
-    EXPIRED = "expired"  # Expired (end date reached)
+    TRIAL = "TRIAL"
+    PAID = "PAID"
+
+
+class SubscriptionStatus(Enum):
+    """Status of subscription"""
+
+    ACTIVE = "ACTIVE"  # Currently active
+    COMPLETED = "COMPLETED"  # Successfully completed
+    CANCELLED = "CANCELLED"  # Cancelled by user/system
+    SUSPENDED = "SUSPENDED"  # Temporarily suspended
+    EXPIRED = "EXPIRED"  # Naturally expired
 
 
 class BillingCycleStatus(str, Enum):

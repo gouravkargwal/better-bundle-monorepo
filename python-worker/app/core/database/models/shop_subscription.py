@@ -1,162 +1,136 @@
 """
-Shop Subscription Model
+Simplified Shop Subscription Model
 
-Links a shop to a subscription plan and tracks the subscription state.
-One active subscription per shop at a time.
+Single table approach: multiple subscription records per shop, only one active.
+Combines trial, paid subscription, and Shopify billing into one unified model.
 """
 
-from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import (
     Column,
     String,
     Boolean,
     ForeignKey,
-    Index,
     Enum as SQLEnum,
-    UniqueConstraint,
     Numeric,
+    Text,
+    Integer,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
-from .enums import SubscriptionStatus
-from .subscription_plan import SubscriptionPlan
-from .pricing_tier import PricingTier
+from .enums import SubscriptionType, SubscriptionStatus
 
 
 class ShopSubscription(BaseModel, ShopMixin):
     """
-    Shop Subscription
-
-    Links a shop to a subscription plan and tracks the subscription state.
-    One active subscription per shop at a time.
+    Unified Shop Subscription Model - keeps essential relationships
     """
 
     __tablename__ = "shop_subscriptions"
 
-    # Foreign keys
+    # ===== SUBSCRIPTION TYPE & STATUS =====
+    subscription_type = Column(
+        SQLEnum(SubscriptionType, name="subscription_type_enum"),
+        nullable=False,
+        default=SubscriptionType.TRIAL,
+        index=True,
+    )
+
+    status = Column(
+        SQLEnum(SubscriptionStatus, name="subscription_status_enum"),
+        nullable=False,
+        default=SubscriptionStatus.ACTIVE,
+        index=True,
+    )
+
+    # ===== KEEP ESSENTIAL FOREIGN KEYS =====
     subscription_plan_id = Column(
         String(255),
         ForeignKey("subscription_plans.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=False,  # This is required for plan configuration
         index=True,
     )
     pricing_tier_id = Column(
         String(255),
         ForeignKey("pricing_tiers.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=False,  # This determines regional pricing!
         index=True,
     )
 
-    # Subscription state
-    status = Column(
-        SQLEnum(SubscriptionStatus, name="subscription_status_enum"),
-        nullable=False,
-        default=SubscriptionStatus.TRIAL,
-        index=True,
-    )
+    # ===== TRIAL-SPECIFIC FIELDS =====
+    # These override the pricing_tier defaults when needed
+    trial_threshold_override = Column(Numeric(10, 2), nullable=True)
+    trial_duration_days = Column(Integer, nullable=True)
 
-    # Subscription lifecycle
-    start_date = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
-    end_date = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-
-    # State flags
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    # ===== PAID SUBSCRIPTION FIELDS =====
+    user_chosen_cap_amount = Column(Numeric(10, 2), nullable=True)
     auto_renew = Column(Boolean, default=True, nullable=False)
 
-    # Subscription metadata
-    subscription_metadata = Column(String(2000), nullable=True)  # JSON string
+    # ===== SHOPIFY INTEGRATION (MOVED HERE) =====
+    shopify_subscription_id = Column(String(255), nullable=True, index=True)
+    shopify_line_item_id = Column(String(255), nullable=True)
+    shopify_status = Column(String(50), nullable=True)
+    confirmation_url = Column(Text, nullable=True)
 
-    # User-chosen cap amount
-    user_chosen_cap_amount = Column(Numeric(10, 2), nullable=True)
-
-    # Timestamps
-    activated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
-    suspended_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    # ===== LIFECYCLE TIMESTAMPS =====
+    started_at = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    completed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
-    # Relationships
+    # ===== STATE & METADATA =====
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    shop_subscription_metadata = Column(JSONB, nullable=True)
+
+    # ===== KEEP ESSENTIAL RELATIONSHIPS =====
     shop = relationship("Shop", back_populates="shop_subscriptions")
     subscription_plan = relationship(
         "SubscriptionPlan", back_populates="shop_subscriptions"
     )
     pricing_tier = relationship("PricingTier", back_populates="shop_subscriptions")
-    subscription_trial = relationship(
-        "SubscriptionTrial",
-        back_populates="shop_subscription",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-    billing_cycles = relationship(
-        "BillingCycle", back_populates="shop_subscription", cascade="all, delete-orphan"
-    )
-    shopify_subscription = relationship(
-        "ShopifySubscription",
-        back_populates="shop_subscription",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-    billing_invoices = relationship(
-        "BillingInvoice",
-        back_populates="shop_subscription",
-        cascade="all, delete-orphan",
+
+    # Keep operational relationships
+    billing_cycles = relationship("BillingCycle", back_populates="shop_subscription")
+    commission_records = relationship(
+        "CommissionRecord", back_populates="shop_subscription"
     )
 
-    # Indexes and constraints
-    __table_args__ = (
-        Index("ix_shop_subscription_shop", "shop_id"),
-        Index("ix_shop_subscription_plan", "subscription_plan_id"),
-        Index("ix_shop_subscription_tier", "pricing_tier_id"),
-        Index("ix_shop_subscription_status", "status"),
-        Index("ix_shop_subscription_active", "is_active"),
-        Index("ix_shop_subscription_dates", "start_date", "end_date"),
-        # Unique constraint: one active subscription per shop
-        UniqueConstraint(
-            "shop_id",
-            name="uq_shop_subscription_active",
-        ),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ShopSubscription(shop_id={self.shop_id}, plan_id={self.subscription_plan_id}, status={self.status.value})>"
+    # ===== SMART PROPERTIES USING PRICING TIER =====
 
     @property
-    def is_trial(self) -> bool:
-        """Check if subscription is in trial phase"""
-        return self.status == SubscriptionStatus.TRIAL
-
-    @property
-    def is_active_subscription(self) -> bool:
-        """Check if subscription is active (not trial, not cancelled)"""
+    def effective_trial_threshold(self) -> Decimal:
+        """Get trial threshold from pricing tier or override"""
+        if self.trial_threshold_override:
+            return self.trial_threshold_override
         return (
-            self.is_active
-            and self.status == SubscriptionStatus.ACTIVE
-            and (self.end_date is None or self.end_date > datetime.utcnow())
+            self.pricing_tier.trial_threshold_amount
+            if self.pricing_tier
+            else Decimal("75.00")
         )
 
     @property
-    def is_pending_approval(self) -> bool:
-        """Check if subscription is pending approval"""
-        return self.status == SubscriptionStatus.PENDING_APPROVAL
+    def effective_commission_rate(self) -> Decimal:
+        """Get commission rate from pricing tier"""
+        return (
+            self.pricing_tier.commission_rate if self.pricing_tier else Decimal("0.03")
+        )
 
     @property
-    def is_suspended(self) -> bool:
-        """Check if subscription is suspended"""
-        return self.status == SubscriptionStatus.SUSPENDED
+    def currency(self) -> str:
+        """Get currency from pricing tier"""
+        return self.pricing_tier.currency if self.pricing_tier else "USD"
 
     @property
-    def is_cancelled(self) -> bool:
-        """Check if subscription is cancelled"""
-        return self.status == SubscriptionStatus.CANCELLED
+    def region_info(self) -> dict:
+        """Get region metadata from pricing tier"""
+        if self.pricing_tier and self.pricing_tier.metadata:
+            return self.pricing_tier.metadata
+        return {}
 
     @property
-    def days_remaining(self) -> int:
-        """Calculate days remaining in subscription"""
-        if not self.end_date:
-            return -1  # No end date (perpetual)
-
-        now = datetime.utcnow()
-        if self.end_date <= now:
-            return 0
-
-        return (self.end_date - now).days
+    def effective_cap_amount(self) -> Decimal:
+        """Get effective cap - user choice or fall back to trial threshold"""
+        if self.is_paid and self.user_chosen_cap_amount:
+            return self.user_chosen_cap_amount
+        return self.effective_trial_threshold

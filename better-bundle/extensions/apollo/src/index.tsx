@@ -19,7 +19,6 @@ extend(
         ? String(initialPurchase.customerId)
         : undefined; // ✅ Ensure string
       const orderId = String(initialPurchase.referenceId); // ✅ Ensure string
-      console.log(initialPurchase, "initialPurchase");
 
       const purchasedProducts = initialPurchase.lineItems.map((item: any) => ({
         id: item.product.id.toString(),

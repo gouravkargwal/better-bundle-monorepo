@@ -24,9 +24,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const suspensionStatus = await checkServiceSuspensionByDomain(shop);
     if (suspensionStatus.isSuspended) {
-      console.log(
-        `⏸️ Skipping refund processing for ${shop} - services suspended (${suspensionStatus.reason})`,
-      );
       return json({
         success: true,
         message: "Refund processing skipped - services suspended",

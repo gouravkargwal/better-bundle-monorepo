@@ -74,6 +74,9 @@ class BillingServiceV2:
                 shop_subscription = await self.billing_repository.get_shop_subscription(
                     shop_id
                 )
+                logger.info(
+                    f"Shop subscription: {shop_subscription}---------------------->"
+                )
                 await self._check_trial_completion(shop_id, shop_subscription)
 
                 # 3. Handle billing based on subscription status

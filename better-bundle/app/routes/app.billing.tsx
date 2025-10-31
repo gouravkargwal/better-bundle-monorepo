@@ -26,7 +26,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shopRecord.id,
       admin,
     );
-    console.log("billingState", billingState);
 
     // Check URL parameters for callback status
     const url = new URL(request.url);

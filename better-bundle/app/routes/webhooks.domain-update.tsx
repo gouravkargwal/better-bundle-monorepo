@@ -11,9 +11,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   try {
-    const body = await request.json();
-    console.log("🔔 Domain update webhook received:", body);
-
     // Fetch current shop details from Shopify API to get the latest domain info
     const shopResponse = await admin.graphql(`
       query {
@@ -49,13 +46,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         updated_at: new Date(),
       },
     });
-
-    console.log(
-      "✅ Webhook updated custom domain for shop:",
-      session.shop,
-      "to:",
-      customDomain,
-    );
 
     return json({
       success: true,

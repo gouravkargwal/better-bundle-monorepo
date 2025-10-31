@@ -281,20 +281,9 @@ class AttributionEngine:
 
             if commission.billing_phase == BillingPhase.TRIAL:
                 # Check if trial threshold reached
-                trial_status = (
-                    await self.commission_service.handle_trial_threshold_check(shop_id)
+                logger.info(
+                    f"✅ Trial commission created: ${commission.commission_earned}"
                 )
-
-                if trial_status.get("threshold_reached"):
-                    logger.warning(
-                        f"🎯 Trial threshold reached for shop {shop_id}! "
-                        f"${trial_status.get('total_trial_revenue')} >= "
-                        f"${trial_status.get('trial_threshold')}"
-                    )
-
-                    # Note: Trial threshold completion is handled by the billing service
-                    # in the main attribution flow, not here in post-commission checks.
-                    # This is just a warning/logging mechanism.
 
             elif commission.billing_phase == BillingPhase.PAID:
                 # Check usage percentage

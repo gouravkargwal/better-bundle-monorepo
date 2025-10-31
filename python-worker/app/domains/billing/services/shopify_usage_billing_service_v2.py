@@ -6,24 +6,16 @@ Uses shopify_subscriptions table instead of billing_plans.
 """
 
 import logging
-import json
-from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
-from app.shared.helpers import now_utc
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
 
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
 from app.core.database.models import (
-    ShopSubscription,
-    ShopifySubscription,
-    BillingCycle,
     SubscriptionStatus,
-    ShopifySubscriptionStatus,
 )
 
 logger = logging.getLogger(__name__)

@@ -38,7 +38,7 @@ export class JWTManager {
     try {
       return await this.refreshToken(shopDomain, customerId);
     } catch (error) {
-      console.log("❌ Apollo: Error fetching new token:", error);
+      console.error("❌ Apollo: Error fetching new token:", error);
       return null;
     }
   }
@@ -69,7 +69,7 @@ export class JWTManager {
 
       return tokenInfo.token;
     } catch (error) {
-      console.log("❌ Apollo: Error in refreshToken:", error);
+      console.error("❌ Apollo: Error in refreshToken:", error);
       return null;
     } finally {
       this.refreshPromise = null;

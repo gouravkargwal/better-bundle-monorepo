@@ -7,7 +7,6 @@ Simplified billing system with all functionality organized in one place.
 # Core Services
 from .services.billing_service_v2 import BillingServiceV2
 from .services.billing_scheduler_service import BillingSchedulerService
-from .services.billing_calculator import BillingCalculator
 
 # Repositories
 from .repositories.billing_repository_v2 import BillingRepositoryV2, BillingPeriod
@@ -19,7 +18,6 @@ __all__ = [
     # Services
     "BillingServiceV2",
     "BillingSchedulerService",
-    "BillingCalculator",
     # Repositories
     "BillingRepositoryV2",
     "BillingPeriod",

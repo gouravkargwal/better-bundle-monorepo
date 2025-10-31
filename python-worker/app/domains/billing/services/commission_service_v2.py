@@ -2,7 +2,7 @@
 Commission Service V2
 
 Updated commission service to work with the new redesigned billing system.
-Uses billing_cycles instead of calculating cycles on-the-fly.
+Uses unified subscription model instead of separate trial/shopify tables.
 """
 
 import logging
@@ -23,6 +23,7 @@ from app.core.database.models.enums import (
     BillingPhase,
     CommissionStatus,
     ChargeType,
+    SubscriptionType,
     SubscriptionStatus,
 )
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class CommissionServiceV2:
-    """Updated service for managing commission records with new billing system"""
+    """Updated service for managing commission records with unified subscription system"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -41,7 +42,7 @@ class CommissionServiceV2:
         self.commission_repository = CommissionRepository(session)
         self.purchase_attribution_repository = PurchaseAttributionRepository(session)
 
-    # ============= CREATION =============
+    # ============= MAIN CREATION =============
 
     async def create_commission_record(
         self,
@@ -69,8 +70,10 @@ class CommissionServiceV2:
                 logger.error(f"❌ No subscription for shop {shop_id}")
                 return None
 
-            # Calculate commission
-            commission_data = self._calculate_commission(purchase_attr)
+            # Calculate commission using pricing tier
+            commission_data = self._calculate_commission(
+                purchase_attr, shop_subscription
+            )
 
             # Skip creating commission if no revenue to attribute
             if commission_data["attributed_revenue"] <= 0:
@@ -80,8 +83,8 @@ class CommissionServiceV2:
                 )
                 return None
 
-            # Create commission based on subscription status
-            commission = await self._create_commission_by_status(
+            # Create commission based on subscription type and status
+            commission = await self._create_commission_by_type(
                 shop_id,
                 purchase_attribution_id,
                 shop_subscription,
@@ -92,7 +95,8 @@ class CommissionServiceV2:
             if commission:
                 await self.commission_repository.commit()
                 logger.info(
-                    f"✅ Created commission: ${commission.commission_earned} ({commission.billing_phase.value})"
+                    f"✅ Created commission: ${commission.commission_earned} "
+                    f"({commission.billing_phase.value}, {commission.charge_type.value})"
                 )
 
             return commission
@@ -101,6 +105,8 @@ class CommissionServiceV2:
             logger.error(f"❌ Error creating commission: {e}")
             await self.commission_repository.rollback()
             return None
+
+    # ============= TRIAL COMMISSION =============
 
     async def _create_trial_commission(
         self,
@@ -114,18 +120,10 @@ class CommissionServiceV2:
     ) -> Optional[CommissionRecord]:
         """Create commission record for trial phase."""
         try:
-            # Get trial info
-            trial = await self.billing_repository.get_subscription_trial(
-                shop_subscription.id
+            # Get current trial revenue from commission records
+            current_trial_revenue = (
+                await self.billing_repository.calculate_trial_revenue(shop_id)
             )
-            if not trial:
-                logger.error(
-                    f"❌ No trial found for subscription {shop_subscription.id}"
-                )
-                return None
-
-            # Get current trial revenue (calculated dynamically)
-            current_trial_revenue = await self._get_trial_current_revenue(shop_id)
 
             # Create commission record
             commission = self._build_trial_commission(
@@ -141,9 +139,9 @@ class CommissionServiceV2:
 
             await self.commission_repository.save(commission)
 
-            # Check if trial should be completed based on actual revenue
+            # Check trial completion using repository method
             await self.billing_repository.check_trial_completion(
-                shop_subscription.id, current_trial_revenue + attributed_revenue
+                shop_id, current_trial_revenue + attributed_revenue
             )
 
             return commission
@@ -151,53 +149,6 @@ class CommissionServiceV2:
         except Exception as e:
             logger.error(f"❌ Error creating trial commission: {e}")
             return None
-
-    async def _suspend_shop_for_cap_reached(self, shop_id: str) -> None:
-        """Suspend shop when monthly cap is reached - ATOMIC"""
-        try:
-            from app.core.database.models.shop import Shop
-            from sqlalchemy import update
-
-            # ✅ ATOMIC: Only suspend if shop is currently active
-            shop_update = (
-                update(Shop)
-                .where(
-                    Shop.id == shop_id,
-                    Shop.is_active == True,  # Only suspend if currently active
-                    Shop.suspension_reason
-                    != "monthly_cap_reached",  # Not already suspended for cap
-                )
-                .values(
-                    is_active=False,
-                    suspended_at=now_utc(),
-                    suspension_reason="monthly_cap_reached",
-                    service_impact="suspended",
-                    updated_at=now_utc(),
-                )
-            )
-
-            result = await self.session.execute(shop_update)
-
-            if result.rowcount > 0:
-                logger.warning(
-                    f"🛑 Shop {shop_id} suspended due to monthly cap reached"
-                )
-            else:
-                logger.debug(f"Shop {shop_id} was already suspended or not found")
-
-        except Exception as e:
-            logger.error(f"❌ Error suspending shop {shop_id}: {e}")
-            raise
-
-    async def _get_trial_current_revenue(self, shop_id: str) -> Decimal:
-        """Get total trial revenue for shop."""
-        try:
-            return await self.purchase_attribution_repository.get_total_revenue_by_shop(
-                shop_id
-            )
-        except Exception as e:
-            logger.error(f"Error getting trial accumulated revenue: {e}")
-            return Decimal("0")
 
     def _build_trial_commission(
         self,
@@ -226,17 +177,15 @@ class CommissionServiceV2:
             billing_cycle_end=None,
             cycle_usage_before=Decimal("0"),
             cycle_usage_after=Decimal("0"),
-            capped_amount=Decimal("0"),  # No cap during trial
+            capped_amount=shop_subscription.effective_trial_threshold,
             trial_accumulated=trial_accumulated,
             billing_phase=BillingPhase.TRIAL,
             status=CommissionStatus.TRIAL_PENDING,
             charge_type=ChargeType.TRIAL,
-            currency=(
-                shop_subscription.pricing_tier.currency
-                if shop_subscription.pricing_tier
-                else "USD"
-            ),
+            currency=shop_subscription.currency,
         )
+
+    # ============= PAID COMMISSION =============
 
     async def _create_paid_commission(
         self,
@@ -285,7 +234,7 @@ class CommissionServiceV2:
                 current_cycle.id, charge_data["actual_charge"]
             )
 
-            # ✅ SUSPEND SHOP if cap is completely reached
+            # Suspend shop if cap is completely reached
             if charge_data["charge_type"] == ChargeType.REJECTED:
                 await self._suspend_shop_for_cap_reached(shop_id)
 
@@ -297,7 +246,7 @@ class CommissionServiceV2:
 
     def _calculate_charge_amounts(
         self, commission_earned: Decimal, remaining_capacity: Decimal
-    ) -> Dict[str, Decimal]:
+    ) -> Dict[str, Any]:
         """Calculate charge amounts based on cap."""
         if remaining_capacity <= 0:
             return {
@@ -330,7 +279,7 @@ class CommissionServiceV2:
         attributed_revenue: Decimal,
         commission_earned: Decimal,
         commission_rate: Decimal,
-        charge_data: Dict[str, Decimal],
+        charge_data: Dict[str, Any],
         current_cycle: BillingCycle,
         shop_subscription: ShopSubscription,
     ) -> CommissionRecord:
@@ -355,57 +304,45 @@ class CommissionServiceV2:
             billing_phase=BillingPhase.PAID,
             status=CommissionStatus.PENDING,
             charge_type=charge_data["charge_type"],
-            currency=(
-                shop_subscription.pricing_tier.currency
-                if shop_subscription.pricing_tier
-                else "USD"
-            ),
+            currency=shop_subscription.currency,
         )
 
-    async def _create_rejected_commission(
-        self,
-        shop_id: str,
-        purchase_attribution_id: str,
-        current_cycle: BillingCycle,
-        attributed_revenue: Decimal,
-        commission_earned: Decimal,
-        commission_rate: Decimal,
-        purchase_attr: PurchaseAttribution,
-    ) -> Optional[CommissionRecord]:
-        """Create rejected commission when cap is reached"""
+    async def _suspend_shop_for_cap_reached(self, shop_id: str) -> None:
+        """Suspend shop when monthly cap is reached - ATOMIC"""
         try:
-            commission = CommissionRecord(
-                shop_id=shop_id,
-                purchase_attribution_id=purchase_attribution_id,
-                billing_plan_id=None,
-                billing_cycle_id=current_cycle.id,
-                order_id=str(purchase_attr.order_id),
-                order_date=purchase_attr.purchase_at,
-                attributed_revenue=attributed_revenue,
-                commission_rate=commission_rate,
-                commission_earned=commission_earned,
-                commission_charged=Decimal("0"),
-                commission_overflow=commission_earned,
-                billing_cycle_start=current_cycle.start_date,
-                billing_cycle_end=current_cycle.end_date,
-                cycle_usage_before=current_cycle.usage_amount,
-                cycle_usage_after=current_cycle.usage_amount,
-                capped_amount=current_cycle.current_cap_amount,
-                trial_accumulated=Decimal("0"),
-                billing_phase=BillingPhase.PAID,
-                status=CommissionStatus.REJECTED,
-                charge_type=ChargeType.REJECTED,
-                currency="USD",  # Default currency
-                notes="Cap reached before this commission",
+            from app.core.database.models.shop import Shop
+            from sqlalchemy import update
+
+            # Only suspend if shop is currently active
+            shop_update = (
+                update(Shop)
+                .where(
+                    Shop.id == shop_id,
+                    Shop.is_active == True,  # Only suspend if currently active
+                    Shop.suspension_reason
+                    != "monthly_cap_reached",  # Not already suspended for cap
+                )
+                .values(
+                    is_active=False,
+                    suspended_at=now_utc(),
+                    suspension_reason="monthly_cap_reached",
+                    service_impact="suspended",
+                    updated_at=now_utc(),
+                )
             )
 
-            await self.commission_repository.save(commission)
+            result = await self.session.execute(shop_update)
 
-            return commission
+            if result.rowcount > 0:
+                logger.warning(
+                    f"🛑 Shop {shop_id} suspended due to monthly cap reached"
+                )
+            else:
+                logger.debug(f"Shop {shop_id} was already suspended or not found")
 
         except Exception as e:
-            logger.error(f"❌ Error creating rejected commission: {e}")
-            return None
+            logger.error(f"❌ Error suspending shop {shop_id}: {e}")
+            raise
 
     # ============= SHOPIFY RECORDING =============
 
@@ -427,7 +364,6 @@ class CommissionServiceV2:
         try:
             # Get commission record
             commission = await self.commission_repository.get_by_id(commission_id)
-            logger.info(f"Commission to record to Shopify: {commission}")
             if not commission:
                 logger.error(f"❌ Commission {commission_id} not found")
                 return {"success": False, "error": "commission_not_found"}
@@ -462,10 +398,25 @@ class CommissionServiceV2:
                 logger.error(f"❌ Billing cycle not found")
                 return {"success": False, "error": "billing_cycle_not_found"}
 
-            # Check if cap already reached
+            # Get subscription for Shopify integration info
+            shop_subscription = (
+                await self.billing_repository.get_shop_subscription_by_id(
+                    billing_cycle.shop_subscription_id
+                )
+            )
+            if not shop_subscription:
+                logger.error(f"❌ Shop subscription not found")
+                return {"success": False, "error": "subscription_not_found"}
+
+            # Check if we have charge amount
             if commission.commission_charged <= 0:
                 logger.warning(f"⚠️ Commission has no charge amount: {commission_id}")
                 return {"success": False, "error": "no_charge_amount"}
+
+            # Check if we have Shopify line item ID
+            if not shop_subscription.shopify_line_item_id:
+                logger.error(f"❌ No Shopify line item ID found")
+                return {"success": False, "error": "no_shopify_line_item"}
 
             # Generate idempotency key
             idempotency_key = (
@@ -485,7 +436,7 @@ class CommissionServiceV2:
                     shop_id=shop.id,
                     shop_domain=shop.shop_domain,
                     access_token=shop.access_token,
-                    subscription_line_item_id=billing_cycle.shop_subscription.shopify_subscription.shopify_line_item_id,
+                    subscription_line_item_id=shop_subscription.shopify_line_item_id,
                     description=f"Better Bundle - Order {commission.order_id}",
                     amount=commission.commission_charged,
                     currency=commission.currency,
@@ -589,9 +540,7 @@ class CommissionServiceV2:
         """Get all pending commissions that need to be recorded to Shopify"""
         try:
             # Get all commissions and filter for pending ones
-            all_commissions = await self.commission_repository.get_all(
-                limit * 10
-            )  # Get more to filter
+            all_commissions = await self.commission_repository.get_all(limit * 10)
 
             pending_commissions = [
                 c
@@ -656,73 +605,6 @@ class CommissionServiceV2:
                 "charge_rate": 0,
             }
 
-    # ============= TRIAL THRESHOLD CHECK =============
-
-    async def handle_trial_threshold_check(self, shop_id: str) -> Dict[str, Any]:
-        """
-        Check if trial threshold has been reached for a shop.
-
-        Args:
-            shop_id: Shop ID to check
-
-        Returns:
-            Dictionary with threshold status information
-        """
-        try:
-            # Get shop subscription
-            shop_subscription = await self.billing_repository.get_shop_subscription(
-                shop_id
-            )
-            if not shop_subscription:
-                return {
-                    "threshold_reached": False,
-                    "total_trial_revenue": 0,
-                    "trial_threshold": 0,
-                    "error": "No subscription found",
-                }
-
-            # Get trial information
-            trial = await self.billing_repository.get_subscription_trial(
-                shop_subscription.id
-            )
-            if not trial:
-                return {
-                    "threshold_reached": False,
-                    "total_trial_revenue": 0,
-                    "trial_threshold": 0,
-                    "error": "No trial found",
-                }
-
-            # Get current trial revenue from purchase attributions
-            revenue_query = select(
-                func.coalesce(func.sum(PurchaseAttribution.total_revenue), 0)
-            ).where(PurchaseAttribution.shop_id == shop_id)
-
-            revenue_result = await self.session.execute(revenue_query)
-            total_trial_revenue = Decimal(str(revenue_result.scalar_one()))
-
-            # Check if threshold reached
-            threshold_reached = total_trial_revenue >= trial.threshold_amount
-
-            return {
-                "threshold_reached": threshold_reached,
-                "total_trial_revenue": float(total_trial_revenue),
-                "trial_threshold": float(trial.threshold_amount),
-                "remaining_revenue": float(
-                    max(Decimal("0"), trial.threshold_amount - total_trial_revenue)
-                ),
-                "trial_status": trial.status.value,
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error checking trial threshold: {e}")
-            return {
-                "threshold_reached": False,
-                "total_trial_revenue": 0,
-                "trial_threshold": 0,
-                "error": str(e),
-            }
-
     # ============= HELPER METHODS =============
 
     async def _get_existing_commission(
@@ -764,11 +646,11 @@ class CommissionServiceV2:
             return None
 
     def _calculate_commission(
-        self, purchase_attr: PurchaseAttribution
+        self, purchase_attr: PurchaseAttribution, shop_subscription: ShopSubscription
     ) -> Dict[str, Decimal]:
-        """Calculate commission data."""
+        """Calculate commission data using subscription's pricing tier."""
         attributed_revenue = Decimal(str(purchase_attr.total_revenue))
-        commission_rate = Decimal("0.03")  # 3%
+        commission_rate = shop_subscription.effective_commission_rate
         commission_earned = attributed_revenue * commission_rate
 
         return {
@@ -777,7 +659,7 @@ class CommissionServiceV2:
             "commission_earned": commission_earned,
         }
 
-    async def _create_commission_by_status(
+    async def _create_commission_by_type(
         self,
         shop_id: str,
         purchase_attribution_id: str,
@@ -785,8 +667,13 @@ class CommissionServiceV2:
         commission_data: Dict[str, Decimal],
         purchase_attr: PurchaseAttribution,
     ) -> Optional[CommissionRecord]:
-        """Create commission based on subscription status."""
-        if shop_subscription.status == SubscriptionStatus.TRIAL:
+        """Create commission based on subscription type and status."""
+
+        # Check subscription type AND ensure it's active
+        if (
+            shop_subscription.subscription_type == SubscriptionType.TRIAL
+            and shop_subscription.status == SubscriptionStatus.ACTIVE
+        ):
             return await self._create_trial_commission(
                 shop_id,
                 purchase_attribution_id,
@@ -796,7 +683,10 @@ class CommissionServiceV2:
                 commission_data["commission_rate"],
                 purchase_attr,
             )
-        elif shop_subscription.status == SubscriptionStatus.ACTIVE:
+        elif (
+            shop_subscription.subscription_type == SubscriptionType.PAID
+            and shop_subscription.status == SubscriptionStatus.ACTIVE
+        ):
             return await self._create_paid_commission(
                 shop_id,
                 purchase_attribution_id,
@@ -808,6 +698,7 @@ class CommissionServiceV2:
             )
         else:
             logger.warning(
-                f"⚠️ Shop {shop_id} status is {shop_subscription.status.value}, not processing commission"
+                f"⚠️ Shop {shop_id} type: {shop_subscription.subscription_type.value}, "
+                f"status: {shop_subscription.status.value} - not processing commission"
             )
             return None

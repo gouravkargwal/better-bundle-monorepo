@@ -91,7 +91,6 @@ function Extension() {
       });
 
       if (result.type === "success") {
-        console.log("✅ Mercury: Product added to cart");
         setAddedProducts((prev) => new Set([...prev, productId]));
 
         // Track add to cart event (not click event)

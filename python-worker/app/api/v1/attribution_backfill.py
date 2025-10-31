@@ -386,13 +386,6 @@ async def trigger_shop_wide_attribution(
     - Comprehensive logging and error handling
     - Dry run mode for testing
     """
-    logger.info(
-        f"🎯 Shop-wide attribution trigger requested for shop {request.shop_id}"
-    )
-    logger.info(f"   - force_recalculate: {request.force_recalculate}")
-    logger.info(f"   - batch_size: {request.batch_size}")
-    logger.info(f"   - dry_run: {request.dry_run}")
-
     try:
         # Analyze shop's attribution status
         attribution_analysis = await _find_shop_orders_with_attribution_status(

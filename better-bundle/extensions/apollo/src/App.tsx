@@ -47,21 +47,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     shopDomain,
     purchasedProducts = [],
   } = initialState;
-  console.log(initialState, "initialState");
-  console.log(shopDomain, "shopDomain");
-  console.log(storage, "storage");
-  console.log(customerId, "customerId");
-  console.log(orderId, "orderId");
-  console.log(sessionId, "sessionId");
-  console.log(recommendations, "recommendations");
-  console.log(purchasedProducts, "purchasedProducts");
-  console.log(jwtManager, "jwtManager");
-  console.log(selectedOptions, "selectedOptions");
-  console.log(quantities, "quantities");
-  console.log(calculatedPurchase, "calculatedPurchase");
-  console.log(isCalculating, "isCalculating");
-  console.log(isLoading, "isLoading");
-  console.log(error, "error");
+
   // Initialize JWT Manager with storage
   useEffect(() => {
     if (shopDomain && storage) {
