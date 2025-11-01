@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
-import { useRecommendations } from "./hooks/useMercuryRecommendations.js";
-import { analyticsApi } from "./api/analytics.js";
+import { useRecommendations } from "./hooks/useRecommendations.js";
+import { trackAddToCart } from "./api/analytics.js";
 
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
@@ -94,7 +94,8 @@ function Extension() {
         setAddedProducts((prev) => new Set([...prev, productId]));
 
         // Track add to cart event (not click event)
-        await analyticsApi.trackAddToCart(
+        await trackAddToCart(
+          storage,
           shopDomain,
           "checkout_page",
           productId,
