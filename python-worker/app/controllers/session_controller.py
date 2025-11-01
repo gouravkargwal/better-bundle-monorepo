@@ -33,14 +33,18 @@ class SessionController:
             request.browser_session_id
         )  # Can be None, backend will generate
 
+        # Convert boolean flags to None if they weren't extracted (shouldn't happen but safety check)
+        user_agent = request.user_agent if isinstance(request.user_agent, str) else None
+        ip_address = request.ip_address if isinstance(request.ip_address, str) else None
+
         # Get or create unified session
         session = await self.session_service.get_or_create_session(
             shop_id=shop_id,
             customer_id=request.customer_id,
             browser_session_id=browser_session_id,
-            user_agent=request.user_agent,
+            user_agent=user_agent,
             client_id=request.client_id,
-            ip_address=request.ip_address,
+            ip_address=ip_address,
             referrer=request.referrer,
         )
 

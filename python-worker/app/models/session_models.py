@@ -12,8 +12,12 @@ class SessionRequest(BaseModel):
         None, description="Browser session identifier"
     )
     client_id: Optional[str] = Field(None, description="Shopify client ID (optional)")
-    user_agent: Optional[str] = Field(None, description="User agent string")
-    ip_address: Optional[str] = Field(None, description="IP address")
+    user_agent: Optional[str | bool] = Field(
+        None, description="User agent string or boolean (true = extract from headers)"
+    )
+    ip_address: Optional[str | bool] = Field(
+        None, description="IP address or boolean (true = extract from headers)"
+    )
     referrer: Optional[str] = Field(None, description="Referrer URL")
     page_url: Optional[str] = Field(None, description="Current page URL")
     extension_type: Optional[str] = Field(

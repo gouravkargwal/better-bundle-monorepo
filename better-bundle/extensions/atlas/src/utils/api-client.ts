@@ -1,183 +1,28 @@
-import { BACKEND_URL } from "../config/constants";
+import { BACKEND_URL, STORAGE_KEYS } from "../config/constants";
 import { logger } from "./logger";
+import { makeAuthenticatedRequest } from "./jwt";
 
-interface TokenInfo {
-  token: string;
-  expiresIn: number;
-  shopDomain: string;
-  shopStatus: string;
-  permissions: string[];
-}
+const getBrowserSessionIdFromStorage = async (
+  localStorage: any,
+): Promise<string | null> => {
+  return await localStorage.getItem(STORAGE_KEYS.BROWSER_SESSION_ID);
+};
 
-class JWTManager {
-  private TOKEN_KEY = "betterbundle_jwt_token";
-  private TOKEN_EXPIRY_KEY = "betterbundle_jwt_expiry";
-  private SHOP_DOMAIN_KEY = "betterbundle_shop_domain";
-  private refreshPromise: Promise<TokenInfo> | null = null;
-
-  constructor(private sessionStorage: any) {}
-
-  async getValidToken(
-    shopDomain: string,
-    customerId?: string | null,
-  ): Promise<string | null> {
-    const storedToken = await this.getStoredToken();
-
-    if (
-      storedToken &&
-      storedToken.token &&
-      storedToken.shopDomain === shopDomain &&
-      this.isTokenNotExpired(storedToken)
-    ) {
-      return storedToken.token;
-    }
-
-    try {
-      return await this.refreshToken(shopDomain, customerId);
-    } catch (error) {
-      logger.error({ error }, "Atlas pixel: Failed to get valid token");
-      return null;
-    }
-  }
-
-  private async refreshToken(
-    shopDomain: string,
-    customerId?: string | null,
-  ): Promise<string | null> {
-    if (this.refreshPromise) {
-      try {
-        return (await this.refreshPromise).token;
-      } catch (error) {
-        return null;
-      }
-    }
-
-    this.refreshPromise = this.fetchNewToken(shopDomain, customerId);
-
-    try {
-      const tokenInfo = await this.refreshPromise;
-      await this.storeToken(tokenInfo);
-      return tokenInfo.token;
-    } catch (error) {
-      logger.error({ error }, "Atlas pixel: Failed to refresh token");
-      return null;
-    } finally {
-      this.refreshPromise = null;
-    }
-  }
-
-  private async fetchNewToken(
-    shopDomain: string,
-    customerId?: string | null,
-  ): Promise<TokenInfo> {
-    const requestBody: any = { shop_domain: shopDomain };
-
-    if (customerId) {
-      requestBody.customer_id = customerId;
-    }
-
-    const response = await fetch(`${BACKEND_URL}/api/v1/auth/shop-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      logger.error({ response }, "Atlas pixel: Failed to fetch new token");
-      throw new Error(`Token generation failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      token: data.token,
-      expiresIn: data.expires_in,
-      shopDomain: data.shop_domain,
-      shopStatus: data.shop_status,
-      permissions: data.permissions,
-    };
-  }
-
-  private isTokenNotExpired(tokenInfo: TokenInfo): boolean {
-    if (!tokenInfo || !tokenInfo.expiresIn) return false;
-    const now = Date.now() / 1000;
-    const expiry = tokenInfo.expiresIn;
-    return expiry - now > 60;
-  }
-
-  private async getStoredToken(): Promise<TokenInfo | null> {
-    try {
-      const token = await this.sessionStorage.getItem(this.TOKEN_KEY);
-      const shopDomain = await this.sessionStorage.getItem(
-        this.SHOP_DOMAIN_KEY,
-      );
-
-      if (!token || !shopDomain) return null;
-
-      return {
-        token,
-        expiresIn: parseInt(
-          (await this.sessionStorage.getItem(this.TOKEN_EXPIRY_KEY)) || "0",
-        ),
-        shopDomain,
-        shopStatus: "unknown",
-        permissions: [],
-      };
-    } catch (error) {
-      logger.error({ error }, "Atlas pixel: Failed to get stored token");
-      return null;
-    }
-  }
-
-  private async storeToken(tokenInfo: TokenInfo): Promise<void> {
-    try {
-      await this.sessionStorage.setItem(this.TOKEN_KEY, tokenInfo.token);
-      const expiryTimestamp =
-        Math.floor(Date.now() / 1000) + tokenInfo.expiresIn;
-      await this.sessionStorage.setItem(
-        this.TOKEN_EXPIRY_KEY,
-        expiryTimestamp.toString(),
-      );
-      await this.sessionStorage.setItem(
-        this.SHOP_DOMAIN_KEY,
-        tokenInfo.shopDomain,
-      );
-    } catch (error) {
-      logger.error({ error }, "Atlas pixel: Failed to store token");
-    }
-  }
-
-  async makeAuthenticatedRequest(
-    url: string,
-    options: RequestInit = {},
-  ): Promise<Response> {
-    return fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
-    });
-  }
-}
-
-const getBrowserSessionId = async (sessionStorage: any): Promise<string> => {
-  let sessionId = await sessionStorage.getItem("unified_browser_session_id");
-  if (!sessionId) {
-    sessionId =
-      "unified_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-    await sessionStorage.setItem("unified_browser_session_id", sessionId);
-  }
-  return sessionId;
+const storeBrowserSessionId = async (
+  localStorage: any,
+  browserSessionId: string,
+): Promise<void> => {
+  await localStorage.setItem(STORAGE_KEYS.BROWSER_SESSION_ID, browserSessionId);
 };
 
 const getOrStoreClientId = async (
   sessionStorage: any,
   clientId: string | null,
 ): Promise<string | null> => {
-  let storedClientId = await sessionStorage.getItem("unified_client_id");
+  let storedClientId = await sessionStorage.getItem(STORAGE_KEYS.CLIENT_ID);
 
   if (clientId && clientId !== storedClientId) {
-    await sessionStorage.setItem("unified_client_id", clientId);
+    await sessionStorage.setItem(STORAGE_KEYS.CLIENT_ID, clientId);
     return clientId;
   }
 
@@ -194,12 +39,13 @@ export const getOrCreateSession = async (
   referrer: string,
   sessionStorage: any,
   clientId: string,
+  localStorage?: any,
 ): Promise<string> => {
   const storedClientId = await getOrStoreClientId(sessionStorage, clientId);
 
-  const storedSessionId = await sessionStorage.getItem("unified_session_id");
+  const storedSessionId = await sessionStorage.getItem(STORAGE_KEYS.SESSION_ID);
   const storedExpiresAt = await sessionStorage.getItem(
-    "unified_session_expires_at",
+    STORAGE_KEYS.SESSION_EXPIRES_AT,
   );
 
   if (
@@ -231,29 +77,31 @@ export const getOrCreateSession = async (
 
   sessionCreationPromise = (async () => {
     try {
-      const jwtManager = new JWTManager(sessionStorage);
-      const token = await jwtManager.getValidToken(shopDomain, customerId);
+      // Get browser_session_id from localStorage if available (backend-generated)
+      // If not available, backend will generate it
+      const storedBrowserSessionId = localStorage
+        ? await getBrowserSessionIdFromStorage(localStorage)
+        : null;
 
-      const url = `${BACKEND_URL}/api/atlas/get-or-create-session`;
-      const browserSessionId = await getBrowserSessionId(sessionStorage);
+      const url = `${BACKEND_URL}/api/session/get-or-create-session`;
 
       const payload = {
         shop_domain: shopDomain,
         customer_id: customerId,
-        browser_session_id: browserSessionId,
+        browser_session_id: storedBrowserSessionId || undefined, // Backend will generate if not provided
         client_id: storedClientId || clientId,
-        user_agent: userAgent,
-        ip_address: null,
+        user_agent: true,
+        ip_address: true,
         referrer: referrer,
         page_url: pageUrl,
+        extension_type: "atlas",
       };
 
-      const response = await fetch(url, {
+      // ✅ Use makeAuthenticatedRequest for automatic token refresh
+      const response = await makeAuthenticatedRequest(sessionStorage, url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token && { Authorization: `Bearer ${token}` }),
-        },
+        shopDomain,
+        customerId,
         body: JSON.stringify(payload),
         keepalive: true,
       });
@@ -273,16 +121,24 @@ export const getOrCreateSession = async (
         const sessionId = result.data.session_id;
         const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
 
-        await sessionStorage.setItem("unified_session_id", sessionId);
+        await sessionStorage.setItem(STORAGE_KEYS.SESSION_ID, sessionId);
         await sessionStorage.setItem(
-          "unified_session_expires_at",
+          STORAGE_KEYS.SESSION_EXPIRES_AT,
           expiresAt.toString(),
         );
 
         if (result.data.client_id) {
           await sessionStorage.setItem(
-            "unified_client_id",
+            STORAGE_KEYS.CLIENT_ID,
             result.data.client_id,
+          );
+        }
+
+        // ✅ Store backend-generated browser_session_id in localStorage
+        if (result.data.browser_session_id && localStorage) {
+          await storeBrowserSessionId(
+            localStorage,
+            result.data.browser_session_id,
           );
         }
 
@@ -313,7 +169,7 @@ export const trackInteraction = async (
   pageUrl: string,
   referrer: string,
   sessionStorage: any,
-  sendBeacon: any,
+  localStorage?: any,
 ): Promise<void> => {
   try {
     const clientId = event?.clientId || null;
@@ -326,14 +182,13 @@ export const trackInteraction = async (
       referrer,
       sessionStorage,
       clientId,
+      localStorage,
     );
-
-    const jwtManager = new JWTManager(sessionStorage);
-    const token = await jwtManager.getValidToken(shopDomain, customerId);
 
     const interactionData = {
       session_id: sessionId,
       shop_domain: shopDomain,
+      extension_type: "atlas", // ✅ Add this required field
       customer_id: customerId,
       interaction_type: interactionType,
       metadata: {
@@ -342,14 +197,13 @@ export const trackInteraction = async (
     };
 
     // Send to unified analytics endpoint
-    const url = `${BACKEND_URL}/api/atlas/track-interaction`;
+    const url = `${BACKEND_URL}/api/interaction/track`;
 
-    const response = await fetch(url, {
+    // ✅ Use makeAuthenticatedRequest for automatic token refresh
+    const response = await makeAuthenticatedRequest(sessionStorage, url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
+      shopDomain,
+      customerId,
       body: JSON.stringify(interactionData),
       keepalive: true,
     });
@@ -369,7 +223,7 @@ export const trackInteraction = async (
     if (result.session_recovery) {
       // Update stored session ID with the new one (unified with other extensions)
       await sessionStorage.setItem(
-        "unified_session_id",
+        STORAGE_KEYS.SESSION_ID,
         result.session_recovery.new_session_id,
       );
     }
@@ -389,25 +243,20 @@ const updateClientIdInBackground = async (
   try {
     const url = `${BACKEND_URL}/api/session/update-client-id`;
 
-    let token: string | null = null;
     if (sessionStorage) {
-      const jwtManager = new JWTManager(sessionStorage);
-      token = await jwtManager.getValidToken(shopDomain, customerId);
+      // ✅ Use makeAuthenticatedRequest for automatic token refresh
+      await makeAuthenticatedRequest(sessionStorage, url, {
+        method: "POST",
+        shopDomain,
+        customerId,
+        body: JSON.stringify({
+          session_id: sessionId,
+          client_id: clientId,
+          shop_domain: shopDomain,
+        }),
+        keepalive: true,
+      });
     }
-
-    await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify({
-        session_id: sessionId,
-        client_id: clientId,
-        shop_domain: shopDomain,
-      }),
-      keepalive: true,
-    });
   } catch (error) {
     logger.error({ error }, "Atlas pixel: Background client_id update failed");
   }

@@ -1,5 +1,5 @@
 import { register } from "@shopify/web-pixels-extension";
-import { SUBSCRIBABLE_EVENTS } from "./config/constants";
+import { SUBSCRIBABLE_EVENTS, STORAGE_KEYS } from "./config/constants";
 import { trackInteraction } from "./utils/api-client";
 import { logger } from "./utils/logger";
 
@@ -24,7 +24,7 @@ register(({ analytics, init, browser }) => {
   const referrer = init?.context?.document?.referrer;
   const shopDomain = init?.data?.shop?.myshopifyDomain;
   const sessionStorage = browser?.sessionStorage;
-  const sendBeacon = browser?.sendBeacon;
+  const localStorage = browser?.localStorage;
 
   // ✅ Use an object to hold mutable state (reference type)
   const state = {
@@ -77,7 +77,7 @@ register(({ analytics, init, browser }) => {
           pageUrl,
           referrer,
           sessionStorage,
-          sendBeacon,
+          localStorage, // ✅ Pass localStorage for browser_session_id storage
         );
       }
     }, "handleCustomerLinking");
@@ -110,7 +110,7 @@ register(({ analytics, init, browser }) => {
 
         if (browser?.sessionStorage) {
           await browser.sessionStorage.setItem(
-            "recommendation_attribution",
+            STORAGE_KEYS.RECOMMENDATION_ATTRIBUTION,
             JSON.stringify(attributionData),
           );
         }
@@ -126,7 +126,7 @@ register(({ analytics, init, browser }) => {
       }
 
       const stored = await browser.sessionStorage.getItem(
-        "recommendation_attribution",
+        STORAGE_KEYS.RECOMMENDATION_ATTRIBUTION,
       );
       if (stored) {
         const attribution = JSON.parse(stored);
@@ -188,7 +188,7 @@ register(({ analytics, init, browser }) => {
           pageUrl,
           referrer,
           sessionStorage,
-          sendBeacon,
+          localStorage, // ✅ Pass localStorage for browser_session_id storage
         );
       }, eventType);
     };
@@ -215,7 +215,7 @@ register(({ analytics, init, browser }) => {
         pageUrl,
         referrer,
         sessionStorage,
-        sendBeacon,
+        localStorage, // ✅ Pass localStorage for browser_session_id storage
       );
     }, "PAGE_VIEWED");
   });
