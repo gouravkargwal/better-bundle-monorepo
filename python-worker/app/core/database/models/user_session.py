@@ -21,7 +21,9 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
 
     __tablename__ = "user_sessions"
 
-    browser_session_id = Column(String(255), nullable=False)
+    browser_session_id = Column(
+        String(255), nullable=True
+    )  # Made nullable as fallback only
     status = Column(String(50), default="active", nullable=False, index=True)
     client_id = Column(String, nullable=True, index=True)  # ✅ NEW: Shopify client ID
     last_active = Column(

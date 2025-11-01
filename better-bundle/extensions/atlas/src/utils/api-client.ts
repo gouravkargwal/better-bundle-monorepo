@@ -241,9 +241,9 @@ export const getOrCreateSession = async (
         shop_domain: shopDomain,
         customer_id: customerId,
         browser_session_id: browserSessionId,
-        client_id: storedClientId || clientId, // Use latest available
+        client_id: storedClientId || clientId,
         user_agent: userAgent,
-        ip_address: null, // Will be detected server-side
+        ip_address: null,
         referrer: referrer,
         page_url: pageUrl,
       };

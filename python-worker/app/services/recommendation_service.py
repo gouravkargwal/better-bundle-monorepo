@@ -4,8 +4,6 @@ Handles all recommendation requests from Shopify extension with context-based ro
 """
 
 import asyncio
-from datetime import datetime
-from fastapi import APIRouter, HTTPException, Header
 from dataclasses import dataclass
 
 from app.shared.helpers import now_utc
@@ -14,7 +12,9 @@ from app.core.logging import get_logger
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.database.session import get_transaction_context
 from app.core.config.settings import settings
-from app.recommandations.models import RecommendationRequest, RecommendationResponse
+from app.models.recommendation_models import (
+    RecommendationRequest,
+)
 from app.recommandations.category_detection import CategoryDetectionService
 from app.recommandations.cache import RecommendationCacheService
 from app.recommandations.hybrid import HybridRecommendationService
@@ -29,10 +29,7 @@ from app.recommandations.client_id_resolver import ClientIdResolver
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/api/v1/recommendations", tags=["recommendations"])
 
-
-# --- Custom Exceptions for Core Logic ---
 # These allow the core logic to be decoupled from FastAPI's HTTPException
 class RecommendationLogicError(Exception):
     """Base exception for recommendation logic errors."""
@@ -437,53 +434,3 @@ async def fetch_recommendations_logic(
         "context": request.context,
         "timestamp": now_utc(),
     }
-
-
-# --- FastAPI Endpoint (Thin Wrapper) ---
-@router.post("/", response_model=RecommendationResponse)
-async def get_recommendations(
-    request: RecommendationRequest, authorization: str = Header(None)
-):
-    """
-    Get recommendations based on context with intelligent fallback system.
-
-    This endpoint provides context-aware recommendations using JWT-based authorization.
-    It uses stateless JWT validation instead of Redis/database checks for better performance.
-    """
-    try:
-        # Extract JWT token from Authorization header
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": "Missing or invalid authorization header",
-                    "message": "Please provide a valid JWT token in Authorization header",
-                    "required_format": "Bearer <jwt_token>",
-                },
-            )
-
-        jwt_token = authorization.split(" ")[1]
-
-        # Pass the request and the bundled services to the core logic function
-        result_data = await fetch_recommendations_logic(request, services)
-
-        return RecommendationResponse(success=True, **result_data)
-
-    except HTTPException:
-        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
-        raise
-    except InvalidInputError as e:
-        # Handle validation errors with a 400 Bad Request
-        raise HTTPException(status_code=400, detail=str(e))
-    except ShopNotFoundError as e:
-        # Handle not found errors with a 404 Not Found
-        raise HTTPException(status_code=404, detail=str(e))
-    except (Exception, RecommendationLogicError) as e:
-        # Handle all other logic or unexpected errors with a 500 Internal Server Error
-        logger.error(
-            f"💥 Recommendation request failed | shop={request.shop_domain} | context={request.context} | error={str(e)}"
-        )
-        raise HTTPException(
-            status_code=500,
-            detail=f"An unexpected error occurred while fetching recommendations.",
-        )
