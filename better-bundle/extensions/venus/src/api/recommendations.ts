@@ -1,7 +1,8 @@
 // API client for recommendation endpoints
 
-import { BACKEND_URL } from "../constant";
-import { type Logger, logger } from "../utils/logger";
+import { BACKEND_URL } from "../config/constants";
+import { logger } from "../utils/logger";
+import { makeAuthenticatedRequest } from "../utils/jwt";
 
 export type ExtensionContext =
   | "homepage"
@@ -70,76 +71,59 @@ export interface RecommendationResponse {
   timestamp: string;
 }
 
-export class RecommendationApiClient {
-  private baseUrl: string;
-  private logger: Logger;
-  private makeAuthenticatedRequest:
-    | ((url: string, options?: RequestInit) => Promise<Response>)
-    | null = null;
+/**
+ * Get recommendations
+ */
+export const getRecommendations = async (
+  storage,
+  request: RecommendationRequest,
+): Promise<RecommendationResponse> => {
+  try {
+    if (!storage) {
+      throw new Error("Storage is required");
+    }
 
-  constructor() {
-    this.baseUrl = BACKEND_URL;
-    this.logger = logger;
-  }
+    if (!request.shop_domain) {
+      throw new Error("shop_domain is required");
+    }
 
-  /**
-   * Set JWT authentication function
-   */
-  setJWT(
-    makeAuthenticatedRequest: (
-      url: string,
-      options?: RequestInit,
-    ) => Promise<Response>,
-  ): void {
-    this.makeAuthenticatedRequest = makeAuthenticatedRequest;
-  }
+    // ✅ Use makeAuthenticatedRequest for automatic token refresh
+    // customerId (user_id) can be null for guest checkouts
+    const response = await makeAuthenticatedRequest(
+      storage,
+      `${BACKEND_URL}/api/v1/recommendations`,
+      {
+        method: "POST",
+        shopDomain: request.shop_domain,
+        customerId: request.user_id || undefined, // Pass undefined instead of null
+        body: JSON.stringify(request),
+      },
+    );
 
-  async getRecommendations(
-    request: RecommendationRequest,
-  ): Promise<RecommendationResponse> {
-    try {
-      // Check if JWT authentication is available
-      if (!this.makeAuthenticatedRequest) {
-        throw new Error("JWT authentication not initialized");
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error("Services suspended");
       }
-
-      // Use JWT authentication for the request
-      const response = await this.makeAuthenticatedRequest(
-        `${this.baseUrl}/api/v1/recommendations`,
+      logger.error(
         {
-          method: "POST",
-          body: JSON.stringify(request),
-        },
-      );
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Services suspended");
-        }
-        this.logger.error(
-          {
-            error: new Error(`HTTP error! status: ${response.status}`),
-            shop_domain: request.shop_domain,
-          },
-          "Failed to fetch recommendations",
-        );
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data;
-    } catch (error) {
-      this.logger.error(
-        {
-          error: error instanceof Error ? error.message : String(error),
+          error: new Error(`HTTP error! status: ${response.status}`),
           shop_domain: request.shop_domain,
         },
         "Failed to fetch recommendations",
       );
-      throw error;
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-  }
-}
 
-// Default instance
-export const recommendationApi = new RecommendationApiClient();
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    logger.error(
+      {
+        error: error instanceof Error ? error.message : String(error),
+        shop_domain: request.shop_domain,
+      },
+      "Failed to fetch Mercury recommendations",
+    );
+    throw error;
+  }
+};
