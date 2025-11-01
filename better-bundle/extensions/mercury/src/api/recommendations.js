@@ -41,13 +41,14 @@ export const getRecommendations = async (storage, request) => {
     };
 
     // ✅ Use makeAuthenticatedRequest for automatic token refresh
+    // customerId (user_id) can be null for guest checkouts
     const response = await makeAuthenticatedRequest(
       storage,
       `${BACKEND_URL}/api/v1/recommendations`,
       {
         method: "POST",
         shopDomain: request.shop_domain,
-        customerId: request.user_id,
+        customerId: request.user_id || undefined, // Pass undefined instead of null
         body: JSON.stringify(mercuryRequest),
       }
     );

@@ -7,7 +7,7 @@ declare module './src/Checkout.jsx' {
 }
 
 //@ts-ignore
-declare module './src/hooks/useMercuryRecommendations.js' {
+declare module './src/hooks/useRecommendations.js' {
   const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
@@ -25,19 +25,19 @@ declare module './src/api/recommendations.js' {
 }
 
 //@ts-ignore
-declare module './src/utils/jwtManager.js' {
-  const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
-  const globalThis: { shopify: typeof shopify };
-}
-
-//@ts-ignore
 declare module './src/utils/logger.js' {
   const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
   const globalThis: { shopify: typeof shopify };
 }
 
 //@ts-ignore
-declare module './src/constant.js' {
+declare module './src/config/constants.js' {
+  const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
+declare module './src/utils/jwt.js' {
   const shopify: import('@shopify/ui-extensions/purchase.checkout.block.render').Api;
   const globalThis: { shopify: typeof shopify };
 }

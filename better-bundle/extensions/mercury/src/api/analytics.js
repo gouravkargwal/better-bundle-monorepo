@@ -21,20 +21,26 @@ const storeBrowserSessionId = async (storage, browserSessionId) => {
 };
 
 const getOrStoreClientId = async (storage, clientId) => {
+  // Mercury extension doesn't have access to client_id from analytics
+  // Only use stored client_id if it exists (might be set by backend)
   let storedClientId = await storage.read(STORAGE_KEYS.CLIENT_ID);
 
+  // Only update if we have a new client_id AND it's different
+  // (In Mercury context, clientId will typically be null)
   if (clientId && clientId !== storedClientId) {
     await storage.write(STORAGE_KEYS.CLIENT_ID, clientId);
     return clientId;
   }
 
-  return storedClientId || clientId;
+  return storedClientId || null;
 };
 
 let sessionCreationPromise = null;
 
 /**
  * Helper function for updating client ID in background
+ * Note: Mercury extension typically doesn't have access to client_id,
+ * so this is rarely called. Only used if backend provides a client_id.
  */
 const updateClientIdInBackground = async (
   sessionId,
@@ -43,6 +49,11 @@ const updateClientIdInBackground = async (
   storage,
   customerId,
 ) => {
+  // Skip if no client_id provided (Mercury doesn't have access to it)
+  if (!clientId) {
+    return;
+  }
+
   try {
     const url = `${BACKEND_URL}/api/session/update-client-id`;
 
@@ -68,17 +79,19 @@ const updateClientIdInBackground = async (
 export const getOrCreateSession = async (
   storage,
   shopDomain,
-  customerId,
+  customerId = null, // Can be null for guest checkouts
   pageUrl = null,
   referrer = null,
   userAgent = null,
-  clientId = null,
+  clientId = null, // Mercury doesn't have access to client_id, typically null
 ) => {
   try {
     if (!storage) {
       throw new Error("Storage is required");
     }
 
+    // Mercury extension doesn't have access to client_id from analytics
+    // We'll only use stored client_id if it exists (might be set by backend)
     const storedClientId = await getOrStoreClientId(storage, clientId);
 
     const storedSessionId = await storage.read(STORAGE_KEYS.SESSION_ID);
@@ -89,6 +102,7 @@ export const getOrCreateSession = async (
       storedExpiresAt &&
       Date.now() < parseInt(storedExpiresAt)
     ) {
+      // Only update client_id if we have a new one (rare in Mercury context)
       if (clientId && clientId !== storedClientId) {
         updateClientIdInBackground(
           storedSessionId,
@@ -121,9 +135,9 @@ export const getOrCreateSession = async (
 
         const payload = {
           shop_domain: shopDomain,
-          customer_id: customerId,
+          customer_id: customerId || undefined, // Can be null for guest checkouts
           browser_session_id: storedBrowserSessionId || undefined, // Backend will generate if not provided
-          client_id: storedClientId || clientId,
+          client_id: storedClientId || clientId || undefined, // Mercury doesn't have access, use stored or undefined
           user_agent: true,
           ip_address: true,
           referrer: referrer || undefined,
@@ -132,10 +146,11 @@ export const getOrCreateSession = async (
         };
 
         // ✅ Use makeAuthenticatedRequest for automatic token refresh
+        // customerId can be null for guest checkouts - JWT will handle it
         const response = await makeAuthenticatedRequest(storage, url, {
           method: "POST",
           shopDomain,
-          customerId,
+          customerId: customerId || undefined, // Pass undefined instead of null
           body: JSON.stringify(payload),
           keepalive: true,
         });
@@ -208,7 +223,7 @@ export const trackUnifiedInteraction = async (storage, request) => {
       session_id: request.session_id,
       shop_domain: request.shop_domain,
       extension_type: "mercury", // ✅ Add this required field
-      customer_id: request.customer_id,
+      customer_id: request.customer_id || undefined, // Can be null for guest checkouts
       interaction_type: request.interaction_type,
       metadata: request.metadata || {},
     };
@@ -217,10 +232,11 @@ export const trackUnifiedInteraction = async (storage, request) => {
     const url = `${BACKEND_URL}/api/interaction/track`;
 
     // ✅ Use makeAuthenticatedRequest for automatic token refresh
+    // customerId can be null for guest checkouts
     const response = await makeAuthenticatedRequest(storage, url, {
       method: "POST",
       shopDomain: request.shop_domain,
-      customerId: request.customer_id,
+      customerId: request.customer_id || undefined, // Pass undefined instead of null
       body: JSON.stringify(interactionData),
       keepalive: true,
     });
