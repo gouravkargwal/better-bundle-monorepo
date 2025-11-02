@@ -6,6 +6,7 @@ interface ROIValueProofSectionProps {
   currency: string;
   commissionRate: number;
   isTrialPhase: boolean;
+  commissionCharged?: number; // Actual commission charged (PAID phase only)
 }
 
 export function ROIValueProofSection({
@@ -13,6 +14,7 @@ export function ROIValueProofSection({
   currency,
   commissionRate,
   isTrialPhase,
+  commissionCharged,
 }: ROIValueProofSectionProps) {
   const formatCurrencyValue = (amount: number, currencyCode: string) => {
     const symbol = getCurrencySymbol(currencyCode);
@@ -20,7 +22,11 @@ export function ROIValueProofSection({
     return `${symbol}${numericAmount.toFixed(2)}`;
   };
 
-  const commissionPaid = totalRevenueGenerated * commissionRate;
+  // ✅ FIX: Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
+  const commissionPaid = isTrialPhase
+    ? totalRevenueGenerated * commissionRate // Trial: calculate expected commission
+    : (commissionCharged ?? totalRevenueGenerated * commissionRate); // Paid: use actual charged amount
+
   const netProfit = totalRevenueGenerated - commissionPaid;
 
   // Calculate percentage kept (more intuitive than ROI)
@@ -149,7 +155,7 @@ export function ROIValueProofSection({
                   🔍 Commission Transparency
                 </Text>
                 <Badge tone="success" size="large">
-                  {(commissionRate * 100).toFixed(1)}% Commission Rate
+                  {`${(commissionRate * 100).toFixed(1)}% Commission Rate`}
                 </Badge>
               </InlineStack>
 
@@ -229,11 +235,13 @@ export function ROIValueProofSection({
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
                       (
-                      {(
-                        (savingsVsCompetitor / competitorAnnualRate) *
-                        100
-                      ).toFixed(0)}
-                      % less)
+                      {competitorAnnualRate > 0
+                        ? `${(
+                            (savingsVsCompetitor / competitorAnnualRate) *
+                            100
+                          ).toFixed(1)}% less`
+                        : "0% less"}
+                      )
                     </Text>
                   </div>
                 </div>

@@ -12,6 +12,7 @@ import { getCurrencySymbol } from "../../../utils/currency";
 interface OverviewMetricsProps {
   overviewData: {
     totalRevenue: number;
+    commissionCharged?: number; // Actual commission charged (PAID phase only)
     currency: string;
     conversionRate: number;
     revenueChange: number | null;
@@ -52,9 +53,18 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
-  // Calculate cost efficiency metrics
+  // ✅ FIX: Use actual commission charged, not calculated from revenue
+  // For PAID phase: commissionCharged is the actual amount charged to Shopify
+  // For TRIAL phase: calculate from revenue since commissions aren't charged yet
+  const isTrialPhase = overviewData.isTrialPhase;
   const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
-  const commissionPaid = overviewData.totalRevenue * commissionRate;
+
+  // Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
+  const commissionPaid = isTrialPhase
+    ? overviewData.totalRevenue * commissionRate // Trial: calculate expected commission
+    : (overviewData.commissionCharged ??
+      overviewData.totalRevenue * commissionRate); // Paid: use actual charged amount
+
   const netProfit = overviewData.totalRevenue - commissionPaid;
 
   // Calculate percentage kept (more intuitive than ROI)

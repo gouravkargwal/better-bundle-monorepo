@@ -18,11 +18,15 @@ export interface BillingPlan {
 }
 
 export interface OverviewMetrics {
-  totalRevenue: number;
+  totalRevenue: number; // Actual attributed revenue generated
+  commissionCharged?: number; // Actual commission charged to Shopify (PAID phase only)
   currency: string;
   conversionRate: number;
   revenueChange: number | null;
   conversionRateChange: number | null;
+  isTrialPhase: boolean; // Whether shop is in trial phase
+  phaseLabel: string;
+  phaseDescription: string;
   // Additional metrics
   totalOrders: number;
   attributedOrders: number;
