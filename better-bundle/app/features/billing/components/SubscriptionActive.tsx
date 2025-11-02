@@ -109,9 +109,6 @@ export function SubscriptionActive({
                     📊 Current Billing Cycle
                   </Text>
                 </div>
-                <Badge tone="success" size="large">
-                  Active
-                </Badge>
               </InlineStack>
 
               {/* Revenue & Commission Side by Side */}

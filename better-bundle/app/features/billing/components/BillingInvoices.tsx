@@ -9,23 +9,30 @@ import {
   BlockStack,
 } from "@shopify/polaris";
 import { useState, useCallback } from "react";
-import { useNavigate, useSearchParams } from "@remix-run/react";
+import { useNavigate, useSearchParams, useRevalidator } from "@remix-run/react";
 import { DateRangePicker } from "../../../components/UI/DateRangePicker";
 
 interface BillingInvoicesProps {
   shopId: string;
   shopCurrency: string;
+  shopDomain?: string;
   data?: any;
 }
 
 export function BillingInvoices({
   shopId,
   shopCurrency,
+  shopDomain,
   data,
 }: BillingInvoicesProps) {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const [searchParams] = useSearchParams();
+
+  const handleViewOrder = (orderId: string) => {
+    window.open(`shopify://admin/orders/${orderId}`, "_top");
+  };
 
   // Get data from server
   const invoices = data?.invoices || [];
@@ -107,13 +114,25 @@ export function BillingInvoices({
 
   const hasActiveFilters = filters.startDate || filters.endDate;
 
+  // Helper to extract numeric ID from Shopify GID format
+  const extractNumericId = (gid: string): string => {
+    // Shopify GID format: gid://shopify/AppUsageRecord/539543896182
+    // Extract just the numeric part for cleaner display
+    const parts = gid.split("/");
+    const numericId = parts[parts.length - 1];
+    return numericId || gid;
+  };
+
   const rows = invoices.map((invoice: any, index: number) => [
     <div key={`id-${index}`}>
       <Text as="span" variant="bodyMd">
-        {invoice.id.length > 30
-          ? `${invoice.id.substring(0, 30)}...`
-          : invoice.id}
+        {extractNumericId(invoice.id)}
       </Text>
+      <div style={{ marginTop: "2px" }}>
+        <Text as="span" variant="bodySm" tone="subdued">
+          {invoice.id}
+        </Text>
+      </div>
     </div>,
     invoice.date,
     formatCurrency(invoice.amount),
@@ -140,9 +159,30 @@ export function BillingInvoices({
         </div>
       )}
     </div>,
-    <Text as="span" tone="subdued" variant="bodyMd" key={`action-${index}`}>
-      —
-    </Text>,
+    <div key={`action-${index}`}>
+      {invoice.orderIds && invoice.orderIds.length > 0 ? (
+        <InlineStack gap="200" align="start">
+          {invoice.orderIds.slice(0, 3).map((orderId: string, idx: number) => (
+            <Button
+              key={`order-${orderId}-${idx}`}
+              variant="plain"
+              onClick={() => handleViewOrder(orderId)}
+            >
+              View Order
+            </Button>
+          ))}
+          {invoice.orderIds.length > 3 && (
+            <Text as="span" variant="bodySm" tone="subdued">
+              +{invoice.orderIds.length - 3} more
+            </Text>
+          )}
+        </InlineStack>
+      ) : (
+        <Text as="span" tone="subdued" variant="bodyMd">
+          —
+        </Text>
+      )}
+    </div>,
   ]);
 
   return (
@@ -161,10 +201,12 @@ export function BillingInvoices({
                   </Button>
                 )}
                 <Button
-                  loading={isLoading}
+                  loading={isLoading || revalidator.state === "loading"}
                   onClick={() => {
                     setIsLoading(true);
-                    window.location.reload();
+                    // Use Remix's revalidator to refresh data without full page reload
+                    revalidator.revalidate();
+                    setTimeout(() => setIsLoading(false), 500);
                   }}
                 >
                   Refresh

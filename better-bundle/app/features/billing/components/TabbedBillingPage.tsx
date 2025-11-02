@@ -1,6 +1,6 @@
 import { Page, Tabs, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "@remix-run/react";
 import type { BillingState } from "../types/billing.types";
 import { BillingPlan } from "./BillingPlan";
@@ -60,17 +60,19 @@ export function TabbedBillingPage({
     },
   ];
 
-  // Determine which tab is active based on current route
-  const getActiveTab = () => {
-    if (location.pathname === "/app/billing") return 0;
-    if (location.pathname === "/app/billing/invoices") return 1;
-    if (location.pathname === "/app/billing/cycles") return 2;
+  // Determine which tab is active based on current route - memoized to prevent re-renders
+  const activeTab = useMemo(() => {
+    if (
+      location.pathname === "/app/billing" ||
+      location.pathname === "/app/billing/"
+    )
+      return 0;
+    if (location.pathname.startsWith("/app/billing/invoices")) return 1;
+    if (location.pathname.startsWith("/app/billing/cycles")) return 2;
     return 0;
-  };
+  }, [location.pathname]);
 
   const renderTabContent = () => {
-    const activeTab = getActiveTab();
-
     switch (activeTab) {
       case 0:
         return (
@@ -98,7 +100,7 @@ export function TabbedBillingPage({
 
         <Tabs
           tabs={tabs}
-          selected={getActiveTab()}
+          selected={activeTab}
           onSelect={handleTabChange}
           fitted
         >
