@@ -85,6 +85,7 @@ class RecommendationAPI {
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
       // Use JWT authentication for the request
+      // Pass customerId for customer-specific token generation
       const response = await this.phoenixJWT.makeAuthenticatedRequest(apiUrl, {
         method: 'POST',
         headers: {
@@ -92,7 +93,8 @@ class RecommendationAPI {
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
-        keepalive: true // Keep connection alive for better performance
+        keepalive: true, // Keep connection alive for better performance
+        customerId: customerId || null, // Pass customerId for token context
       });
 
       clearTimeout(timeoutId);

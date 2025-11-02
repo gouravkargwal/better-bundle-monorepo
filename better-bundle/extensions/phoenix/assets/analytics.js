@@ -76,18 +76,22 @@ class AnalyticsApiClient {
         return this.currentSessionId;
       }
 
-      const url = `${this.baseUrl}/api/phoenix/get-or-create-session`;
+      const url = `${this.baseUrl}/api/session/get-or-create-session`;
       const browserSessionId = await this.getBrowserSessionId();
+
+      // Get browser_session_id from localStorage if available (backend-generated)
+      const storedBrowserSessionId = localStorage.getItem("unified_browser_session_id") || browserSessionId || undefined;
 
       const payload = {
         shop_domain: shopDomain,
         customer_id: customerId ? String(customerId) : undefined,
-        browser_session_id: browserSessionId,
-        client_id: this.clientId, // ✅ Include client_id if available
-        user_agent: navigator.userAgent,
-        ip_address: null,
-        referrer: document.referrer,
-        page_url: window.location.href,
+        browser_session_id: storedBrowserSessionId || undefined, // Backend will generate if not provided
+        client_id: this.clientId || undefined,
+        user_agent: true, // Backend will extract from request
+        ip_address: true, // Backend will extract from request
+        referrer: document.referrer || undefined,
+        page_url: window.location.href || undefined,
+        extension_type: "phoenix", // ✅ Add this required field
       };
 
       // Create AbortController for timeout
@@ -95,12 +99,14 @@ class AnalyticsApiClient {
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
       // Use JWT authentication for the request
+      // Pass customerId for customer-specific token generation
       const response = await this.phoenixJWT.makeAuthenticatedRequest(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
         signal: controller.signal,
+        customerId: customerId || null, // Pass customerId for token context
       });
 
       clearTimeout(timeoutId);
@@ -128,9 +134,17 @@ class AnalyticsApiClient {
           // Store in sessionStorage for other extensions
           try {
             sessionStorage.setItem("unified_client_id", this.clientId);
-
           } catch (error) {
             this.logger.error("Phoenix: Failed to store client_id:", error);
+          }
+        }
+
+        // ✅ Store backend-generated browser_session_id in localStorage
+        if (result.data.browser_session_id) {
+          try {
+            localStorage.setItem("unified_browser_session_id", result.data.browser_session_id);
+          } catch (error) {
+            this.logger.error("Phoenix: Failed to store browser_session_id:", error);
           }
         }
 
@@ -179,14 +193,24 @@ class AnalyticsApiClient {
         request.customer_id ? String(request.customer_id) : undefined,
       );
 
+      // Build unified interaction payload matching other extensions
       const interactionData = {
-        ...request,
         session_id: sessionId,
+        shop_domain: request.shop_domain,
+        extension_type: "phoenix", // ✅ Required field at top level (not in metadata)
+        customer_id: request.customer_id ? String(request.customer_id) : undefined,
+        interaction_type: request.interaction_type,
+        metadata: {
+          // Exclude extension_type from metadata since it's now at top level
+          ...request.metadata,
+        },
       };
 
-      const url = `${this.baseUrl}/api/phoenix/track-interaction`;
+      // Use unified interaction endpoint
+      const url = `${this.baseUrl}/api/interaction/track`;
 
       // Use JWT authentication for the request
+      // Pass customerId for customer-specific token generation
       const response = await this.phoenixJWT.makeAuthenticatedRequest(url, {
         method: "POST",
         headers: {
@@ -194,6 +218,7 @@ class AnalyticsApiClient {
         },
         body: JSON.stringify(interactionData),
         keepalive: true,
+        customerId: request.customer_id || null, // Pass customerId for token context
       });
 
       if (!response.ok) {
@@ -243,7 +268,6 @@ class AnalyticsApiClient {
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "phoenix",
           source: "phoenix_theme_extension",
           // Standard structure expected by adapters
           data: {
@@ -290,7 +314,6 @@ class AnalyticsApiClient {
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "phoenix",
           source: "phoenix_theme_extension",
           // Standard structure expected by adapters
           data: {
@@ -336,7 +359,6 @@ class AnalyticsApiClient {
         referrer: document.referrer,
         metadata: {
           ...metadata,
-          extension_type: "phoenix",
           source: "phoenix_theme_extension",
           // Standard structure expected by adapters
           data: {
