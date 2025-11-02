@@ -160,7 +160,26 @@ class RecommendationAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`Cart API error: ${response.status}`);
+        // Parse error response for better error handling
+        let errorMessage = `Cart API error: ${response.status}`;
+        let errorData = null;
+
+        try {
+          errorData = await response.json();
+          if (errorData && errorData.description) {
+            errorMessage = errorData.description;
+          }
+        } catch (e) {
+          // If response isn't JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+
+        // Create error object with status code for proper handling
+        const error = new Error(errorMessage);
+        error.status = response.status;
+        error.statusCode = response.status;
+        error.data = errorData;
+        throw error;
       }
 
       const data = await response.json();

@@ -1,10 +1,3 @@
-"""
-Commission Service V2
-
-Updated commission service to work with the new redesigned billing system.
-Uses unified subscription model instead of separate trial/shopify tables.
-"""
-
 import logging
 import asyncio
 from decimal import Decimal
@@ -29,6 +22,11 @@ from app.core.database.models.enums import (
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
 from app.repository.CommissionRepository import CommissionRepository
 from app.repository.PurchaseAttributionRepository import PurchaseAttributionRepository
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
+from app.core.database.models.shop_subscription import ShopSubscription
+from app.core.database.models.enums import SubscriptionStatus
+from sqlalchemy import update, and_
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +39,6 @@ class CommissionServiceV2:
         self.billing_repository = BillingRepositoryV2(session)
         self.commission_repository = CommissionRepository(session)
         self.purchase_attribution_repository = PurchaseAttributionRepository(session)
-
-    # ============= MAIN CREATION =============
 
     async def create_commission_record(
         self,
@@ -62,18 +58,9 @@ class CommissionServiceV2:
             shop_subscription = await self.billing_repository.get_shop_subscription(
                 shop_id
             )
-            logger.info(
-                f"💰 Purchase attribution: {purchase_attr}---------------------->"
-            )
-            logger.info(
-                f"💰 Shop subscription: {shop_subscription}---------------------->"
-            )
+
             effective_commission_rate = shop_subscription.effective_commission_rate
-            logger.info(
-                f"💰 Effective commission rate: {effective_commission_rate}---------------------->"
-            )
             total_revenue = purchase_attr.total_revenue
-            logger.info(f"💰 Total revenue: {total_revenue}---------------------->")
             commission_data = self._calculate_commission(
                 total_revenue, effective_commission_rate
             )
@@ -106,8 +93,6 @@ class CommissionServiceV2:
                     and commission.status == CommissionStatus.PENDING
                 ):
                     try:
-                        from app.core.messaging.event_publisher import EventPublisher
-                        from app.core.config.kafka_settings import kafka_settings
 
                         event_publisher = EventPublisher(kafka_settings.model_dump())
                         await event_publisher.initialize()
@@ -260,15 +245,6 @@ class CommissionServiceV2:
 
             await self.commission_repository.save(commission)
 
-            # Update billing cycle usage
-            await self.billing_repository.update_billing_cycle_usage(
-                current_cycle.id, charge_data["actual_charge"]
-            )
-
-            # Suspend shop if cap is completely reached
-            if charge_data["charge_type"] == ChargeType.REJECTED:
-                await self._suspend_shop_for_cap_reached(shop_id)
-
             return commission
 
         except Exception as e:
@@ -341,9 +317,6 @@ class CommissionServiceV2:
     async def _suspend_shop_for_cap_reached(self, shop_id: str) -> None:
         """Suspend shop subscription when monthly cap is reached - ATOMIC"""
         try:
-            from app.core.database.models.shop_subscription import ShopSubscription
-            from app.core.database.models.enums import SubscriptionStatus
-            from sqlalchemy import update, and_
 
             # Get active subscription for this shop
             shop_subscription = await self.billing_repository.get_shop_subscription(
@@ -386,22 +359,9 @@ class CommissionServiceV2:
             )
             raise
 
-    # ============= SHOPIFY RECORDING =============
-
     async def record_commission_to_shopify(
         self, commission_id: str, shopify_billing_service
     ) -> Dict[str, Any]:
-        """
-        Record commission to Shopify as usage record.
-        Handles cap checking, partial charges, and overflow.
-
-        Args:
-            commission_id: Commission record ID
-            shopify_billing_service: Instance of ShopifyUsageBillingService
-
-        Returns:
-            Result dictionary with success status and details
-        """
         commission = None
         try:
             # Get commission record
@@ -566,6 +526,7 @@ class CommissionServiceV2:
             # Check if we still don't have a usage record (other errors)
             if not usage_record:
                 logger.error("❌ Failed to record to Shopify after retries")
+                # Commission remains PENDING - don't update status
                 await self.commission_repository.rollback()
                 return {
                     "success": False,
@@ -573,7 +534,6 @@ class CommissionServiceV2:
                     "error_message": last_error_message,
                 }
 
-            # Update commission record with success
             commission.shopify_usage_record_id = usage_record.id
             commission.shopify_recorded_at = now_utc()
             commission.shopify_response = {
@@ -585,13 +545,15 @@ class CommissionServiceV2:
                 },
                 "idempotency_key": idempotency_key,
             }
+
             commission.status = CommissionStatus.RECORDED
             commission.updated_at = now_utc()
 
             await self.commission_repository.commit()
 
             logger.info(
-                f"✅ Recorded commission to Shopify: {usage_record.id} (${commission.commission_charged} charged)"
+                f"✅ Commission marked as RECORDED: {usage_record.id} "
+                f"(${commission.commission_charged} charged, usage tracked in billing cycle)"
             )
 
             return {
@@ -606,8 +568,6 @@ class CommissionServiceV2:
             logger.error(f"❌ Error recording to Shopify: {e}")
             await self.commission_repository.rollback()
             return {"success": False, "error": str(e)}
-
-    # ============= QUERY METHODS =============
 
     async def get_commissions_by_shop(
         self,
@@ -660,8 +620,6 @@ class CommissionServiceV2:
             logger.error(f"❌ Error getting pending commissions: {e}")
             return []
 
-    # ============= STATISTICS =============
-
     async def get_commission_stats_for_cycle(
         self, billing_cycle_id: str
     ) -> Dict[str, Any]:
@@ -704,8 +662,6 @@ class CommissionServiceV2:
                 "total_overflow": 0,
                 "charge_rate": 0,
             }
-
-    # ============= HELPER METHODS =============
 
     def _calculate_commission(
         self, total_revenue: Decimal, effective_commission_rate: Decimal

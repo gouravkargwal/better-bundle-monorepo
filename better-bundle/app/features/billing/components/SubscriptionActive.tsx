@@ -146,13 +146,12 @@ export function SubscriptionActive({
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" tone="subdued">
-                          Max Revenue:
+                          Revenue Limit (at cap):
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           {formatCurrency(
                             subscriptionData.spendingLimit / 0.03,
-                          )}{" "}
-                          (before cap)
+                          )}
                         </Text>
                       </InlineStack>
                     </BlockStack>
@@ -180,7 +179,7 @@ export function SubscriptionActive({
                         Your Current Bill
                       </Text>
                       <Text as="span" variant="bodySm" tone="subdued">
-                        💰 {usagePercentage.toFixed(1)}% of cap
+                        💰 {Number(usagePercentage.toFixed(1))}% of cap
                       </Text>
                     </InlineStack>
                     <Text
@@ -191,9 +190,93 @@ export function SubscriptionActive({
                     >
                       {formatCurrency(subscriptionData.currentUsage)}
                     </Text>
+
+                    {/* ✅ Smart Breakdown: Show only when relevant */}
+                    {subscriptionData.expectedCharge > 0 ||
+                    (subscriptionData.rejectedAmount &&
+                      subscriptionData.rejectedAmount > 0) ? (
+                      <div
+                        style={{
+                          padding: "12px",
+                          backgroundColor: "#F0F9FF",
+                          borderRadius: "8px",
+                          border: "1px solid #BAE6FD",
+                        }}
+                      >
+                        <BlockStack gap="100">
+                          <Text
+                            as="span"
+                            variant="bodySm"
+                            fontWeight="semibold"
+                            tone="subdued"
+                          >
+                            💳 Charge Breakdown
+                          </Text>
+                          <InlineStack align="space-between">
+                            <Text as="span" variant="bodySm" tone="subdued">
+                              ✓ Recorded:
+                            </Text>
+                            <Text
+                              as="span"
+                              variant="bodySm"
+                              fontWeight="medium"
+                            >
+                              {formatCurrency(
+                                subscriptionData.shopifyUsage || 0,
+                              )}
+                            </Text>
+                          </InlineStack>
+                          {subscriptionData.expectedCharge > 0 && (
+                            <InlineStack align="space-between">
+                              <Text as="span" variant="bodySm" tone="subdued">
+                                ⏳ Pending:
+                              </Text>
+                              <Text
+                                as="span"
+                                variant="bodySm"
+                                fontWeight="medium"
+                              >
+                                {formatCurrency(
+                                  subscriptionData.expectedCharge,
+                                )}
+                              </Text>
+                            </InlineStack>
+                          )}
+                          {subscriptionData.rejectedAmount &&
+                            subscriptionData.rejectedAmount > 0 && (
+                              <InlineStack align="space-between">
+                                <Text as="span" variant="bodySm" tone="subdued">
+                                  🚫 Rejected:
+                                </Text>
+                                <Text
+                                  as="span"
+                                  variant="bodySm"
+                                  fontWeight="medium"
+                                  tone="critical"
+                                >
+                                  {formatCurrency(
+                                    subscriptionData.rejectedAmount,
+                                  )}
+                                </Text>
+                              </InlineStack>
+                            )}
+                        </BlockStack>
+                      </div>
+                    ) : (
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        ✓ All{" "}
+                        {formatCurrency(
+                          subscriptionData.shopifyUsage ||
+                            subscriptionData.currentUsage,
+                        )}{" "}
+                        recorded to Shopify
+                      </Text>
+                    )}
+
                     <Text as="span" variant="bodySm" tone="subdued">
-                      3% of{" "}
-                      {formatCurrency(subscriptionData.currentUsage / 0.03)}
+                      3% commission on{" "}
+                      {formatCurrency(subscriptionData.currentUsage / 0.03)}{" "}
+                      revenue
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -258,21 +341,25 @@ export function SubscriptionActive({
                           📈 Revenue vs Cap
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
-                          {(
-                            (subscriptionData.currentUsage /
-                              0.03 /
-                              (subscriptionData.spendingLimit / 0.03)) *
-                            100
-                          ).toFixed(3)}
+                          {Number(
+                            (
+                              (subscriptionData.currentUsage /
+                                0.03 /
+                                (subscriptionData.spendingLimit / 0.03)) *
+                              100
+                            ).toFixed(1),
+                          )}
                           % of max
                         </Text>
                       </InlineStack>
                       <ProgressBar
-                        progress={Math.min(
-                          (subscriptionData.currentUsage /
-                            subscriptionData.spendingLimit) *
+                        progress={Number(
+                          Math.min(
+                            (subscriptionData.currentUsage /
+                              subscriptionData.spendingLimit) *
+                              100,
                             100,
-                          100,
+                          ).toFixed(1),
                         )}
                         tone="success"
                         size="large"
@@ -320,11 +407,13 @@ export function SubscriptionActive({
                           💰 Commission Cap
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
-                          {usagePercentage.toFixed(1)}% used
+                          {Number(usagePercentage.toFixed(1))}% used
                         </Text>
                       </InlineStack>
                       <ProgressBar
-                        progress={Math.min(usagePercentage, 100)}
+                        progress={Number(
+                          Math.min(usagePercentage, 100).toFixed(1),
+                        )}
                         tone={isAtCap ? "critical" : "success"}
                         size="large"
                       />

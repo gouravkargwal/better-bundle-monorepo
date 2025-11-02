@@ -107,9 +107,7 @@ class ShopifyUsageKafkaConsumer:
 
                 # Route to appropriate handler
                 if event_type == "record_usage":
-                    await self._handle_record_usage(
-                        payload, session, commission_service, shopify_billing
-                    )
+                    await self._handle_record_usage(payload)
                 elif event_type == "cap_increase":
                     await self._handle_cap_increase(
                         payload,
@@ -344,20 +342,22 @@ class ShopifyUsageKafkaConsumer:
                 f"🔄 Reprocessing {len(commissions_to_reprocess)} commissions (REJECTED + PENDING) for cycle {cycle_id}"
             )
 
-            # Calculate remaining cap
-            remaining_cap = Decimal(current_cycle.current_cap_amount) - Decimal(
-                current_cycle.usage_amount
-            )
-
             total_reprocessed = 0
             total_charged = Decimal("0")
 
             # Process each commission
             for commission in commissions_to_reprocess:
+                # ✅ CRITICAL: Refresh cycle to get current usage_amount before calculating remaining_cap
+                # This ensures we use the actual usage after previous commissions were recorded
+                await session.refresh(current_cycle)
+
+                # Calculate remaining cap from actual current usage
+                remaining_cap = Decimal(current_cycle.current_cap_amount) - Decimal(
+                    current_cycle.usage_amount
+                )
+
                 # Re-evaluate charge amounts based on current cap
                 # Always recalculate from commission_earned to account for cap changes
-                # For REJECTED: commission_overflow contains the rejected amount, but we recalculate from earned
-                # For PENDING: commission might have been created but not recorded, or cap increased
                 amount_to_charge = Decimal(commission.commission_earned)
 
                 # Use commission service's charge calculation logic
@@ -379,7 +379,8 @@ class ShopifyUsageKafkaConsumer:
                 # Record to Shopify if there's a charge amount
                 if commission.commission_charged > 0:
                     logger.info(
-                        f"🎯 Re-recording commission {commission.id} to Shopify (charge: ${commission.commission_charged})"
+                        f"🎯 Re-recording commission {commission.id} to Shopify "
+                        f"(charge: ${commission.commission_charged}, remaining_cap: ${remaining_cap})"
                     )
 
                     record_result = (
@@ -390,8 +391,9 @@ class ShopifyUsageKafkaConsumer:
                     )
 
                     if record_result.get("success"):
+                        # ✅ Usage is already updated by record_commission_to_shopify → _store_usage_record
+                        # No need to update again here (would cause double-counting)
                         total_charged += commission.commission_charged
-                        remaining_cap -= commission.commission_charged
                         total_reprocessed += 1
                         logger.info(
                             f"✅ Successfully re-recorded commission {commission.id} to Shopify"
@@ -420,20 +422,29 @@ class ShopifyUsageKafkaConsumer:
                         )
                         await session.flush()
 
+                # ✅ Check remaining cap AFTER usage update (will refresh on next iteration)
+                # Refresh cycle to get updated usage for next iteration
+                await session.refresh(current_cycle)
+                remaining_cap_after = Decimal(
+                    current_cycle.current_cap_amount
+                ) - Decimal(current_cycle.usage_amount)
+
                 # Stop processing if no remaining cap
-                if remaining_cap <= 0:
+                if remaining_cap_after <= 0:
                     logger.info(
-                        f"⚠️ Remaining cap exhausted. Stopping reprocessing. {len(commissions_to_reprocess) - total_reprocessed - 1} commissions remaining."
+                        f"⚠️ Remaining cap exhausted. Stopping reprocessing. "
+                        f"{len(commissions_to_reprocess) - total_reprocessed - 1} commissions remaining."
                     )
                     break
 
-            # Update billing cycle usage
-            if total_charged > 0:
-                await billing_repo.update_billing_cycle_usage(cycle_id, total_charged)
+            # ✅ CRITICAL: Do NOT update billing cycle usage here!
+            # Usage is already updated in record_commission_to_shopify → _store_usage_record
+            # Calling update_billing_cycle_usage here would cause double-counting
 
             # Transaction will be committed automatically by get_transaction_context()
             logger.info(
-                f"✅ Reprocessed {total_reprocessed} commissions, charged ${total_charged} for cycle {cycle_id}"
+                f"✅ Reprocessed {total_reprocessed} commissions, charged ${total_charged} for cycle {cycle_id} "
+                f"(usage already tracked in billing cycle during recording)"
             )
 
         except Exception as e:

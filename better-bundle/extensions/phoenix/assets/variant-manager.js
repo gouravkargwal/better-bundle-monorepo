@@ -44,31 +44,35 @@ class VariantManager {
     }
 
     const result = productData.variants.find(variant => {
-      // Try different approaches to match variants
       const variantTitle = variant.title || '';
-      const variantOptions = variantTitle.split(' / ');
+      const variantParts = variantTitle.split(' / ').map(p => p.trim());
 
-      // Method 1: Match by variant title parts (most common)
-      const matchesByTitle = Object.keys(selectedOptions).every(optionName => {
-        const optionPosition = this.getOptionPosition(optionName, productData.options);
-        const variantValue = variantOptions[optionPosition - 1]; // Convert to 0-based index
-        const selectedValue = selectedOptions[optionName];
-        return variantValue === selectedValue;
-      });
+      // Match by option positions
+      if (productData.options && productData.options.length > 0) {
+        const allMatch = Object.keys(selectedOptions).every(optionName => {
+          const option = productData.options.find(opt => opt.name === optionName);
+          if (!option) return false;
 
-      if (matchesByTitle) {
-        return true;
+          const position = option.position || 1;
+          if (position < 1 || position > variantParts.length) return false;
+
+          const variantPart = variantParts[position - 1] || '';
+          const selectedValue = (selectedOptions[optionName] || '').trim();
+
+          return variantPart === selectedValue;
+        });
+
+        if (allMatch) return true;
       }
 
-      // Method 2: Try to match by variant properties (option1, option2, etc.)
-      const matchesByProperties = Object.keys(selectedOptions).every(optionName => {
-        const optionPosition = this.getOptionPosition(optionName, productData.options);
-        const variantValue = variant[`option${optionPosition}`];
-        const selectedValue = selectedOptions[optionName];
-        return variantValue === selectedValue;
-      });
+      // Fallback: match by order
+      const selectedValues = Object.values(selectedOptions).map(v => (v || '').trim());
+      if (selectedValues.length === variantParts.length) {
+        const allMatch = selectedValues.every((val, idx) => variantParts[idx] === val);
+        if (allMatch) return true;
+      }
 
-      return matchesByProperties;
+      return false;
     });
 
     // Cache the result
@@ -93,24 +97,32 @@ class VariantManager {
     }
 
     // For multi-variant products, check if any variant with this option value is available
-    // considering current selections
     return productData.variants.some(variant => {
       const variantTitle = variant.title || '';
-      const variantOptions = variantTitle.split(' / ');
+      const variantParts = variantTitle.split(' / ').map(p => p.trim());
 
       // Check if this variant has the selected option value
-      const optionPosition = this.getOptionPosition(optionName, productData.options);
-      const hasOptionValue = variantOptions[optionPosition - 1] === value;
+      const option = productData.options?.find(opt => opt.name === optionName);
+      if (!option) return false;
 
+      const optionPosition = option.position || 1;
+      if (optionPosition < 1 || optionPosition > variantParts.length) return false;
+
+      const hasOptionValue = variantParts[optionPosition - 1] === (value || '').trim();
       if (!hasOptionValue) return false;
 
       // Check if this variant is compatible with current selections
       const isCompatibleWithCurrentSelections = Object.keys(currentSelections).every(selectedOptionName => {
         if (selectedOptionName === optionName) return true; // Skip the option being checked
 
-        const selectedOptionPosition = this.getOptionPosition(selectedOptionName, productData.options);
-        const variantValue = variantOptions[selectedOptionPosition - 1];
-        const selectedValue = currentSelections[selectedOptionName];
+        const selectedOption = productData.options?.find(opt => opt.name === selectedOptionName);
+        if (!selectedOption) return true;
+
+        const selectedPosition = selectedOption.position || 1;
+        if (selectedPosition < 1 || selectedPosition > variantParts.length) return false;
+
+        const variantValue = variantParts[selectedPosition - 1] || '';
+        const selectedValue = (currentSelections[selectedOptionName] || '').trim();
 
         return variantValue === selectedValue;
       });
@@ -157,6 +169,8 @@ class VariantManager {
 
   // Update availability for variant
   updateAvailability(variant, productCard) {
+    if (!variant || !productCard) return;
+
     const qtyInput = productCard.querySelector('.qty-input');
     if (qtyInput) {
       const inv = typeof variant.inventory === 'number' ? variant.inventory : null;
@@ -165,6 +179,25 @@ class VariantManager {
         if (parseInt(qtyInput.value) > inv) qtyInput.value = String(inv);
       } else {
         qtyInput.removeAttribute('max');
+      }
+    }
+
+    // ✅ Check inventory - undefined/null = unlimited, > 0 = in stock, <= 0 = out of stock
+    const addToCartBtn = productCard.querySelector('.product-card__btn');
+    if (addToCartBtn) {
+      const inventory = typeof variant.inventory === 'number' ? variant.inventory : undefined;
+      const isAvailable = inventory === undefined || inventory > 0;
+
+      if (isAvailable) {
+        addToCartBtn.disabled = false;
+        addToCartBtn.textContent = 'Add to cart';
+        addToCartBtn.style.opacity = '1';
+        addToCartBtn.style.cursor = 'pointer';
+      } else {
+        addToCartBtn.disabled = true;
+        addToCartBtn.textContent = 'Out of stock';
+        addToCartBtn.style.opacity = '0.6';
+        addToCartBtn.style.cursor = 'not-allowed';
       }
     }
   }

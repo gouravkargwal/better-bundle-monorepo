@@ -18,22 +18,50 @@ export class KafkaProducerService {
   private producer: Producer | null = null;
   private messageCount = 0;
   private errorCount = 0;
+  private initialized = false;
+  private initializing = false;
 
   public static async getInstance(): Promise<KafkaProducerService> {
     if (!KafkaProducerService.instance) {
       KafkaProducerService.instance = new KafkaProducerService();
+      await KafkaProducerService.instance.initialize();
+    } else if (
+      !KafkaProducerService.instance.initialized ||
+      !KafkaProducerService.instance.producer
+    ) {
+      // Re-initialize if the instance exists but producer is null
       await KafkaProducerService.instance.initialize();
     }
     return KafkaProducerService.instance;
   }
 
   private async initialize(): Promise<void> {
+    // Prevent concurrent initialization attempts
+    if (this.initializing) {
+      // Wait for the ongoing initialization to complete
+      while (this.initializing) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return;
+    }
+
+    if (this.initialized && this.producer) {
+      return;
+    }
+
+    this.initializing = true;
     try {
       this.clientService = await KafkaClientService.getInstance();
       this.producer = await this.clientService.getProducer();
+      this.initialized = true;
+      logger.info("Kafka producer service initialized successfully");
     } catch (error) {
+      this.initialized = false;
+      this.producer = null;
       logger.error({ error }, "Failed to initialize Kafka producer service");
       throw error;
+    } finally {
+      this.initializing = false;
     }
   }
 
@@ -44,9 +72,6 @@ export class KafkaProducerService {
     eventData: ShopifyEventData,
   ): Promise<string> {
     try {
-      const shopIdentifier =
-        eventData.shop_id || eventData.shop_domain || "unknown";
-
       // Add metadata
       const messageWithMetadata = {
         ...eventData,
@@ -59,11 +84,15 @@ export class KafkaProducerService {
       const key = eventData.shop_id || eventData.shop_domain || "unknown";
 
       if (!this.producer) {
-        logger.error("Producer not initialized");
-        throw new Error("Producer not initialized");
+        logger.warn("Producer not initialized, attempting to re-initialize");
+        await this.initialize();
+        if (!this.producer) {
+          logger.error("Failed to initialize producer after retry");
+          throw new Error("Producer not initialized");
+        }
       }
 
-      const result: RecordMetadata = await this.producer.send({
+      const result: RecordMetadata[] = await this.producer.send({
         topic: "shopify-events",
         messages: [
           {
@@ -105,10 +134,14 @@ export class KafkaProducerService {
       const key = jobData.shop_id;
 
       if (!this.producer) {
-        throw new Error("Producer not initialized");
+        logger.warn("Producer not initialized, attempting to re-initialize");
+        await this.initialize();
+        if (!this.producer) {
+          throw new Error("Producer not initialized");
+        }
       }
 
-      const result: RecordMetadata = await this.producer.send({
+      const result: RecordMetadata[] = await this.producer.send({
         topic: "data-collection-jobs",
         messages: [
           {
@@ -153,11 +186,15 @@ export class KafkaProducerService {
         "unknown";
 
       if (!this.producer) {
-        logger.error("Producer not initialized");
-        throw new Error("Producer not initialized");
+        logger.warn("Producer not initialized, attempting to re-initialize");
+        await this.initialize();
+        if (!this.producer) {
+          logger.error("Failed to initialize producer after retry");
+          throw new Error("Producer not initialized");
+        }
       }
 
-      const result: RecordMetadata = await this.producer.send({
+      const result: RecordMetadata[] = await this.producer.send({
         topic: "shopify-usage-events",
         messages: [
           {
@@ -204,10 +241,14 @@ export class KafkaProducerService {
       const key = accessData.shop_id;
 
       if (!this.producer) {
-        throw new Error("Producer not initialized");
+        logger.warn("Producer not initialized, attempting to re-initialize");
+        await this.initialize();
+        if (!this.producer) {
+          throw new Error("Producer not initialized");
+        }
       }
 
-      const result: RecordMetadata = await this.producer.send({
+      const result: RecordMetadata[] = await this.producer.send({
         topic: "access-control",
         messages: [
           {
@@ -241,7 +282,11 @@ export class KafkaProducerService {
   ): Promise<string[]> {
     try {
       if (!this.producer) {
-        throw new Error("Producer not initialized");
+        logger.warn("Producer not initialized, attempting to re-initialize");
+        await this.initialize();
+        if (!this.producer) {
+          throw new Error("Producer not initialized");
+        }
       }
 
       const messages = events.map((event) => ({
@@ -303,5 +348,6 @@ export class KafkaProducerService {
       await this.producer.disconnect();
       this.producer = null;
     }
+    this.initialized = false;
   }
 }

@@ -164,9 +164,20 @@ export class BillingService {
     const spendingLimit =
       shopifyStatus.cappedAmount ||
       Number(shopSubscription.user_chosen_cap_amount || 0);
-    const currentUsage = shopifyStatus.currentUsage || 0;
-    // currentUsage from Shopify is commission amount (usage charged)
-    // Calculate percentage: commission / cap
+
+    // ✅ Get Shopify usage from RECORDED commissions (what's actually in Shopify)
+    const shopifyUsage = shopifyStatus.currentUsage || 0;
+
+    // ✅ Calculate expected charge from PENDING commissions (excluding REJECTED)
+    const { expectedCharge, rejectedAmount } =
+      await this.getCommissionBreakdown(
+        shopSubscription.shop_id,
+        shopSubscription.id,
+      );
+
+    // Total current usage = Shopify usage + expected charge
+    const currentUsage = shopifyUsage + expectedCharge;
+
     const usagePercentage =
       spendingLimit > 0 ? Math.round((currentUsage / spendingLimit) * 100) : 0;
 
@@ -180,10 +191,76 @@ export class BillingService {
         | "EXPIRED",
       spendingLimit,
       currentUsage,
+      shopifyUsage,
+      expectedCharge,
+      rejectedAmount, // Optional: Show separately
       usagePercentage,
       confirmationUrl: shopifyStatus.confirmationUrl,
       currency: shopifyStatus.currency || "USD",
     };
+  }
+
+  /**
+   * Get commission breakdown: expected charge and rejected amount
+   */
+  private static async getCommissionBreakdown(
+    shopId: string,
+    subscriptionId: string,
+  ): Promise<{ expectedCharge: number; rejectedAmount: number }> {
+    try {
+      // Get current billing cycle
+      const currentCycle = await prisma.billing_cycles.findFirst({
+        where: {
+          shop_subscription_id: subscriptionId,
+          status: "ACTIVE",
+        },
+      });
+
+      if (!currentCycle) {
+        return { expectedCharge: 0, rejectedAmount: 0 };
+      }
+
+      // ✅ Expected charge: PENDING commissions that will be charged
+      const pendingCommissions = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopId,
+          billing_cycle_id: currentCycle.id,
+          billing_phase: "PAID",
+          status: "PENDING", // Only PENDING, exclude REJECTED
+          commission_charged: {
+            gt: 0,
+          },
+        },
+        _sum: {
+          commission_charged: true,
+        },
+      });
+
+      // ✅ Rejected amount: REJECTED commissions (for transparency, not counted in usage)
+      const rejectedCommissions = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopId,
+          billing_cycle_id: currentCycle.id,
+          billing_phase: "PAID",
+          status: "REJECTED",
+        },
+        _sum: {
+          commission_earned: true, // Show what would have been charged
+        },
+      });
+
+      return {
+        expectedCharge: Number(
+          pendingCommissions._sum?.commission_charged || 0,
+        ),
+        rejectedAmount: Number(
+          rejectedCommissions._sum?.commission_earned || 0,
+        ),
+      };
+    } catch (error) {
+      logger.error({ error, shopId }, "Error calculating commission breakdown");
+      return { expectedCharge: 0, rejectedAmount: 0 };
+    }
   }
 
   /**

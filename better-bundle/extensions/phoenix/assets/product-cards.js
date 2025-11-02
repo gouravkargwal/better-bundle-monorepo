@@ -331,30 +331,52 @@ class ProductCardManager {
       this.logger.warn('⚠️ Dropdown not found for option:', optionName);
     }
 
-    // Update dependent dropdowns based on current selection
-    if (this.dropdownManager) {
-      this.dropdownManager.updateDependentDropdowns(productId, optionName, selectedValue);
-    }
-
-    // Get all selected options
+    // ✅ Get all selected options and check if complete selection
     const selectedOptions = this.dropdownManager ?
       this.dropdownManager.getSelectedOptions(productCard) :
       {};
 
-    // Find matching variant
-    const matchingVariant = this.variantManager ?
-      this.variantManager.findMatchingVariant(productData, selectedOptions) :
-      null;
+    // Check if ALL options are selected
+    const allOptionsSelected = productData.options &&
+      productData.options.length > 0 &&
+      Object.keys(selectedOptions).length === productData.options.length;
 
-    if (matchingVariant) {
-      if (this.variantManager) {
-        this.variantManager.updateVariantPriceFromSelection(matchingVariant, productId);
-        this.variantManager.updateAvailability(matchingVariant, productCard);
+    if (allOptionsSelected) {
+      // All options selected - find matching variant and update button
+      const matchingVariant = this.variantManager ?
+        this.variantManager.findMatchingVariant(productData, selectedOptions) :
+        null;
+
+      if (matchingVariant) {
+        if (this.variantManager) {
+          this.variantManager.updateVariantPriceFromSelection(matchingVariant, productId);
+          // ✅ updateAvailability shows "Add to cart" or "Out of stock" based on inventory
+          this.variantManager.updateAvailability(matchingVariant, productCard);
+        }
+      } else {
+        // Shouldn't happen - all options match should find a variant
+        this.logger.warn('⚠️ No variant match for complete selection', {
+          productId,
+          selectedOptions,
+          options: productData.options
+        });
+
+        const addToCartBtn = productCard.querySelector('.product-card__btn');
+        if (addToCartBtn) {
+          addToCartBtn.disabled = true;
+          addToCartBtn.textContent = 'Select Options';
+          addToCartBtn.style.opacity = '0.6';
+          addToCartBtn.style.cursor = 'not-allowed';
+        }
       }
     } else {
-      this.logger.warn('⚠️ No matching variant found, showing unavailable');
-      if (this.variantManager) {
-        this.variantManager.showVariantUnavailable(productId);
+      // Not all options selected yet - keep button enabled but show "Select Options" if needed
+      const addToCartBtn = productCard.querySelector('.product-card__btn');
+      if (addToCartBtn && Object.keys(selectedOptions).length > 0) {
+        addToCartBtn.disabled = true;
+        addToCartBtn.textContent = 'Select Options';
+        addToCartBtn.style.opacity = '0.6';
+        addToCartBtn.style.cursor = 'not-allowed';
       }
     }
 
@@ -447,11 +469,12 @@ class ProductCardManager {
     const selectedVariantId = variantSelect ? variantSelect.value : variantId;
     const selectedQuantity = qtyInput ? parseInt(qtyInput.value) : 1;
 
-    // Enforce inventory cap at the time of add to cart
+    // ✅ Check if variant is available before adding to cart
     const productData = this.productDataStore[productId];
     if (productData && productData.variants && selectedVariantId) {
       const selectedVariant = productData.variants.find(v => String(v.variant_id) === String(selectedVariantId));
-      if (selectedVariant && typeof selectedVariant.inventory === 'number' && selectedVariant.inventory >= 0) {
+      // ✅ Backend ensures variants are in-stock, but check inventory for quantity capping
+      if (selectedVariant && typeof selectedVariant.inventory === 'number' && selectedVariant.inventory > 0) {
         const cappedQty = Math.max(1, Math.min(selectedQuantity, selectedVariant.inventory));
         if (cappedQty !== selectedQuantity && qtyInput) {
           qtyInput.value = String(cappedQty);
@@ -531,11 +554,55 @@ class ProductCardManager {
     } catch (error) {
       this.logger.error("Error adding to cart:", error);
 
-      // Restore button state on error
-      if (addToCartButton) {
-        addToCartButton.disabled = false;
-        addToCartButton.style.cursor = "pointer";
-        addToCartButton.textContent = originalButtonText;
+      // Handle specific error cases
+      if (error.status === 422 || error.statusCode === 422) {
+        // 422 = Unprocessable Entity (usually means out of stock or invalid variant)
+        this.logger.warn('❌ Item unavailable (422):', {
+          variantId: selectedVariantId,
+          error: error.message || error.data
+        });
+
+        // Update variant inventory to 0 in our data store to reflect reality
+        if (productData && productData.variants) {
+          const variant = productData.variants.find(v => String(v.variant_id) === String(selectedVariantId));
+          if (variant) {
+            variant.inventory = 0; // Mark as out of stock
+            this.logger.info('✅ Updated variant inventory to 0:', selectedVariantId);
+          }
+        }
+
+        // Update button to show out of stock
+        if (addToCartButton) {
+          addToCartButton.disabled = true;
+          addToCartButton.textContent = 'Out of stock';
+          addToCartButton.style.opacity = '0.6';
+          addToCartButton.style.cursor = 'not-allowed';
+
+          // Update variant manager to reflect out of stock state
+          if (this.variantManager && productCard) {
+            const variant = productData?.variants?.find(v => String(v.variant_id) === String(selectedVariantId));
+            if (variant) {
+              this.variantManager.updateAvailability(variant, productCard);
+            }
+          }
+        }
+
+        // Show user-friendly error message (optional - can be removed if you don't want notifications)
+        if (window.Shopify && window.Shopify.notify) {
+          window.Shopify.notify('This item is currently out of stock', { status: 'error', duration: 3000 });
+        }
+      } else {
+        // Generic error - restore button state
+        if (addToCartButton) {
+          addToCartButton.disabled = false;
+          addToCartButton.style.cursor = "pointer";
+          addToCartButton.textContent = originalButtonText;
+
+          // Show generic error message
+          if (window.Shopify && window.Shopify.notify) {
+            window.Shopify.notify('Unable to add item to cart. Please try again.', { status: 'error', duration: 3000 });
+          }
+        }
       }
 
     }

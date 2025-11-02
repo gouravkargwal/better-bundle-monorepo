@@ -268,11 +268,52 @@ class ProductEnrichment:
                         f"🔍 Product {product.product_id} inventory: {product.total_inventory}"
                     )
 
+                    # Determine availability based on per-variant inventory
+                    # Check if ANY variant has positive inventory or unlimited stock (None)
+                    # None inventory means unlimited stock (tracking disabled)
+                    any_variant_instock = False
+                    in_stock_variant = None
+                    if isinstance(variants, list) and len(variants) > 0:
+                        for v in variants:
+                            try:
+                                inv = (
+                                    v.get("inventory") if isinstance(v, dict) else None
+                                )
+                                # None = unlimited stock, > 0 = in stock, <= 0 = out of stock
+                                if inv is None or (isinstance(inv, int) and inv > 0):
+                                    any_variant_instock = True
+                                    # Store first in-stock variant for default selection
+                                    if in_stock_variant is None:
+                                        in_stock_variant = v
+                                    # Prefer the first/default variant if it's in stock
+                                    if variants.index(v) == 0:
+                                        in_stock_variant = v
+                                        break
+                            except Exception:
+                                pass
+
+                    # Select default variant - prefer in-stock variant
                     if variants and len(variants) > 0:
-                        # Get the first variant (usually the default)
+                        # First try the first variant if it's in stock
                         default_variant = (
                             variants[0] if isinstance(variants, list) else None
                         )
+
+                        # Check if first variant is in stock (None = unlimited, > 0 = in stock)
+                        first_variant_instock = False
+                        if default_variant and isinstance(default_variant, dict):
+                            try:
+                                inv = default_variant.get("inventory")
+                                first_variant_instock = inv is None or (
+                                    isinstance(inv, int) and inv > 0
+                                )
+                            except Exception:
+                                pass
+
+                        # If first variant is out of stock, use the in_stock_variant found above
+                        if not first_variant_instock and in_stock_variant:
+                            default_variant = in_stock_variant
+
                         if default_variant and isinstance(default_variant, dict):
                             # Extract variant ID - handle both GraphQL format and numeric format
                             # Try different possible keys for variant ID
@@ -289,31 +330,17 @@ class ProductEnrichment:
                                     variant_id = str(raw_variant_id)
                                 selected_variant_id = variant_id
                                 logger.debug(
-                                    f"✅ Extracted variant_id: {variant_id} from {raw_variant_id}"
+                                    f"✅ Extracted variant_id: {variant_id} from {raw_variant_id} "
+                                    f"(in_stock: {first_variant_instock or in_stock_variant == default_variant})"
                                 )
                             else:
                                 logger.warning(
                                     f"⚠️ No variant ID found in variant: {default_variant}"
                                 )
 
-                    # Determine availability based on per-variant inventory
-                    # Check if ANY variant has positive inventory
-                    any_variant_instock = False
-                    if isinstance(variants, list) and len(variants) > 0:
-                        for v in variants:
-                            try:
-                                inv = (
-                                    v.get("inventory") if isinstance(v, dict) else None
-                                )
-                                if isinstance(inv, int) and inv > 0:
-                                    any_variant_instock = True
-                                    break
-                            except Exception:
-                                pass
-
                     # Product is available only if:
                     # 1. Status is ACTIVE
-                    # 2. At least one variant has positive inventory
+                    # 2. At least one variant has positive inventory or unlimited stock
                     is_available = (product.status == "ACTIVE") and any_variant_instock
 
                     # Skip products that are unavailable (sold out or inactive)
