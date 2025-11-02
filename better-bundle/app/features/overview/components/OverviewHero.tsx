@@ -1,47 +1,14 @@
 import { formatCurrency } from "app/utils/currency";
 
 interface OverviewHeroProps {
-  subscriptionStatus?: string;
   totalRevenueGenerated?: number;
   currency?: string;
 }
 
 export function OverviewHero({
-  subscriptionStatus,
   totalRevenueGenerated,
   currency,
 }: OverviewHeroProps) {
-  const getStatusBadge = () => {
-    switch (subscriptionStatus) {
-      case "TRIAL":
-        return {
-          text: "Trial",
-          color: "#F59E0B",
-          bgColor: "rgba(245, 158, 11, 0.2)",
-        };
-      case "ACTIVE":
-        return {
-          text: "Active",
-          color: "#10B981",
-          bgColor: "rgba(16, 185, 129, 0.2)",
-        };
-      case "SUSPENDED":
-        return {
-          text: "Suspended",
-          color: "#EF4444",
-          bgColor: "rgba(239, 68, 68, 0.2)",
-        };
-      default:
-        return {
-          text: "Active",
-          color: "#10B981",
-          bgColor: "rgba(16, 185, 129, 0.2)",
-        };
-    }
-  };
-
-  const statusBadge = getStatusBadge();
-
   return (
     <div
       style={{
@@ -58,25 +25,6 @@ export function OverviewHero({
       }}
     >
       <div style={{ position: "relative", zIndex: 2 }}>
-        {/* App Name and Status Badge */}
-        <div style={{ marginBottom: "16px" }}>
-          <div
-            style={{
-              display: "inline-block",
-              padding: "8px 16px",
-              backgroundColor: statusBadge.bgColor,
-              border: `1px solid ${statusBadge.color}40`,
-              color: statusBadge.color,
-              fontWeight: "600",
-              borderRadius: "8px",
-              fontSize: "14px",
-              marginBottom: "12px",
-            }}
-          >
-            🚀 Better Bundle • {statusBadge.text}
-          </div>
-        </div>
-
         {/* Main Headline */}
         <div
           style={{
@@ -112,42 +60,6 @@ export function OverviewHero({
             AI-powered recommendations that pay for themselves
           </div>
         </div>
-
-        {/* Value Communication */}
-        {totalRevenueGenerated && totalRevenueGenerated > 0 && (
-          <div
-            style={{
-              marginTop: "20px",
-              padding: "16px 24px",
-              backgroundColor: "rgba(255, 255, 255, 0.1)",
-              borderRadius: "12px",
-              border: "1px solid rgba(255, 255, 255, 0.2)",
-              backdropFilter: "blur(10px)",
-            }}
-          >
-            <div
-              style={{
-                fontSize: "1.5rem",
-                fontWeight: "bold",
-                marginBottom: "4px",
-                color: "#10B981",
-              }}
-            >
-              {formatCurrency(totalRevenueGenerated, currency || "USD", {
-                showSymbol: true,
-              })}
-              Generated
-            </div>
-            <div
-              style={{
-                fontSize: "0.9rem",
-                color: "rgba(255,255,255,0.8)",
-              }}
-            >
-              Revenue attributed to AI recommendations
-            </div>
-          </div>
-        )}
 
         {/* Enhanced Decorative elements */}
         <div

@@ -11,6 +11,9 @@ from decimal import Decimal
 from datetime import datetime, UTC
 import sys
 import os
+from dotenv import load_dotenv
+
+load_dotenv("../../.env.local")
 
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
