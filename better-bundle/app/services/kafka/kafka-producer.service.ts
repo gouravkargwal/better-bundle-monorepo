@@ -135,6 +135,61 @@ export class KafkaProducerService {
   }
 
   /**
+   * Publish a Shopify usage event (for async usage recording and reprocessing)
+   */
+  public async publishShopifyUsageEvent(usageData: any): Promise<string> {
+    try {
+      const messageWithMetadata = {
+        ...usageData,
+        timestamp: new Date().toISOString(),
+        worker_id: kafkaConfig.workerId,
+        source: "shopify_usage",
+      };
+
+      const key =
+        usageData.shop_id ||
+        usageData.commission_id ||
+        usageData.shop_domain ||
+        "unknown";
+
+      if (!this.producer) {
+        logger.error("Producer not initialized");
+        throw new Error("Producer not initialized");
+      }
+
+      const result: RecordMetadata = await this.producer.send({
+        topic: "shopify-usage-events",
+        messages: [
+          {
+            key,
+            value: JSON.stringify(messageWithMetadata),
+            headers: {
+              "event-type": usageData.event_type || "unknown",
+              "shop-id":
+                usageData.shop_id || usageData.shop_domain || "unknown",
+              timestamp: new Date().toISOString(),
+            },
+          },
+        ],
+      });
+
+      this.messageCount++;
+      const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
+
+      logger.info(
+        { event_type: usageData.event_type, shop_id: usageData.shop_id },
+        "Published Shopify usage event",
+      );
+
+      return messageId;
+    } catch (error) {
+      this.errorCount++;
+      logger.error({ error }, "Failed to publish Shopify usage event");
+      throw error;
+    }
+  }
+
+  /**
    * Publish an access control event
    */
   public async publishAccessControlEvent(accessData: any): Promise<string> {

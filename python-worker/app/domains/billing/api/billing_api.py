@@ -17,11 +17,13 @@ from app.core.database.models import (
     PurchaseAttribution,
     CommissionRecord,
 )
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from app.core.logging import get_logger
 from ..services.billing_scheduler_service import BillingSchedulerService
-from ..repositories.billing_repository_v2 import BillingPeriod
+from ..repositories.billing_repository_v2 import BillingPeriod, BillingRepositoryV2
 from ..services.commission_service_v2 import CommissionServiceV2
+from ..services.shopify_usage_billing_service_v2 import ShopifyUsageBillingServiceV2
+from app.repository.CommissionRepository import CommissionRepository
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
@@ -296,4 +298,155 @@ async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest
         raise
     except Exception as e:
         logger.error(f"Error retriggering commissions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============= REPROCESS REJECTED COMMISSIONS =============
+
+
+class ReprocessRejectedCommissionsRequest(BaseModel):
+    """Request to reprocess rejected/pending commissions for a billing cycle.
+
+    Reprocessing means: re-evaluating charge amounts based on current cap
+    and re-recording to Shopify. Current cycle is determined by finding the
+    active billing cycle for the shop's subscription.
+    """
+
+    shop_id: str
+    billing_cycle_id: Optional[str] = None  # If not provided, uses current active cycle
+
+
+class ReprocessRejectedCommissionsResponse(BaseModel):
+    """Response from reprocessing rejected/pending commissions."""
+
+    success: bool
+    shop_id: str
+    billing_cycle_id: str
+    total_to_reprocess: int  # Count of REJECTED + PENDING commissions
+    total_reprocessed: int
+    total_charged: float
+    errors: List[Dict] = []
+
+
+@router.post(
+    "/shop/reprocess-rejected-commissions",
+    response_model=ReprocessRejectedCommissionsResponse,
+)
+async def reprocess_rejected_commissions(request: ReprocessRejectedCommissionsRequest):
+    try:
+        logger.info(
+            f"🔄 Reprocessing rejected/pending commissions for shop {request.shop_id}, cycle_id={request.billing_cycle_id if request.billing_cycle_id else 'current'}"
+        )
+
+        async with get_session_context() as session:
+            billing_repo = BillingRepositoryV2(session)
+            commission_repo = CommissionRepository(session)
+
+            # Get billing cycle (use provided cycle_id or current active cycle)
+            # Current cycle = active billing cycle for the shop's subscription
+            cycle_id = None
+            if request.billing_cycle_id:
+                cycle_id = request.billing_cycle_id
+                current_cycle = await billing_repo.get_billing_cycle_by_id(cycle_id)
+            else:
+                # Get current active billing cycle for shop
+                # Steps: shop_id -> shop_subscription -> current_billing_cycle (status=ACTIVE)
+                shop_subscription = await billing_repo.get_shop_subscription(
+                    request.shop_id
+                )
+                if not shop_subscription:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No active subscription found for shop {request.shop_id}",
+                    )
+
+                current_cycle = await billing_repo.get_current_billing_cycle(
+                    shop_subscription.id
+                )
+                if current_cycle:
+                    cycle_id = current_cycle.id
+
+            if not current_cycle:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No active billing cycle found for shop {request.shop_id}",
+                )
+
+            logger.info(
+                f"📊 Current billing cycle: {cycle_id} (cap: {current_cycle.current_cap_amount}, usage: {current_cycle.usage_amount})"
+            )
+
+            # Count REJECTED and PENDING commissions before publishing event
+            # These need reprocessing: re-evaluate charges based on current cap and re-record to Shopify
+            from app.core.database.models.commission import CommissionRecord
+            from app.core.database.models.enums import ChargeType, CommissionStatus
+
+            query = select(CommissionRecord).where(
+                and_(
+                    CommissionRecord.shop_id == request.shop_id,
+                    CommissionRecord.billing_cycle_id == cycle_id,
+                    CommissionRecord.billing_phase
+                    == "PAID",  # Only PAID phase commissions
+                    # Include REJECTED commissions and PENDING commissions (might need re-evaluation)
+                    (
+                        (CommissionRecord.charge_type == ChargeType.REJECTED)
+                        | (CommissionRecord.status == CommissionStatus.PENDING)
+                    ),
+                )
+            )
+            result = await session.execute(query)
+            commissions_to_reprocess = result.scalars().all()
+            total_count = len(commissions_to_reprocess)
+
+            if total_count == 0:
+                logger.info(
+                    f"ℹ️ No rejected/pending commissions to reprocess for cycle {cycle_id}"
+                )
+                return ReprocessRejectedCommissionsResponse(
+                    success=True,
+                    shop_id=request.shop_id,
+                    billing_cycle_id=cycle_id,
+                    total_to_reprocess=0,
+                    total_reprocessed=0,
+                    total_charged=0.0,
+                    errors=[],
+                )
+
+            logger.info(
+                f"📋 Found {total_count} commissions to reprocess (REJECTED + PENDING) for cycle {cycle_id}"
+            )
+
+            # Publish Kafka event for async reprocessing
+            from app.core.messaging.event_publisher import EventPublisher
+            from app.core.config.kafka_settings import kafka_settings
+
+            event_publisher = EventPublisher(kafka_settings.model_dump())
+            await event_publisher.initialize()
+
+            await event_publisher.publish_shopify_usage_event(
+                {
+                    "event_type": "reprocess_rejected_commissions",
+                    "shop_id": request.shop_id,
+                    "billing_cycle_id": cycle_id,
+                }
+            )
+
+            logger.info(
+                f"📤 Published reprocess_rejected_commissions event for shop {request.shop_id}, cycle {cycle_id} ({total_count} commissions to reprocess)"
+            )
+
+            return ReprocessRejectedCommissionsResponse(
+                success=True,
+                shop_id=request.shop_id,
+                billing_cycle_id=cycle_id,
+                total_to_reprocess=total_count,
+                total_reprocessed=0,  # Will be processed asynchronously by Kafka consumer
+                total_charged=0.0,  # Will be calculated asynchronously by Kafka consumer
+                errors=[],
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reprocessing rejected commissions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

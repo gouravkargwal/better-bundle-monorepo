@@ -370,8 +370,26 @@ class ShopifyUsageBillingServiceV2:
             data = response.get("data", {}).get("appUsageRecordCreate", {})
 
             if data.get("userErrors"):
-                logger.error(f"User errors: {data['userErrors']}")
-                return None
+                user_errors = data["userErrors"]
+                logger.error(f"User errors: {user_errors}")
+                # Check if error is due to capped amount exceeded
+                error_messages = [
+                    error.get("message", "").lower() for error in user_errors
+                ]
+                cap_exceeded = any(
+                    "cap" in msg
+                    or "capped" in msg
+                    or "limit" in msg
+                    or "exceeded" in msg
+                    for msg in error_messages
+                )
+                # Return a special error indicator that can be checked by caller
+                error_result = {
+                    "error": True,
+                    "user_errors": user_errors,
+                    "cap_exceeded": cap_exceeded,
+                }
+                return error_result
 
             usage_record_data = data.get("appUsageRecord")
             if not usage_record_data:

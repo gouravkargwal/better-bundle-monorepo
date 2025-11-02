@@ -141,7 +141,7 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(subscriptionData.currentUsage)}
+                      {formatCurrency(subscriptionData.currentUsage / 0.03)}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -189,10 +189,11 @@ export function SubscriptionActive({
                       fontWeight="bold"
                       tone={isAtCap ? "critical" : undefined}
                     >
-                      {formatCurrency(subscriptionData.currentUsage * 0.03)}
+                      {formatCurrency(subscriptionData.currentUsage)}
                     </Text>
                     <Text as="span" variant="bodySm" tone="subdued">
-                      3% of {formatCurrency(subscriptionData.currentUsage)}
+                      3% of{" "}
+                      {formatCurrency(subscriptionData.currentUsage / 0.03)}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -204,7 +205,7 @@ export function SubscriptionActive({
                             Math.max(
                               0,
                               subscriptionData.spendingLimit -
-                                subscriptionData.currentUsage * 0.03,
+                                subscriptionData.currentUsage,
                             ),
                           )}
                         </Text>
@@ -257,18 +258,19 @@ export function SubscriptionActive({
                           📈 Revenue vs Cap
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
-                          {Math.round(
+                          {(
                             (subscriptionData.currentUsage /
+                              0.03 /
                               (subscriptionData.spendingLimit / 0.03)) *
-                              100,
-                          )}
+                            100
+                          ).toFixed(3)}
                           % of max
                         </Text>
                       </InlineStack>
                       <ProgressBar
                         progress={Math.min(
                           (subscriptionData.currentUsage /
-                            (subscriptionData.spendingLimit / 0.03)) *
+                            subscriptionData.spendingLimit) *
                             100,
                           100,
                         )}
@@ -277,7 +279,7 @@ export function SubscriptionActive({
                       />
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" fontWeight="semibold">
-                          {formatCurrency(subscriptionData.currentUsage)}
+                          {formatCurrency(subscriptionData.currentUsage / 0.03)}
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           /{" "}
@@ -328,7 +330,7 @@ export function SubscriptionActive({
                       />
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" fontWeight="semibold">
-                          {formatCurrency(subscriptionData.currentUsage * 0.03)}
+                          {formatCurrency(subscriptionData.currentUsage)}
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           / {formatCurrency(subscriptionData.spendingLimit)}

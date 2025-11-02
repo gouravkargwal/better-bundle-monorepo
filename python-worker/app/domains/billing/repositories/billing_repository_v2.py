@@ -268,18 +268,22 @@ class BillingRepositoryV2:
 
     async def get_shop_subscription(self, shop_id: str) -> ShopSubscription:
         """Get shop subscription with all required relationships loaded."""
-        query = (
-            select(ShopSubscription)
-            .options(
-                # Load whatever relationships effective_commission_rate needs
-                selectinload(ShopSubscription.pricing_tier),
-                joinedload(ShopSubscription.shop),  # if needed
+        try:
+            query = (
+                select(ShopSubscription)
+                .options(
+                    # Load whatever relationships effective_commission_rate needs
+                    selectinload(ShopSubscription.pricing_tier),
+                    joinedload(ShopSubscription.shop),  # if needed
+                )
+                .where(ShopSubscription.shop_id == shop_id)
+                .where(ShopSubscription.is_active == True)
             )
-            .where(ShopSubscription.shop_id == shop_id)
-            .where(ShopSubscription.is_active == True)
-        )
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+            result = await self.session.execute(query)
+            return result.scalar_one()
+        except Exception as e:
+            logger.error(f"Error getting shop subscription for shop {shop_id}: {e}")
+            return None
 
     async def get_shop_subscription_by_id(
         self, subscription_id: str
@@ -320,7 +324,8 @@ class BillingRepositoryV2:
                     and_(
                         ShopSubscription.shop_id == shop_id,
                         ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.status == SubscriptionStatus.TRIAL,  # ✅ FIX: Check for TRIAL status, not ACTIVE
+                        ShopSubscription.status
+                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Check for TRIAL status, not ACTIVE
                         ShopSubscription.is_active == True,
                     )
                 )
@@ -414,7 +419,9 @@ class BillingRepositoryV2:
                 return True
 
             # ✅ GUARD: Check if already completed
-            if subscription.status != SubscriptionStatus.TRIAL:  # ✅ FIX: Check for TRIAL status, not ACTIVE
+            if (
+                subscription.status != SubscriptionStatus.TRIAL
+            ):  # ✅ FIX: Check for TRIAL status, not ACTIVE
                 logger.debug(
                     f"Trial {subscription.id} already completed (status: {subscription.status})"
                 )
@@ -429,6 +436,16 @@ class BillingRepositoryV2:
 
     # ============= BILLING CYCLE OPERATIONS =============
     # (Keep existing billing cycle methods unchanged)
+
+    async def get_billing_cycle_by_id(self, cycle_id: str) -> Optional[BillingCycle]:
+        """Get billing cycle by ID"""
+        try:
+            query = select(BillingCycle).where(BillingCycle.id == cycle_id)
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting billing cycle by ID {cycle_id}: {e}")
+            return None
 
     async def get_current_billing_cycle(
         self, shop_subscription_id: str

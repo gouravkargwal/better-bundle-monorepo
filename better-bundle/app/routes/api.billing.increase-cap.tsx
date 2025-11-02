@@ -4,120 +4,6 @@ import prisma from "../db.server";
 import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 import logger from "app/utils/logger";
 
-async function reprocessRejectedCommissions(shopId: string, cycleId: string) {
-  try {
-    await prisma.$transaction(async (tx) => {
-      // Find all rejected commissions for this cycle with row-level locking
-      const rejectedCommissions = await tx.commission_records.findMany({
-        where: {
-          shop_id: shopId,
-          billing_cycle_id: cycleId,
-          charge_type: "rejected",
-          status: "rejected",
-        },
-        select: {
-          id: true,
-          commission_overflow: true,
-        },
-        orderBy: { created_at: "asc" }, // Process in order
-      });
-
-      if (rejectedCommissions.length === 0) {
-        return;
-      }
-
-      // Get current cycle with row-level locking
-      const currentCycle = await tx.billing_cycles.findUnique({
-        where: { id: cycleId },
-        select: {
-          current_cap_amount: true,
-          usage_amount: true,
-        },
-      });
-
-      if (!currentCycle) {
-        logger.error({ cycleId }, "Billing cycle not found");
-        return;
-      }
-
-      let remainingCap =
-        Number(currentCycle.current_cap_amount) -
-        Number(currentCycle.usage_amount);
-
-      let totalCharged = 0;
-
-      // Reprocess each rejected commission with atomic updates
-      for (const commission of rejectedCommissions) {
-        const commissionOverflow = Number(commission.commission_overflow);
-
-        if (commissionOverflow <= remainingCap) {
-          // Can charge the full overflow amount
-          const updateResult = await tx.commission_records.updateMany({
-            where: {
-              id: commission.id,
-              charge_type: "rejected", // Only update if still rejected
-              status: "rejected",
-            },
-            data: {
-              commission_charged: commissionOverflow,
-              commission_overflow: 0,
-              charge_type: "full",
-              status: "pending",
-              updated_at: new Date(),
-            },
-          });
-
-          if (updateResult.count > 0) {
-            totalCharged += commissionOverflow;
-            remainingCap -= commissionOverflow;
-          }
-        } else if (remainingCap > 0) {
-          // Partial charge only
-          const partialCharge = remainingCap;
-          const newOverflow = commissionOverflow - partialCharge;
-
-          const updateResult = await tx.commission_records.updateMany({
-            where: {
-              id: commission.id,
-              charge_type: "rejected", // Only update if still rejected
-              status: "rejected",
-            },
-            data: {
-              commission_charged: partialCharge,
-              commission_overflow: newOverflow,
-              charge_type: "partial",
-              status: "pending",
-              updated_at: new Date(),
-            },
-          });
-
-          if (updateResult.count > 0) {
-            totalCharged += partialCharge;
-            remainingCap = 0;
-          }
-        } else {
-          // No remaining cap
-          break;
-        }
-      }
-
-      // ✅ ATOMIC: Update cycle usage once with total charged amount
-      if (totalCharged > 0) {
-        await tx.billing_cycles.update({
-          where: { id: cycleId },
-          data: {
-            usage_amount: {
-              increment: totalCharged,
-            },
-          },
-        });
-      }
-    });
-  } catch (error) {
-    logger.error({ error }, "Error reprocessing rejected commissions");
-  }
-}
-
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
@@ -130,7 +16,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // Get shop record
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
-      select: { id: true, currency_code: true },
+      select: {
+        id: true,
+        currency_code: true,
+        suspension_reason: true,
+      },
     });
 
     if (!shopRecord) {
@@ -146,11 +36,10 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       include: {
         billing_cycles: {
-          where: { status: "active" },
+          where: { status: "ACTIVE" },
           orderBy: { cycle_number: "desc" },
           take: 1,
         },
-        shopify_subscription: true,
       },
     });
 
@@ -180,12 +69,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Update Shopify subscription with new capped amount
     const currency = shopRecord.currency_code || "USD";
-    const subscriptionId =
-      shopSubscription.shopify_subscription?.shopify_subscription_id;
+    const shopifyLineItemId = shopSubscription.shopify_line_item_id;
 
-    if (!subscriptionId) {
+    if (!shopifyLineItemId) {
       return json(
-        { success: false, error: "No subscription ID found" },
+        { success: false, error: "No Shopify line item ID found" },
         { status: 404 },
       );
     }
@@ -221,7 +109,7 @@ export async function action({ request }: ActionFunctionArgs) {
     `;
 
     const variables = {
-      id: shopSubscription.shopify_subscription.shopify_line_item_id,
+      id: shopifyLineItemId,
       cappedAmount: {
         amount: newSpendingLimit.toString(),
         currencyCode: currency,
@@ -235,7 +123,7 @@ export async function action({ request }: ActionFunctionArgs) {
       logger.error(
         {
           errors: data.data.appSubscriptionLineItemUpdate.userErrors,
-          subscriptionId,
+          shopifyLineItemId,
         },
         "Shopify GraphQL errors while updating subscription",
       );
@@ -246,19 +134,8 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Update billing plan with new cap
-    // Create billing cycle adjustment record
-    await prisma.billing_cycle_adjustments.create({
-      data: {
-        billing_cycle_id: currentCycle.id,
-        old_cap_amount: currentCap,
-        new_cap_amount: newSpendingLimit,
-        adjustment_amount: newSpendingLimit - currentCap,
-        adjustment_reason: "cap_increase",
-        adjusted_by: "user",
-        adjusted_by_type: "user",
-        adjusted_at: new Date(),
-      },
-    });
+    // Note: billing_cycle_adjustments table may not exist in all schemas
+    // This is optional tracking - main cap update happens below
 
     // ✅ ATOMIC: Update billing cycle cap with race condition protection
     await prisma.billing_cycles.update({
@@ -271,15 +148,13 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Reactivate shop services if they were suspended due to cap
-    if (shopRecord.suspension_reason === "monthly_cap_reached") {
-      await prisma.shops.update({
-        where: { id: shopRecord.id },
+    // Reactivate shop subscription if it was suspended due to cap
+    // Kafka consumer will handle reprocessing rejected commissions
+    if (shopSubscription.status === "SUSPENDED") {
+      await prisma.shop_subscriptions.update({
+        where: { id: shopSubscription.id },
         data: {
-          is_active: true,
-          suspended_at: null,
-          suspension_reason: null,
-          service_impact: null,
+          status: "ACTIVE",
           updated_at: new Date(),
         },
       });
@@ -287,8 +162,38 @@ export async function action({ request }: ActionFunctionArgs) {
       // Invalidate suspension cache so fresh data is fetched
       await invalidateSuspensionCache(shopRecord.id);
 
-      // ✅ REPROCESS REJECTED COMMISSIONS
-      await reprocessRejectedCommissions(shopRecord.id, currentCycle.id);
+      logger.info(
+        { shop_id: shopRecord.id, subscription_id: shopSubscription.id },
+        "Reactivated shop subscription after cap increase",
+      );
+    }
+
+    // ✅ Publish Kafka event to reprocess rejected commissions asynchronously
+    try {
+      const { KafkaProducerService } = await import(
+        "../services/kafka/kafka-producer.service"
+      );
+      const kafkaProducer = await KafkaProducerService.getInstance();
+
+      await kafkaProducer.publishShopifyUsageEvent({
+        event_type: "cap_increase",
+        shop_id: shopRecord.id,
+        shop_domain: shop,
+        billing_cycle_id: currentCycle.id,
+        new_cap_amount: newSpendingLimit,
+        old_cap_amount: currentCap,
+      });
+
+      logger.info(
+        { shop_id: shopRecord.id, cycle_id: currentCycle.id },
+        "Published cap increase event for reprocessing rejected commissions",
+      );
+    } catch (kafkaError) {
+      logger.error(
+        { error: kafkaError, shop_id: shopRecord.id },
+        "Failed to publish cap increase event - reprocessing will happen when consumer processes next message",
+      );
+      // Don't fail the request - Kafka consumer will handle it eventually
     }
 
     return json({

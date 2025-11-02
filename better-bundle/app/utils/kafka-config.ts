@@ -83,6 +83,13 @@ export const kafkaConfig = {
       compressionType: "snappy",
       cleanupPolicy: "delete",
     },
+    "shopify-usage-events": {
+      partitions: 4,
+      replicationFactor: 3,
+      retentionMs: 259200000, // 3 days
+      compressionType: "snappy",
+      cleanupPolicy: "delete",
+    },
     "access-control": {
       partitions: 6,
       replicationFactor: 3,
@@ -100,6 +107,7 @@ export const kafkaConfig = {
     "ml-training-processors": "ml-training",
     "behavioral-events-processors": "behavioral-events",
     "billing-processors": "billing-events",
+    "shopify-usage-processors": "shopify-usage-events",
     "access-control-processors": "access-control",
   },
 

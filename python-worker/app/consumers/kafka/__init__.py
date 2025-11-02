@@ -8,6 +8,7 @@ from .billing_consumer import BillingKafkaConsumer
 from .customer_linking_consumer import CustomerLinkingKafkaConsumer
 from .feature_computation_consumer import FeatureComputationKafkaConsumer
 from .purchase_attribution_consumer import PurchaseAttributionKafkaConsumer
+from .shopify_usage_consumer import ShopifyUsageKafkaConsumer
 
 __all__ = [
     "DataCollectionKafkaConsumer",
@@ -16,4 +17,5 @@ __all__ = [
     "CustomerLinkingKafkaConsumer",
     "FeatureComputationKafkaConsumer",
     "PurchaseAttributionKafkaConsumer",
+    "ShopifyUsageKafkaConsumer",
 ]
