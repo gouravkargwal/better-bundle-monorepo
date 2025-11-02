@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   BlockStack,
@@ -29,6 +29,29 @@ export function SubscriptionActive({
   const [showCapIncreaseModal, setShowCapIncreaseModal] = useState(false);
   const [newCapAmount, setNewCapAmount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{
+    content: string;
+    isError: boolean;
+  } | null>(null);
+
+  // Calculate default cap amount (1.5x current cap)
+  const getDefaultCap = () => Math.round(subscriptionData.spendingLimit * 1.5);
+
+  // Initialize newCapAmount when modal opens
+  useEffect(() => {
+    if (showCapIncreaseModal) {
+      // Set default to 1.5x current cap when modal opens
+      const defaultCap = getDefaultCap();
+      // Only set if current value is invalid (0 or less than minimum)
+      if (
+        newCapAmount === 0 ||
+        newCapAmount < subscriptionData.spendingLimit * 1.1
+      ) {
+        setNewCapAmount(defaultCap);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCapIncreaseModal]);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -41,9 +64,22 @@ export function SubscriptionActive({
   const isNearCap = usagePercentage > 80;
   const isAtCap = usagePercentage >= 100;
 
+  // Auto-dismiss toast after 5 seconds
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
   const handleCapIncrease = async () => {
     if (newCapAmount <= subscriptionData.spendingLimit) {
-      alert("New cap must be higher than current cap");
+      setToastMessage({
+        content: "New cap must be higher than current cap",
+        isError: true,
+      });
       return;
     }
 
@@ -52,12 +88,52 @@ export function SubscriptionActive({
       const result = await onIncreaseCap(newCapAmount);
       if (result.success) {
         setShowCapIncreaseModal(false);
-        alert("Cap increased successfully! Services will resume.");
+        // Check if merchant approval is required
+        if (
+          (result as any).requiresApproval &&
+          (result as any).confirmationUrl
+        ) {
+          // Convert confirmation URL to shopify:// protocol (same as usage records navigation)
+          const confirmationUrl = (result as any).confirmationUrl;
+          if (confirmationUrl) {
+            try {
+              const url = new URL(confirmationUrl);
+              if (url.pathname.startsWith("/admin/")) {
+                // Extract path after /admin/ and convert to shopify://admin/...
+                const adminPath = url.pathname.substring("/admin".length);
+                const shopifyUrl = `shopify://admin${adminPath}${url.search}`;
+                window.open(shopifyUrl, "_top");
+              } else {
+                // Fallback to original URL if format doesn't match
+                window.open(confirmationUrl, "_top");
+              }
+            } catch (error) {
+              // If URL parsing fails, use original URL
+              console.error("Failed to parse confirmation URL:", error);
+              window.open(confirmationUrl, "_top");
+            }
+          }
+        } else {
+          setToastMessage({
+            content: "Cap increased successfully! Services will resume.",
+            isError: false,
+          });
+          // Refresh data after successful increase
+          setTimeout(() => {
+            window.location.reload();
+          }, 2000);
+        }
       } else {
-        alert(`Failed to increase cap: ${result.error}`);
+        setToastMessage({
+          content: result.error || "Failed to increase cap",
+          isError: true,
+        });
       }
     } catch (error) {
-      alert("An unexpected error occurred");
+      setToastMessage({
+        content: "An unexpected error occurred. Please try again.",
+        isError: true,
+      });
     } finally {
       setIsLoading(false);
     }
@@ -66,6 +142,16 @@ export function SubscriptionActive({
   return (
     <>
       <BlockStack gap="500">
+        {/* Toast Messages */}
+        {toastMessage && (
+          <Banner
+            tone={toastMessage.isError ? "critical" : "success"}
+            onDismiss={() => setToastMessage(null)}
+          >
+            <Text as="p">{toastMessage.content}</Text>
+          </Banner>
+        )}
+
         {/* Status Header */}
         <Card>
           <BlockStack gap="300">
@@ -429,10 +515,23 @@ export function SubscriptionActive({
 
               {/* Warnings */}
               {isNearCap && !isAtCap && (
-                <Banner tone="info">
+                <Banner
+                  tone="info"
+                  action={{
+                    content: "Increase Cap",
+                    onAction: () => {
+                      const defaultCap = Math.round(
+                        subscriptionData.spendingLimit * 1.5,
+                      );
+                      setNewCapAmount(defaultCap);
+                      setShowCapIncreaseModal(true);
+                    },
+                  }}
+                >
                   <Text as="p">
                     You're approaching your monthly spending cap (
-                    {subscriptionData.usagePercentage}% used).
+                    {Number(usagePercentage.toFixed(1))}% used). Consider
+                    increasing your cap to avoid service interruption.
                   </Text>
                 </Banner>
               )}
@@ -498,9 +597,10 @@ export function SubscriptionActive({
                           variant="primary"
                           size="slim"
                           onClick={() => {
-                            setNewCapAmount(
+                            const defaultCap = Math.round(
                               subscriptionData.spendingLimit * 1.5,
-                            ); // 50% increase as default
+                            );
+                            setNewCapAmount(defaultCap);
                             setShowCapIncreaseModal(true);
                           }}
                         >
@@ -635,13 +735,19 @@ export function SubscriptionActive({
 
             <RangeSlider
               label="New Monthly Cap"
-              min={subscriptionData.spendingLimit * 1.1} // 10% higher than current
-              max={subscriptionData.spendingLimit * 5} // 5x current cap
-              step={50}
-              value={newCapAmount}
-              onChange={(value) =>
-                setNewCapAmount(typeof value === "number" ? value : value[0])
+              min={Math.round(subscriptionData.spendingLimit * 1.1)} // 10% higher than current
+              max={Math.round(subscriptionData.spendingLimit * 5)} // 5x current cap
+              step={Math.max(
+                1,
+                Math.round(subscriptionData.spendingLimit * 0.05),
+              )} // 5% of current cap as step, minimum 1
+              value={
+                newCapAmount || Math.round(subscriptionData.spendingLimit * 1.5)
               }
+              onChange={(value) => {
+                const numValue = typeof value === "number" ? value : value[0];
+                setNewCapAmount(Math.round(numValue));
+              }}
               output
             />
 

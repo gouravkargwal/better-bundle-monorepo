@@ -79,6 +79,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Use Shopify GraphQL to update subscription
+    // Note: AppSubscriptionLineItemUpdatePayload returns appSubscription, not appSubscriptionLineItem
     const mutation = `
       mutation appSubscriptionLineItemUpdate($id: ID!, $cappedAmount: MoneyInput!) {
         appSubscriptionLineItemUpdate(
@@ -89,16 +90,21 @@ export async function action({ request }: ActionFunctionArgs) {
             field
             message
           }
-          appSubscriptionLineItem {
+          confirmationUrl
+          appSubscription {
             id
-            plan {
-              pricingDetails {
-                __typename
-                ... on AppUsagePricing {
-                  terms
-                  cappedAmount {
-                    amount
-                    currencyCode
+            status
+            lineItems {
+              id
+              plan {
+                pricingDetails {
+                  __typename
+                  ... on AppUsagePricing {
+                    terms
+                    cappedAmount {
+                      amount
+                      currencyCode
+                    }
                   }
                 }
               }
@@ -119,6 +125,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const response = await admin.graphql(mutation, { variables });
     const data = await response.json();
 
+    // Check for user errors first
     if (data.data?.appSubscriptionLineItemUpdate?.userErrors?.length > 0) {
       logger.error(
         {
@@ -127,10 +134,28 @@ export async function action({ request }: ActionFunctionArgs) {
         },
         "Shopify GraphQL errors while updating subscription",
       );
-      return json(
-        { success: false, error: "Failed to update subscription in Shopify" },
-        { status: 500 },
+      const errorMessage =
+        data.data.appSubscriptionLineItemUpdate.userErrors[0]?.message ||
+        "Failed to update subscription in Shopify";
+      return json({ success: false, error: errorMessage }, { status: 500 });
+    }
+
+    // Check if merchant approval is required (confirmationUrl is returned)
+    const confirmationUrl =
+      data.data?.appSubscriptionLineItemUpdate?.confirmationUrl;
+    if (confirmationUrl) {
+      logger.info(
+        { shopifyLineItemId, confirmationUrl },
+        "Cap increase requires merchant approval",
       );
+      // Return the confirmation URL so the frontend can redirect
+      return json({
+        success: true,
+        requiresApproval: true,
+        confirmationUrl,
+        message:
+          "Please approve the cap increase in Shopify to complete the update",
+      });
     }
 
     // Update billing plan with new cap
