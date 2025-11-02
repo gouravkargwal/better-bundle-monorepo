@@ -320,7 +320,7 @@ class BillingRepositoryV2:
                     and_(
                         ShopSubscription.shop_id == shop_id,
                         ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,  # ✅ FIX: Check for TRIAL status, not ACTIVE
                         ShopSubscription.is_active == True,
                     )
                 )
@@ -347,11 +347,11 @@ class BillingRepositoryV2:
                     and_(
                         ShopSubscription.id == subscription.id,
                         ShopSubscription.status
-                        == SubscriptionStatus.ACTIVE,  # Only update if still active
+                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Only update if still in TRIAL status
                     )
                 )
                 .values(
-                    status=SubscriptionStatus.COMPLETED,
+                    status=SubscriptionStatus.TRIAL_COMPLETED,  # ✅ FIX: Set to TRIAL_COMPLETED, not COMPLETED
                     completed_at=now_utc(),
                     updated_at=now_utc(),
                 )
@@ -414,7 +414,7 @@ class BillingRepositoryV2:
                 return True
 
             # ✅ GUARD: Check if already completed
-            if subscription.status != SubscriptionStatus.ACTIVE:
+            if subscription.status != SubscriptionStatus.TRIAL:  # ✅ FIX: Check for TRIAL status, not ACTIVE
                 logger.debug(
                     f"Trial {subscription.id} already completed (status: {subscription.status})"
                 )

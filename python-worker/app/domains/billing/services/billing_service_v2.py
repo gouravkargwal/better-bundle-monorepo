@@ -252,10 +252,17 @@ class BillingServiceV2:
     ) -> None:
         """Complete trial and wait for user to setup billing with their chosen cap - TRANSACTION SAFE"""
         try:
+            # Calculate actual revenue from commission records
+            actual_revenue = (
+                await self.purchase_attribution_repository.get_total_revenue_by_shop(
+                    shop_id
+                )
+            )
+
             # ✅ ATOMIC: Use the repository's atomic trial completion method
             await self.billing_repository.check_trial_completion(
-                shop_subscription.id,
-                Decimal("0"),  # Will be calculated dynamically in the repository
+                shop_id,  # ✅ FIX: Pass shop_id, not shop_subscription.id
+                actual_revenue,  # ✅ FIX: Pass calculated revenue, not Decimal("0")
             )
 
             logger.info(

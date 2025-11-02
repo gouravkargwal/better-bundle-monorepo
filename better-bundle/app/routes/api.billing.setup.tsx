@@ -36,7 +36,9 @@ export async function action({ request }: ActionFunctionArgs) {
     // ✅ Get shop subscription - allow if trial is completed OR pending approval
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
-      include: { subscription_trials: true },
+      include: {
+        pricing_tiers: true,
+      },
     });
 
     if (!shopSubscription) {
@@ -68,7 +70,9 @@ export async function action({ request }: ActionFunctionArgs) {
         actualRevenue._sum?.attributed_revenue || 0,
       );
       const thresholdAmount = Number(
-        shopSubscription.subscription_trials?.threshold_amount || 0,
+        shopSubscription.trial_threshold_override ||
+          shopSubscription.pricing_tiers?.trial_threshold_amount ||
+          0,
       );
 
       if (actualAccumulatedRevenue < thresholdAmount) {
@@ -218,25 +222,15 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
-    // Create or update Shopify subscription record
-    await prisma.shopify_subscriptions.upsert({
-      where: { shop_subscription_id: shopSubscription.id },
-      update: {
+    // Update shop subscription with Shopify subscription info
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
         shopify_subscription_id: subscription.id,
         shopify_line_item_id: subscription.lineItems[0].id,
         confirmation_url: confirmationUrl,
-        status: "PENDING" as any,
+        shopify_status: "PENDING",
         updated_at: new Date(),
-        error_count: "0",
-      },
-      create: {
-        shop_subscription_id: shopSubscription.id,
-        shopify_subscription_id: subscription.id,
-        shopify_line_item_id: subscription.lineItems[0].id,
-        confirmation_url: confirmationUrl,
-        status: "PENDING" as any,
-        created_at: new Date(),
-        error_count: "0",
       },
     });
 

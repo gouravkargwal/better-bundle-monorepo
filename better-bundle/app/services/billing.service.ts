@@ -62,18 +62,16 @@ export async function getTrialRevenueData(
         is_active: true,
       },
       include: {
-        subscription_trials: true,
+        pricing_tiers: true,
       },
     });
 
-    if (!shopSubscription?.subscription_trials) {
+    if (!shopSubscription || shopSubscription.subscription_type !== "TRIAL") {
       return {
         attributedRevenue: 0,
         commissionEarned: 0,
       };
     }
-
-    const trial = shopSubscription.subscription_trials;
 
     // ✅ Calculate actual revenue from commission records
     const actualRevenue = await prisma.commission_records.aggregate({
@@ -89,9 +87,16 @@ export async function getTrialRevenueData(
       },
     });
 
+    // Calculate commission earned from trial revenue
+    const trialRevenue = Number(actualRevenue._sum?.attributed_revenue || 0);
+    const commissionRate = Number(
+      shopSubscription.pricing_tiers?.commission_rate || 0.03,
+    );
+    const commissionEarned = trialRevenue * commissionRate;
+
     return {
-      attributedRevenue: Number(actualRevenue._sum?.attributed_revenue || 0),
-      commissionEarned: Number(trial.commission_saved),
+      attributedRevenue: trialRevenue,
+      commissionEarned: commissionEarned,
     };
   } catch (error) {
     logger.error({ error, shopId }, "Error getting trial revenue data");
@@ -251,13 +256,11 @@ export async function getBillingSummary(
       include: {
         subscription_plans: true,
         pricing_tiers: true,
-        subscription_trials: true,
         billing_cycles: {
           where: { status: "ACTIVE" },
           orderBy: { cycle_number: "desc" },
           take: 1,
         },
-        shopify_subscriptions: true,
       },
     });
 
@@ -266,15 +269,13 @@ export async function getBillingSummary(
     }
 
     const currentCycle = shopSubscription.billing_cycles[0];
-    const trial = shopSubscription.subscription_trials;
-    const shopifySub = shopSubscription.shopify_subscriptions;
 
     return {
       shop_id: shopId,
       subscription: {
         id: shopSubscription.id,
         status: shopSubscription.status,
-        start_date: shopSubscription.start_date.toISOString(),
+        start_date: shopSubscription.started_at.toISOString(),
         plan_name: shopSubscription.subscription_plans?.name || "Unknown",
       },
       pricing_tier: {
@@ -283,14 +284,19 @@ export async function getBillingSummary(
           shopSubscription.pricing_tiers?.commission_rate || 0.03,
         ),
       },
-      trial: trial
-        ? {
-            status: trial.status,
-            threshold: Number(trial.threshold_amount),
-            // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
-            progress_percentage: 0, // Calculate based on actual revenue from commission_records
-          }
-        : undefined,
+      trial:
+        shopSubscription.subscription_type === "TRIAL"
+          ? {
+              status: shopSubscription.status,
+              threshold: Number(
+                shopSubscription.trial_threshold_override ||
+                  shopSubscription.pricing_tiers?.trial_threshold_amount ||
+                  1000,
+              ),
+              // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
+              progress_percentage: 0, // Calculate based on actual revenue from commission_records
+            }
+          : undefined,
       current_cycle: currentCycle
         ? {
             id: currentCycle.id,
@@ -301,10 +307,10 @@ export async function getBillingSummary(
             days_remaining: 0, // Calculate based on end_date - now
           }
         : undefined,
-      shopify_subscription: shopifySub
+      shopify_subscription: shopSubscription.shopify_subscription_id
         ? {
-            status: shopifySub.status,
-            shopify_id: shopifySub.shopify_subscription_id,
+            status: shopSubscription.shopify_status || "UNKNOWN",
+            shopify_id: shopSubscription.shopify_subscription_id,
           }
         : undefined,
     };
@@ -362,21 +368,8 @@ export async function createShopSubscription(
       },
     });
 
-    // Create subscription trial
-    const subscriptionTrial = await prisma.subscription_trials.create({
-      data: {
-        shop_subscription_id: shopSubscription.id,
-        threshold_amount: defaultPricingTier.trial_threshold_amount,
-        // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
-        commission_saved: 0,
-        status: "ACTIVE",
-        started_at: new Date(),
-      },
-    });
-
     return {
       shop_subscription: shopSubscription,
-      subscription_trial: subscriptionTrial,
     };
   } catch (error: any) {
     logger.error(
@@ -410,7 +403,6 @@ export async function completeTrialAndCreateCycle(
       },
       include: {
         pricing_tiers: true,
-        subscription_trials: true,
       },
     });
 
@@ -418,14 +410,7 @@ export async function completeTrialAndCreateCycle(
       throw new Error("Shop subscription not found");
     }
 
-    // Update trial status
-    await prisma.subscription_trials.update({
-      where: { id: shopSubscription.subscription_trials!.id },
-      data: {
-        status: "COMPLETED",
-        completed_at: new Date(),
-      },
-    });
+    // Trial completion is handled by updating shop subscription status
 
     // Update shop subscription status
     await prisma.shop_subscriptions.update({
@@ -470,32 +455,14 @@ export async function activateSubscription(
       throw new Error("Shop subscription not found");
     }
 
-    // Create or update Shopify subscription record
-    const shopifySubscription = await prisma.shopify_subscriptions.upsert({
-      where: {
-        shopify_subscription_id: shopifySubscriptionId,
-      },
-      update: {
-        status: "ACTIVE",
-        activated_at: new Date(),
-        error_count: "0",
-      },
-      create: {
-        shop_subscription_id: shopSubscription.id,
-        shopify_subscription_id: shopifySubscriptionId,
-        status: "ACTIVE",
-        created_at: new Date(),
-        activated_at: new Date(),
-        error_count: "0",
-      },
-    });
-
-    // Update shop subscription status
+    // Update shop subscription with Shopify subscription info
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
+        shopify_subscription_id: shopifySubscriptionId,
+        shopify_status: "ACTIVE",
         status: "ACTIVE",
-        activated_at: new Date(),
+        updated_at: new Date(),
       },
     });
 
@@ -521,7 +488,6 @@ export async function activateSubscription(
 
     return {
       success: true,
-      shopify_subscription: shopifySubscription,
       billing_cycle: billingCycle,
     };
   } catch (error) {
@@ -555,21 +521,6 @@ export async function increaseBillingCycleCap(
     }
 
     const oldCapAmount = currentCycle.current_cap_amount;
-    const adjustmentAmount = newCapAmount - Number(oldCapAmount);
-
-    // Create adjustment record
-    await prisma.billing_cycle_adjustments.create({
-      data: {
-        billing_cycle_id: currentCycle.id,
-        old_cap_amount: oldCapAmount,
-        new_cap_amount: newCapAmount,
-        adjustment_amount: adjustmentAmount,
-        adjustment_reason: "CAP_INCREASE",
-        adjusted_by: adjustedBy,
-        adjusted_by_type: "user",
-        adjusted_at: new Date(),
-      },
-    });
 
     // Update billing cycle cap
     await prisma.billing_cycles.update({
