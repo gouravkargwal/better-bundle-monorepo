@@ -456,11 +456,13 @@ export async function activateSubscription(
     }
 
     // Update shop subscription with Shopify subscription info
+    // ✅ When subscription is activated, convert from TRIAL to PAID
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         shopify_subscription_id: shopifySubscriptionId,
         shopify_status: "ACTIVE",
+        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
         status: "ACTIVE",
         updated_at: new Date(),
       },

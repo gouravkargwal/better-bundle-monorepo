@@ -52,10 +52,18 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
-  // Calculate ROI metrics
+  // Calculate cost efficiency metrics
   const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
   const commissionPaid = overviewData.totalRevenue * commissionRate;
   const netProfit = overviewData.totalRevenue - commissionPaid;
+
+  // Calculate percentage kept (more intuitive than ROI)
+  const percentageKept =
+    overviewData.totalRevenue > 0
+      ? (netProfit / overviewData.totalRevenue) * 100
+      : 0;
+
+  // ROI calculation (used to show "Exceptional ROI" for very high values)
   const roiPercentage =
     commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
 
@@ -213,7 +221,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               <div style={{ color: "#8B5CF6" }}>
                 <Text as="p" variant="heading2xl" fontWeight="bold">
                   {overviewData.totalRevenue > 0
-                    ? `${roiPercentage.toFixed(0)}% ROI`
+                    ? `You keep ${percentageKept.toFixed(1)}%`
                     : "Commission-Based"}
                 </Text>
               </div>
@@ -227,6 +235,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     )}
                     , paid only{" "}
                     {formatCurrencyValue(commissionPaid, overviewData.currency)}
+                    {roiPercentage > 1000 && <> • Exceptional ROI</>}
                   </>
                 ) : (
                   "No charges until revenue is generated"

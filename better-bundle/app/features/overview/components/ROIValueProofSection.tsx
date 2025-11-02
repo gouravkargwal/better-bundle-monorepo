@@ -1,12 +1,4 @@
-// features/overview/components/ROIValueProofSection.tsx
-import {
-  Card,
-  Text,
-  BlockStack,
-  InlineStack,
-  Badge,
-  Divider,
-} from "@shopify/polaris";
+import { Card, Text, BlockStack, InlineStack, Badge } from "@shopify/polaris";
 import { getCurrencySymbol } from "../../../utils/currency";
 
 interface ROIValueProofSectionProps {
@@ -30,8 +22,10 @@ export function ROIValueProofSection({
 
   const commissionPaid = totalRevenueGenerated * commissionRate;
   const netProfit = totalRevenueGenerated - commissionPaid;
-  const roiPercentage =
-    commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
+
+  // Calculate percentage kept (more intuitive than ROI)
+  const percentageKept =
+    totalRevenueGenerated > 0 ? (netProfit / totalRevenueGenerated) * 100 : 0;
 
   // Don't show ROI section if there's no revenue data
   if (totalRevenueGenerated === 0) {
@@ -124,7 +118,7 @@ export function ROIValueProofSection({
                 {!isTrialPhase && (
                   <div>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      ROI
+                      You Keep
                     </Text>
                     <Text
                       as="p"
@@ -132,7 +126,7 @@ export function ROIValueProofSection({
                       fontWeight="bold"
                       tone="success"
                     >
-                      {`${roiPercentage.toFixed(0)}%`}
+                      {`${percentageKept.toFixed(1)}%`}
                     </Text>
                   </div>
                 )}

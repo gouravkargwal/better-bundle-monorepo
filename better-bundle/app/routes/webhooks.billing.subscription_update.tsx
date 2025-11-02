@@ -81,7 +81,6 @@ async function handleActiveSubscription(
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
       include: {
-        shopify_subscriptions: true,
         pricing_tiers: true,
         billing_cycles: true,
       },
@@ -95,25 +94,16 @@ async function handleActiveSubscription(
       return;
     }
 
-    // Update shopify_subscriptions table
-    if (shopSubscription.shopify_subscriptions) {
-      await prisma.shopify_subscriptions.update({
-        where: { id: shopSubscription.shopify_subscriptions.id },
-        data: {
-          status: "ACTIVE",
-          activated_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    // Update shop_subscriptions table
+    // Update shop_subscriptions table with Shopify subscription info
+    // ✅ When Shopify subscription becomes ACTIVE, convert from TRIAL to PAID
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
+        shopify_subscription_id: subscriptionId,
+        shopify_status: "ACTIVE",
+        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
         status: "ACTIVE",
         is_active: true,
-        activated_at: new Date(),
         updated_at: new Date(),
       },
     });
@@ -213,7 +203,6 @@ async function handleCancelledSubscription(
     // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
-      include: { shopify_subscriptions: true },
     });
 
     if (!shopSubscription) {
@@ -224,22 +213,12 @@ async function handleCancelledSubscription(
       return;
     }
 
-    // Update shopify_subscriptions table
-    if (shopSubscription.shopify_subscriptions) {
-      await prisma.shopify_subscriptions.update({
-        where: { id: shopSubscription.shopify_subscriptions.id },
-        data: {
-          status: "CANCELLED",
-          cancelled_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-    }
-
     // Update shop_subscriptions table
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
+        shopify_subscription_id: subscriptionId,
+        shopify_status: "CANCELLED",
         status: "CANCELLED",
         is_active: false,
         cancelled_at: new Date(),
@@ -254,7 +233,7 @@ async function handleCancelledSubscription(
         is_active: false,
         suspended_at: new Date(),
         suspension_reason: "subscription_cancelled",
-        service_impact: "Services suspended due to subscription cancellation",
+        service_impact: "suspended", // ✅ FIX: Shortened to fit VarChar(50) limit
         updated_at: new Date(),
       },
     });

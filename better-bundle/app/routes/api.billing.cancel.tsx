@@ -37,19 +37,10 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const shopifySubscription = await prisma.shopify_subscriptions.findFirst({
-      where: {
-        shop_subscription_id: shopSubscription.id,
-      },
-      orderBy: {
-        created_at: "desc",
-      },
-    });
-
     // ✅ Cancel in Shopify if subscription exists and is not already cancelled
     if (
-      shopifySubscription?.shopify_subscription_id &&
-      shopifySubscription.status !== "CANCELLED"
+      shopSubscription.shopify_subscription_id &&
+      shopSubscription.shopify_status !== "CANCELLED"
     ) {
       try {
         const mutation = `
@@ -68,7 +59,7 @@ export async function action({ request }: ActionFunctionArgs) {
         `;
 
         const variables = {
-          id: shopifySubscription.shopify_subscription_id,
+          id: shopSubscription.shopify_subscription_id,
         };
 
         const response = await admin.graphql(mutation, { variables });
@@ -77,7 +68,7 @@ export async function action({ request }: ActionFunctionArgs) {
         logger.info(
           {
             shop,
-            subscriptionId: shopifySubscription.shopify_subscription_id,
+            subscriptionId: shopSubscription.shopify_subscription_id,
             result: result.data,
           },
           "Subscription cancellation response",
@@ -88,41 +79,21 @@ export async function action({ request }: ActionFunctionArgs) {
           logger.warn(
             {
               errors,
-              subscriptionId: shopifySubscription.shopify_subscription_id,
+              subscriptionId: shopSubscription.shopify_subscription_id,
             },
             "Errors cancelling in Shopify (continuing anyway)",
           );
         }
-
-        // Update local status to CANCELLED
-        await prisma.shopify_subscriptions.update({
-          where: { id: shopifySubscription.id },
-          data: {
-            status: "CANCELLED",
-            cancelled_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
       } catch (error) {
         logger.error(
           {
             error,
-            subscriptionId: shopifySubscription.shopify_subscription_id,
+            subscriptionId: shopSubscription.shopify_subscription_id,
           },
           "Error cancelling subscription in Shopify (continuing with local cancellation)",
         );
-
-        // Still update local status even if Shopify call fails
-        await prisma.shopify_subscriptions.update({
-          where: { id: shopifySubscription.id },
-          data: {
-            status: "CANCELLED",
-            cancelled_at: new Date(),
-            updated_at: new Date(),
-          },
-        });
       }
-    } else if (shopifySubscription?.status === "CANCELLED") {
+    } else if (shopSubscription.shopify_status === "CANCELLED") {
       logger.info({ shop }, "Subscription already cancelled in Shopify");
     } else {
       logger.info({ shop }, "No Shopify subscription to cancel");
@@ -133,8 +104,10 @@ export async function action({ request }: ActionFunctionArgs) {
       where: { id: shopSubscription.id },
       data: {
         user_chosen_cap_amount: null,
+        shopify_status: "CANCELLED",
         status: "TRIAL_COMPLETED", // Reset to trial completed so they can set up again
         is_active: true, // Reactivate so they can set up billing again
+        cancelled_at: new Date(),
         updated_at: new Date(),
       },
     });

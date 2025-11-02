@@ -22,6 +22,9 @@ interface InvoiceItem {
   description: string;
   type: "usage_record";
   createdAt?: string;
+  orderIds?: string[]; // Order IDs linked to this usage record
+  totalRevenue?: number; // Total revenue from orders
+  orderCount?: number; // Number of orders
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -138,15 +141,63 @@ export async function loader({ request }: LoaderFunctionArgs) {
         }
 
         // Transform usage records
-        usageRecords = allUsageRecords.map((record) => ({
-          id: record.id,
-          date: new Date(record.createdAt).toISOString().split("T")[0],
-          amount: parseFloat(record.price.amount),
-          status: "paid", // Usage records are typically paid when created
-          description: record.description || "Usage charge",
-          type: "usage_record" as const,
-          createdAt: record.createdAt,
-        }));
+        const usageRecordIds = allUsageRecords.map((r) => r.id);
+
+        // Batch fetch all commission records for all usage records at once
+        const allCommissionRecords = await prisma.commission_records.findMany({
+          where: {
+            shop_id: shop.id,
+            shopify_usage_record_id: {
+              in: usageRecordIds,
+            },
+            deleted_at: null,
+          },
+          select: {
+            shopify_usage_record_id: true,
+            order_id: true,
+            attributed_revenue: true,
+          },
+        });
+
+        // Group commission records by usage record ID
+        const commissionsByUsageRecord = new Map<
+          string,
+          typeof allCommissionRecords
+        >();
+        allCommissionRecords.forEach((cr) => {
+          if (cr.shopify_usage_record_id) {
+            const existing =
+              commissionsByUsageRecord.get(cr.shopify_usage_record_id) || [];
+            existing.push(cr);
+            commissionsByUsageRecord.set(cr.shopify_usage_record_id, existing);
+          }
+        });
+
+        // Transform usage records with order details
+        usageRecords = allUsageRecords.map((record) => {
+          const commissionRecords =
+            commissionsByUsageRecord.get(record.id) || [];
+
+          // Extract order IDs and calculate total revenue
+          const orderIds = commissionRecords.map((cr) => cr.order_id);
+          const totalRevenue = commissionRecords.reduce(
+            (sum, cr) => sum + Number(cr.attributed_revenue),
+            0,
+          );
+
+          return {
+            id: record.id,
+            date: new Date(record.createdAt).toISOString().split("T")[0],
+            amount: parseFloat(record.price.amount),
+            status: "paid", // Usage records are typically paid when created
+            description: record.description || "Usage charge",
+            type: "usage_record" as const,
+            createdAt: record.createdAt,
+            orderIds: orderIds.length > 0 ? orderIds : undefined,
+            totalRevenue: totalRevenue > 0 ? totalRevenue : undefined,
+            orderCount: orderIds.length,
+          };
+        });
 
         // Sort by date descending
         usageRecords.sort(

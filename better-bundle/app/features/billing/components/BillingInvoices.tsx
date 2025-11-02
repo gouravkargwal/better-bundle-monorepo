@@ -118,7 +118,28 @@ export function BillingInvoices({
     invoice.date,
     formatCurrency(invoice.amount),
     getStatusBadge(invoice.status),
-    invoice.description || "—",
+    <div key={`desc-${index}`}>
+      <Text as="span" variant="bodyMd">
+        {invoice.description || "Usage charge"}
+      </Text>
+      {invoice.orderIds && invoice.orderIds.length > 0 && (
+        <div style={{ marginTop: "4px" }}>
+          <Text as="span" variant="bodySm" tone="subdued">
+            Orders:{" "}
+            {invoice.orderIds.length <= 5
+              ? invoice.orderIds.join(", ")
+              : `${invoice.orderIds.slice(0, 5).join(", ")} (+${invoice.orderIds.length - 5} more)`}
+          </Text>
+          {invoice.totalRevenue && (
+            <div style={{ marginTop: "2px" }}>
+              <Text as="span" variant="bodySm" tone="subdued">
+                Revenue: {formatCurrency(invoice.totalRevenue)}
+              </Text>
+            </div>
+          )}
+        </div>
+      )}
+    </div>,
     <Text as="span" tone="subdued" variant="bodyMd" key={`action-${index}`}>
       —
     </Text>,

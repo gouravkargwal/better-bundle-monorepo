@@ -29,18 +29,11 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get shop subscription with the subscription
+    // Get shop subscription
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
         is_active: true,
-      },
-      include: {
-        shopify_subscriptions: {
-          where: {
-            status: "ACTIVE",
-          },
-        },
       },
     });
 
@@ -52,26 +45,17 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     // Update shop subscription status
+    // ✅ When subscription is activated, convert from TRIAL to PAID
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
+        shopify_subscription_id: subscriptionId,
+        shopify_status: "ACTIVE",
+        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
         status: "ACTIVE",
-        activated_at: new Date(),
         updated_at: new Date(),
       },
     });
-
-    // Update Shopify subscription record
-    if (shopSubscription.shopify_subscriptions) {
-      await prisma.shopify_subscriptions.update({
-        where: { id: shopSubscription.shopify_subscriptions.id },
-        data: {
-          status: "ACTIVE",
-          activated_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-    }
 
     // Reactivate shop services
     await prisma.shops.updateMany({

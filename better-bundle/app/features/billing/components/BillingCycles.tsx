@@ -112,8 +112,10 @@ export function BillingCycles({
                 No Billing Cycles Found
               </Text>
               <Text as="p" tone="subdued" style={{ marginTop: "8px" }}>
-                Billing cycles will appear here once your subscription is active
-                and you start generating commissions.
+                {data?.subscriptionType === "TRIAL" ||
+                data?.subscriptionStatus === "TRIAL"
+                  ? "Billing cycles will appear here once your trial period ends and your subscription becomes active."
+                  : "Billing cycles will appear here once your subscription is active and you start generating commissions."}
               </Text>
             </div>
           ) : (
