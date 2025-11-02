@@ -52,6 +52,9 @@ export const STORAGE_KEYS = {
 
   // Recommendation Attribution Storage (sessionStorage)
   RECOMMENDATION_ATTRIBUTION: "recommendation_attribution",
+
+  // Customer Linking Storage (sessionStorage)
+  LINKED_CUSTOMER_ID: "bb_linked_customer_id",
 } as const;
 
 // Type for storage key values

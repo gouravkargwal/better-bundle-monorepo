@@ -1,271 +1,266 @@
-import { BACKEND_URL } from "../constant";
+import { BACKEND_URL } from "../config/constants";
 import type {
   InteractionType,
   UnifiedInteractionRequest,
   UnifiedResponse,
 } from "../types";
-import { type Logger, logger } from "../utils/logger";
-import type { JWTManager } from "../utils/jwtManager";
+import { logger } from "../utils/logger";
+import { makeAuthenticatedRequest } from "../utils/jwt";
 
-class ApolloAnalyticsClient {
-  private baseUrl: string;
-  private logger: Logger;
-  private jwtManager: JWTManager | null = null;
+/**
+ * Track interaction using unified analytics (internal helper)
+ */
+const trackInteraction = async (
+  sessionId: string,
+  shopDomain: string,
+  interactionType: InteractionType,
+  productId?: string,
+  customerId?: string,
+  metadata?: Record<string, any>,
+): Promise<boolean> => {
+  try {
+    const url = `${BACKEND_URL}/api/interaction/track`;
 
-  constructor() {
-    this.baseUrl = BACKEND_URL as string;
-    this.logger = logger;
-  }
+    const request: UnifiedInteractionRequest = {
+      session_id: sessionId,
+      shop_domain: shopDomain,
+      extension_type: "apollo", // Required field for backend
+      context: "post_purchase",
+      interaction_type: interactionType,
+      product_id: productId ? String(productId) : undefined,
+      customer_id: customerId ? String(customerId) : undefined,
+      metadata: metadata || {},
+    };
 
-  setJWTManager(jwtManager: JWTManager) {
-    this.jwtManager = jwtManager;
-  }
+    const response = await makeAuthenticatedRequest(url, {
+      method: "POST",
+      body: JSON.stringify(request),
+      keepalive: true,
+      shopDomain: shopDomain,
+      customerId: customerId,
+    });
 
-  private async trackInteraction(
-    sessionId: string,
-    shopDomain: string,
-    interactionType: InteractionType,
-    productId?: string,
-    customerId?: string,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    try {
-      if (!this.jwtManager) {
-        throw new Error("JWT Manager not initialized");
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error("Services suspended");
       }
-
-      const url = `${this.baseUrl}/api/apollo/track-interaction`;
-
-      const request: UnifiedInteractionRequest = {
-        session_id: sessionId,
-        shop_domain: shopDomain,
-        context: "post_purchase",
-        interaction_type: interactionType,
-        product_id: productId ? String(productId) : undefined,
-        customer_id: customerId ? String(customerId) : undefined,
-        metadata: metadata || {},
-      };
-
-      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
-        method: "POST",
-        body: JSON.stringify(request),
-        keepalive: true,
-        shopDomain: shopDomain,
-        customerId: customerId,
-      });
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          throw new Error("Services suspended");
-        }
-        this.logger.error(
-          {
-            error: new Error(`Interaction tracking failed: ${response.status}`),
-            shop_domain: shopDomain,
-            interactionType,
-            productId,
-            customerId,
-            metadata,
-          },
-          "Interaction tracking failed",
-        );
-        throw new Error(`Interaction tracking failed: ${response.status}`);
-      }
-
-      const result: UnifiedResponse = await response.json();
-
-      if (result.success) {
-        if (result.session_recovery) {
-          localStorage.setItem(
-            "unified_session_id",
-            result.session_recovery.new_session_id,
-          );
-        }
-        return true;
-      } else {
-        this.logger.error(
-          {
-            error: new Error(result.message || "Failed to track interaction"),
-            shop_domain: shopDomain,
-            interactionType,
-            productId,
-            customerId,
-            metadata,
-          },
-          "Failed to track interaction",
-        );
-        throw new Error(result.message || "Failed to track interaction");
-      }
-    } catch (error) {
-      this.logger.error(
+      logger.error(
         {
-          error: error instanceof Error ? error.message : String(error),
+          error: new Error(`Interaction tracking failed: ${response.status}`),
           shop_domain: shopDomain,
           interactionType,
           productId,
           customerId,
           metadata,
         },
-        "Interaction tracking error",
+        "Interaction tracking failed",
       );
-      return false;
+      throw new Error(`Interaction tracking failed: ${response.status}`);
     }
-  }
 
-  async trackRecommendationView(
-    shopDomain: string,
-    sessionId: string,
-    productId: string,
-    position: number,
-    customerId: string,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    return this.trackInteraction(
-      sessionId,
-      shopDomain,
-      "recommendation_viewed",
-      productId,
-      customerId,
-      {
-        extension_type: "apollo",
-        source: "apollo_post_purchase",
-        data: {
-          product: {
-            id: productId,
-            title: metadata?.product_title || "",
-            price: metadata?.product_price || 0,
-            type: metadata?.product_type || "",
-            vendor: metadata?.product_vendor || "",
-            url: metadata?.product_url || "",
-          },
-          type: "recommendation",
-          position: position,
-          widget: "apollo_recommendation",
-          algorithm: "apollo_algorithm",
-          confidence: metadata?.recommendation_confidence || 0.0,
-          pageUrl: metadata?.page_url || "",
+    const result: UnifiedResponse = await response.json();
+
+    if (result.success) {
+      if (result.session_recovery) {
+        localStorage.setItem(
+          "unified_session_id",
+          result.session_recovery.new_session_id,
+        );
+      }
+      return true;
+    } else {
+      logger.error(
+        {
+          error: new Error(result.message || "Failed to track interaction"),
+          shop_domain: shopDomain,
+          interactionType,
+          productId,
+          customerId,
+          metadata,
         },
-        ...metadata,
-      },
-    );
-  }
-
-  async trackRecommendationClick(
-    shopDomain: string,
-    sessionId: string,
-    productId: string,
-    position: number,
-    customerId: string,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    return this.trackInteraction(
-      sessionId,
-      shopDomain,
-      "recommendation_clicked",
-      productId,
-      customerId,
+        "Failed to track interaction",
+      );
+      throw new Error(result.message || "Failed to track interaction");
+    }
+  } catch (error) {
+    logger.error(
       {
-        extension_type: "apollo",
-        source: "apollo_post_purchase",
-        data: {
-          product: {
-            id: productId,
-            title: metadata?.product_title || "",
-            price: metadata?.product_price || 0,
-            type: metadata?.product_type || "",
-            vendor: metadata?.product_vendor || "",
-            url: metadata?.product_url || "",
-          },
-          type: "recommendation",
-          position: position,
-          widget: "apollo_recommendation",
-          algorithm: "apollo_algorithm",
-          confidence: metadata?.recommendation_confidence || 0.0,
-          pageUrl: metadata?.page_url || "",
+        error: error instanceof Error ? error.message : String(error),
+        shop_domain: shopDomain,
+        interactionType,
+        productId,
+        customerId,
+        metadata,
+      },
+      "Interaction tracking error",
+    );
+    return false;
+  }
+};
+
+/**
+ * Track recommendation view (when recommendation is displayed)
+ */
+export const trackRecommendationView = async (
+  shopDomain: string,
+  sessionId: string,
+  productId: string,
+  position: number,
+  customerId: string,
+  metadata?: Record<string, any>,
+): Promise<boolean> => {
+  return trackInteraction(
+    sessionId,
+    shopDomain,
+    "recommendation_viewed",
+    productId,
+    customerId,
+    {
+      extension_type: "apollo",
+      source: "apollo_post_purchase",
+      data: {
+        product: {
+          id: productId,
+          title: metadata?.product_title || "",
+          price: metadata?.product_price || 0,
+          type: metadata?.product_type || "",
+          vendor: metadata?.product_vendor || "",
+          url: metadata?.product_url || "",
         },
-        ...metadata,
+        type: "recommendation",
+        position: position,
+        widget: "apollo_recommendation",
+        algorithm: "apollo_algorithm",
+        confidence: metadata?.recommendation_confidence || 0.0,
+        pageUrl: metadata?.page_url || "",
       },
-    );
-  }
+      ...metadata,
+    },
+  );
+};
 
-  async trackAddToOrder(
-    shopDomain: string,
-    sessionId: string,
-    productId: string,
-    variantId: string,
-    position: number,
-    customerId: string,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    return this.trackInteraction(
-      sessionId,
-      shopDomain,
-      "recommendation_add_to_cart",
-      productId,
-      customerId,
-      {
-        extension_type: "apollo",
-        source: "apollo_post_purchase",
-        data: {
-          cartLine: {
-            merchandise: {
-              id: variantId,
-              product: {
-                id: productId,
-              },
+/**
+ * Track recommendation click (when user clicks on a recommendation)
+ */
+export const trackRecommendationClick = async (
+  shopDomain: string,
+  sessionId: string,
+  productId: string,
+  position: number,
+  customerId: string,
+  metadata?: Record<string, any>,
+): Promise<boolean> => {
+  return trackInteraction(
+    sessionId,
+    shopDomain,
+    "recommendation_clicked",
+    productId,
+    customerId,
+    {
+      extension_type: "apollo",
+      source: "apollo_post_purchase",
+      data: {
+        product: {
+          id: productId,
+          title: metadata?.product_title || "",
+          price: metadata?.product_price || 0,
+          type: metadata?.product_type || "",
+          vendor: metadata?.product_vendor || "",
+          url: metadata?.product_url || "",
+        },
+        type: "recommendation",
+        position: position,
+        widget: "apollo_recommendation",
+        algorithm: "apollo_algorithm",
+        confidence: metadata?.recommendation_confidence || 0.0,
+        pageUrl: metadata?.page_url || "",
+      },
+      ...metadata,
+    },
+  );
+};
+
+/**
+ * Track add to order (when user adds a recommendation to their order)
+ */
+export const trackAddToOrder = async (
+  shopDomain: string,
+  sessionId: string,
+  productId: string,
+  variantId: string,
+  position: number,
+  customerId: string,
+  metadata?: Record<string, any>,
+): Promise<boolean> => {
+  return trackInteraction(
+    sessionId,
+    shopDomain,
+    "recommendation_add_to_cart",
+    productId,
+    customerId,
+    {
+      extension_type: "apollo",
+      source: "apollo_post_purchase",
+      data: {
+        cartLine: {
+          merchandise: {
+            id: variantId,
+            product: {
+              id: productId,
             },
-            quantity: metadata?.quantity || 1,
           },
-          type: "recommendation",
-          position: position,
-          widget: "apollo_recommendation",
-          algorithm: "apollo_algorithm",
+          quantity: metadata?.quantity || 1,
         },
-        action: "add_to_order_success",
-        changeset_applied: true,
-        ...metadata,
+        type: "recommendation",
+        position: position,
+        widget: "apollo_recommendation",
+        algorithm: "apollo_algorithm",
       },
-    );
-  }
+      action: "add_to_order_success",
+      changeset_applied: true,
+      ...metadata,
+    },
+  );
+};
 
-  async trackRecommendationDecline(
-    shopDomain: string,
-    sessionId: string,
-    productId: string,
-    position: number,
-    customerId: string,
-    productData?: any,
-    metadata?: Record<string, any>,
-  ): Promise<boolean> {
-    return this.trackInteraction(
-      sessionId,
-      shopDomain,
-      "recommendation_declined",
-      productId,
-      customerId,
-      {
-        extension_type: "apollo",
-        source: "apollo_post_purchase",
-        data: {
-          product: {
-            id: productId,
-            title: productData?.title || "",
-            price: productData?.price?.amount || 0,
-            type: productData?.product_type || "",
-            vendor: productData?.vendor || "",
-          },
-          type: "recommendation",
-          position: position,
-          widget: "apollo_recommendation",
-          algorithm: "apollo_algorithm",
-          confidence: productData?.score || 0.0,
-          decline_reason: metadata?.decline_reason || "user_declined",
+/**
+ * Track recommendation decline (when user dismisses a recommendation)
+ */
+export const trackRecommendationDecline = async (
+  shopDomain: string,
+  sessionId: string,
+  productId: string,
+  position: number,
+  customerId: string,
+  productData?: any,
+  metadata?: Record<string, any>,
+): Promise<boolean> => {
+  return trackInteraction(
+    sessionId,
+    shopDomain,
+    "recommendation_declined",
+    productId,
+    customerId,
+    {
+      extension_type: "apollo",
+      source: "apollo_post_purchase",
+      data: {
+        product: {
+          id: productId,
+          title: productData?.title || "",
+          price: productData?.price?.amount || 0,
+          type: productData?.product_type || "",
+          vendor: productData?.vendor || "",
         },
-        action: "recommendation_declined",
-        ...metadata,
+        type: "recommendation",
+        position: position,
+        widget: "apollo_recommendation",
+        algorithm: "apollo_algorithm",
+        confidence: productData?.score || 0.0,
+        decline_reason: metadata?.decline_reason || "user_declined",
       },
-    );
-  }
-}
-
-export const apolloAnalytics = new ApolloAnalyticsClient();
+      action: "recommendation_declined",
+      ...metadata,
+    },
+  );
+};

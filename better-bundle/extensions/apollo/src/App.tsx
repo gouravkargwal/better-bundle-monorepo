@@ -1,10 +1,13 @@
 import { useState, useCallback, useEffect } from "react";
 import type { StorageData, ProductRecommendationAPI } from "./types";
 import { isProductEligible, getShopifyErrorMessage } from "./utils/utils";
-import { apolloAnalytics } from "./api/analytics";
-import { apolloRecommendationApi } from "./api/recommendations";
+import {
+  trackRecommendationView,
+  trackRecommendationClick,
+  trackAddToOrder,
+  trackRecommendationDecline,
+} from "./api/analytics";
 import { ImageCarousel } from "./components/ImageCarousel";
-import { JWTManager } from "./utils/jwtManager";
 import {
   BlockStack,
   Button,
@@ -23,7 +26,11 @@ import {
 } from "@shopify/post-purchase-ui-extensions-react";
 import { logger } from "./utils/logger";
 import { SHOPIFY_APP_URL } from "./constant";
+import { initializeJWTStorage } from "./utils/jwt";
+
 function App({ storage, calculateChangeset, applyChangeset, done }: any) {
+  // Initialize JWT storage for token persistence (same instance as ShouldRender)
+  initializeJWTStorage(storage);
   // State management
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +42,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [calculatedPurchase, setCalculatedPurchase] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [jwtManager, setJwtManager] = useState<JWTManager | null>(null);
 
   // Extract storage data
   const initialState: StorageData = storage.initialData || {};
@@ -47,18 +53,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     shopDomain,
     purchasedProducts = [],
   } = initialState;
-
-  // Initialize JWT Manager with storage
-  useEffect(() => {
-    if (shopDomain && storage) {
-      const jwt = new JWTManager(storage);
-      setJwtManager(jwt);
-
-      // Set JWT manager on API clients
-      apolloRecommendationApi.setJWTManager(jwt);
-      apolloAnalytics.setJWTManager(jwt);
-    }
-  }, [shopDomain, storage]);
 
   // Maximum consecutive offers per Shopify guidelines
   const MAX_OFFERS = 3;
@@ -207,8 +201,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
   // Handle declining an offer - show next product or complete
   const handleDecline = useCallback(async () => {
     // Track decline
-    if (shopDomain && sessionId && currentProduct && jwtManager) {
-      await apolloAnalytics.trackRecommendationDecline(
+    if (shopDomain && sessionId && currentProduct && customerId) {
+      await trackRecommendationDecline(
         shopDomain,
         sessionId,
         currentProduct.id,
@@ -247,7 +241,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
     sessionId,
     customerId,
     orderId,
-    jwtManager,
     done,
   ]);
 
@@ -386,8 +379,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         }
 
         // Track recommendation click
-        if (shopDomain && sessionId && jwtManager) {
-          await apolloAnalytics.trackRecommendationClick(
+        if (shopDomain && sessionId && customerId) {
+          await trackRecommendationClick(
             shopDomain,
             sessionId,
             product.id,
@@ -532,8 +525,8 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         }
 
         // Track successful add to order
-        if (shopDomain && sessionId && jwtManager) {
-          await apolloAnalytics.trackAddToOrder(
+        if (shopDomain && sessionId && customerId) {
+          await trackAddToOrder(
             shopDomain,
             sessionId,
             product.id,
@@ -578,7 +571,6 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
       getCurrentVariant,
       getCurrentQuantity,
       isVariantAvailable,
-      jwtManager,
       calculateChangeset,
       applyChangeset,
       done,

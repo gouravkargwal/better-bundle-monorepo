@@ -2,8 +2,14 @@ from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
 from app.core.dependencies import get_shop_authorization
 
-from app.models.session_models import SessionRequest, SessionResponse
+from app.models.session_models import (
+    SessionRequest,
+    SessionResponse,
+    SessionAndRecommendationsRequest,
+    SessionAndRecommendationsResponse,
+)
 from app.controllers.session_controller import session_controller
+from app.controllers.recommendation_controller import recommendation_controller
 from app.core.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -71,4 +77,35 @@ async def get_or_create_session(
         logger.error(f"Error creating session: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Failed to create session: {str(e)}"
+        )
+
+
+@router.post(
+    "/get-session-and-recommendations", response_model=SessionAndRecommendationsResponse
+)
+async def get_session_and_recommendations(
+    http_request: Request,
+    request: SessionAndRecommendationsRequest,
+    shop_info: Dict[str, Any] = Depends(get_shop_authorization),
+):
+    """
+    Get or create session and fetch recommendations in a single API call
+
+    This optimized endpoint combines session creation and recommendation retrieval
+    to minimize API calls and improve performance for Apollo post-purchase extension.
+    """
+    try:
+
+        return await recommendation_controller.get_recommendations_with_session(
+            http_request, request, shop_info
+        )
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403 from suspension check) without modification
+        raise
+    except Exception as e:
+        logger.error(f"Error in Apollo combined request: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get session and recommendations: {str(e)}",
         )

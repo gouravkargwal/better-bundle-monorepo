@@ -4,7 +4,6 @@ from fastapi import HTTPException
 
 from app.domains.analytics.models.extension import ExtensionType
 from app.core.logging.logger import get_logger
-from app.domains.analytics.services.shop_resolver import shop_resolver
 from app.models.session_models import SessionRequest
 from app.services.session_service import SessionService
 
@@ -16,17 +15,12 @@ class SessionController:
         self.session_service = SessionService()
 
     async def get_or_create_session(
-        self, request: SessionRequest, authorization: str
+        self, request: SessionRequest, shop_info: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Handle session creation business logic"""
 
-        # Resolve shop domain to shop ID if needed
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        if not shop_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
-            )
+        # Use shop_id from JWT token (already validated)
+        shop_id = shop_info["shop_id"]
 
         # Browser session ID is now handled by backend (generated if not provided)
         browser_session_id = (

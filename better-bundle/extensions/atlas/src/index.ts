@@ -62,23 +62,39 @@ register(({ analytics, init, browser }) => {
 
       // Fire customer_linked event when we have BOTH clientId and customerId
       if (state.clientId && state.customerId) {
-        await trackInteraction(
-          {
-            name: "customer_linked",
-            id: `customer_linked_${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            customerId: state.customerId,
-            clientId: state.clientId,
-          },
-          shopDomain,
-          userAgent,
-          state.customerId,
-          "customer_linked",
-          pageUrl,
-          referrer,
-          sessionStorage,
-          localStorage, // ✅ Pass localStorage for browser_session_id storage
-        );
+        // Check session storage to see if we've already fired this event
+        const storedLinkedCustomerId = sessionStorage
+          ? await sessionStorage.getItem(STORAGE_KEYS.LINKED_CUSTOMER_ID)
+          : null;
+
+        // Only fire if we haven't fired for this customer ID before
+        if (storedLinkedCustomerId !== state.customerId) {
+          await trackInteraction(
+            {
+              name: "customer_linked",
+              id: `customer_linked_${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              customerId: state.customerId,
+              clientId: state.clientId,
+            },
+            shopDomain,
+            userAgent,
+            state.customerId,
+            "customer_linked",
+            pageUrl,
+            referrer,
+            sessionStorage,
+            localStorage, // ✅ Pass localStorage for browser_session_id storage
+          );
+
+          // Save customer ID to session storage after successful event
+          if (sessionStorage) {
+            await sessionStorage.setItem(
+              STORAGE_KEYS.LINKED_CUSTOMER_ID,
+              state.customerId,
+            );
+          }
+        }
       }
     }, "handleCustomerLinking");
   };

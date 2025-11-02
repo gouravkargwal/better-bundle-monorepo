@@ -4,7 +4,6 @@ from fastapi import HTTPException
 from app.models.interaction_models import InteractionRequest, InteractionResponse
 from app.services.interaction_service import InteractionService
 from app.services.session_service import SessionService
-from app.domains.analytics.services.shop_resolver import shop_resolver
 from app.core.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,13 +19,8 @@ class InteractionController:
     ) -> InteractionResponse:
         """Handle interaction tracking business logic"""
 
-        # Resolve shop domain to shop ID if needed
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        if not shop_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
-            )
+        # Use shop_id from JWT token (already validated)
+        shop_id = shop_info["shop_id"]
 
         # Add extension type to metadata if not already present
         enhanced_metadata = {

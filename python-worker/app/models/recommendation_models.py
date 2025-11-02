@@ -1,6 +1,27 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, List
 from app.domains.analytics.models.extension import ExtensionType
+
+
+def normalize_graphql_id(value: Optional[str]) -> Optional[str]:
+    """
+    Normalize Shopify GraphQL ID to numeric ID.
+
+    Converts: gid://shopify/Customer/8830605820155 -> 8830605820155
+    Returns the original value if it's not a GraphQL ID format.
+    """
+    if not value:
+        return value
+
+    # Check if it's a GraphQL ID format (gid://shopify/Entity/123456)
+    if value.startswith("gid://shopify/"):
+        # Extract the numeric ID (last part after final /)
+        parts = value.split("/")
+        if len(parts) >= 4:
+            return parts[-1]  # Return the numeric ID
+
+    # Return as-is if not a GraphQL ID
+    return value
 
 
 class RecommendationRequest(BaseModel):
@@ -17,6 +38,13 @@ class RecommendationRequest(BaseModel):
         ..., description="Context: product_page, homepage, cart, post_purchase, etc."
     )
     user_id: Optional[str] = Field(None, description="Customer identifier")
+
+    @field_validator("user_id", mode="before")
+    @classmethod
+    def normalize_user_id(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize GraphQL ID to numeric ID"""
+        return normalize_graphql_id(v)
+
     product_ids: Optional[List[str]] = Field(
         None, description="Product IDs for recommendations"
     )
@@ -37,6 +65,13 @@ class CombinedRecommendationRequest(BaseModel):
         default=ExtensionType.APOLLO, description="Extension type"
     )
     customer_id: Optional[str] = Field(None, description="Customer identifier")
+
+    @field_validator("customer_id", mode="before")
+    @classmethod
+    def normalize_customer_id(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize GraphQL ID to numeric ID"""
+        return normalize_graphql_id(v)
+
     browser_session_id: Optional[str] = Field(
         None, description="Browser session identifier"
     )

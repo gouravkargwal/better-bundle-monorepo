@@ -1,17 +1,19 @@
 from typing import Dict, Any, List
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.models.recommendation_models import (
     RecommendationRequest,
-    CombinedRecommendationRequest,
     RecommendationResponse,
 )
 from app.domains.analytics.models.extension import ExtensionType
 from app.services.session_service import SessionService
 from app.services.interaction_service import InteractionService
-from app.domains.analytics.services.shop_resolver import shop_resolver
 from app.domains.analytics.models.interaction import InteractionType
 from app.recommandations.models import RecommendationRequest
+from app.models.session_models import (
+    SessionAndRecommendationsRequest,
+    SessionAndRecommendationsResponse,
+)
 from app.api.v1.recommendations import (
     fetch_recommendations_logic,
     services as recommendation_services,
@@ -27,17 +29,12 @@ class RecommendationController:
         self.interaction_service = InteractionService()
 
     async def get_recommendations(
-        self, request: RecommendationRequest
+        self, request: RecommendationRequest, shop_info: Dict[str, Any]
     ) -> RecommendationResponse:
         """Handle standard recommendation retrieval (session must exist)"""
 
-        # Resolve shop domain to shop ID
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        if not shop_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
-            )
+        # Use shop_id from JWT token (already validated)
+        shop_id = shop_info["shop_id"]
 
         # Validate session exists
         session = await self.session_service.get_session(request.session_id)
@@ -95,17 +92,15 @@ class RecommendationController:
         )
 
     async def get_recommendations_with_session(
-        self, request: CombinedRecommendationRequest, shop_info: Dict[str, Any]
+        self,
+        http_request: Request,
+        request: SessionAndRecommendationsRequest,
+        shop_info: Dict[str, Any],
     ) -> RecommendationResponse:
         """Handle combined session creation + recommendations (Apollo use case)"""
 
-        # Resolve shop domain to shop ID
-        shop_id = await shop_resolver.get_shop_id_from_domain(request.shop_domain)
-        if not shop_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Could not resolve shop ID for domain: {request.shop_domain}",
-            )
+        # Use shop_id from JWT token (already validated)
+        shop_id = shop_info["shop_id"]
 
         # Step 1: Create session
         session = await self.session_service.get_or_create_session(
@@ -119,16 +114,15 @@ class RecommendationController:
         )
 
         # Add extension to session
+        extension_type_str = request.extension_type or "unknown"
         await self.session_service.add_extension_to_session(
-            session.id, request.extension_type
+            session.id, extension_type_str
         )
 
         if not session:
             raise HTTPException(status_code=500, detail="Failed to create session")
 
-        logger.info(
-            f"✅ Session created for {request.extension_type.value}: {session.id}"
-        )
+        logger.info(f"✅ Session created for {extension_type_str}: {session.id}")
 
         # Step 2: Get recommendations
         # Apollo-specific: use purchased products as context
@@ -141,7 +135,7 @@ class RecommendationController:
             session_id=session.id,
             metadata={
                 **request.metadata,
-                "extension_type": request.extension_type.value,
+                "extension_type": extension_type_str,
                 "order_id": request.order_id,
             },
         )
@@ -152,26 +146,37 @@ class RecommendationController:
 
         # Step 3: Track interaction
         try:
-            await self.interaction_service.track_interaction(
-                session_id=session.id,
-                extension_type=request.extension_type,
-                interaction_type=InteractionType.RECOMMENDATION_READY,
-                shop_id=shop_id,
-                customer_id=request.customer_id,
-                interaction_metadata={
-                    "extension_type": request.extension_type.value,
-                    "order_id": request.order_id,
-                    "recommendation_count": result_data.get("count", 0),
-                    "source": result_data.get("source", "unknown"),
-                    "context": "post_purchase",
-                },
-            )
+            # Convert string extension_type to ExtensionType enum
+            from app.domains.analytics.models.extension import ExtensionType as ExtType
+
+            # Only track if we can convert to a valid ExtensionType enum
+            if extension_type_str:
+                try:
+                    extension_type_enum = ExtType(extension_type_str.lower())
+                    await self.interaction_service.track_interaction(
+                        session_id=session.id,
+                        extension_type=extension_type_enum,
+                        interaction_type=InteractionType.RECOMMENDATION_READY,
+                        shop_id=shop_id,
+                        customer_id=request.customer_id,
+                        interaction_metadata={
+                            "extension_type": extension_type_str,
+                            "order_id": request.order_id,
+                            "recommendation_count": result_data.get("count", 0),
+                            "source": result_data.get("source", "unknown"),
+                            "context": "post_purchase",
+                        },
+                    )
+                except ValueError:
+                    logger.warning(
+                        f"Invalid extension_type: {extension_type_str}, skipping interaction tracking"
+                    )
         except Exception as e:
             logger.warning(f"Failed to track interaction: {e}")
 
         return RecommendationResponse(
             success=True,
-            message=f"{request.extension_type.value} session and recommendations retrieved successfully",
+            message=f"{extension_type_str} session and recommendations retrieved successfully",
             recommendations=result_data.get("recommendations", []),
             count=result_data.get("count", 0),
             source=result_data.get("source", "unknown"),

@@ -92,12 +92,7 @@ app.include_router(auth_router)
 app.include_router(session_router)
 app.include_router(interaction_router)
 app.include_router(recommendation_router)
-# Include unified analytics routers
-from app.domains.analytics.api import (
-    apollo_router,
-)
 
-app.include_router(apollo_router)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,

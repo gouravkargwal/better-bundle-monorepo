@@ -351,7 +351,12 @@ class SessionRepository:
         exclude_session_id: str,
         current_time: datetime,
     ) -> Optional[UserSessionModel]:
-        """Check if active session exists with same customer_id (for updates)."""
+        """
+        Check if ANOTHER active session already has this customer_id.
+
+        Used before updating customer_id to ensure we don't create duplicates.
+        This is now the APPLICATION layer's responsibility (was database layer before).
+        """
         async with self.session_factory() as session:
             stmt = select(UserSessionModel).where(
                 and_(
@@ -359,7 +364,8 @@ class SessionRepository:
                     UserSessionModel.customer_id == customer_id,
                     UserSessionModel.status == SessionStatus.ACTIVE,
                     UserSessionModel.expires_at > current_time,
-                    UserSessionModel.id != exclude_session_id,
+                    UserSessionModel.id
+                    != exclude_session_id,  # Exclude current session
                 )
             )
             result = await session.execute(stmt)
