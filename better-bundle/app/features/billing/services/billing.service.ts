@@ -6,9 +6,6 @@ import type {
 import prisma from "../../../db.server";
 
 export class BillingService {
-  /**
-   * ✅ CORRECT: Get billing state - Clean architecture implementation
-   */
   static async getBillingState(
     shopId: string,
     admin?: any,
@@ -17,13 +14,15 @@ export class BillingService {
       // 1. Get trial revenue (single source of truth)
       const trialRevenue = await this.getTrialRevenue(shopId);
 
-      // 2. Get trial threshold (from any subscription record or default)
+      // 2. Get trial threshold (from subscription override or pricing tier)
       const subscription = await prisma.shop_subscriptions.findFirst({
         where: { shop_id: shopId },
-        include: { subscription_trials: true },
+        include: { pricing_tiers: true },
       });
       const trialThreshold = Number(
-        subscription?.subscription_trials?.threshold_amount || 75,
+        subscription?.trial_threshold_override ||
+          subscription?.pricing_tiers?.trial_threshold_amount ||
+          75,
       );
 
       // 3. Simple logic: If trial not completed, show trial
@@ -174,12 +173,11 @@ export class BillingService {
     currency?: string;
   } | null> {
     try {
-      // First, check if we have any subscription records to query
-      const shopifySub = await prisma.shopify_subscriptions.findFirst({
+      // First, check if we have any subscription records with Shopify subscription ID
+      const shopifySub = await prisma.shop_subscriptions.findFirst({
         where: {
-          shop_subscriptions: {
-            shop_id: shopId,
-          },
+          shop_id: shopId,
+          shopify_subscription_id: { not: null },
         },
         orderBy: {
           created_at: "desc",
