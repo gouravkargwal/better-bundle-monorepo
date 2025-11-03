@@ -53,6 +53,7 @@ class AttributionContext:
     purchase_amount: Decimal
     purchase_products: List[Dict[str, Any]]
     purchase_time: datetime
+    order_metafields: Optional[List[Dict[str, Any]]] = None  # For Apollo tracking data
 
 
 class AttributionEngine:
@@ -123,29 +124,63 @@ class AttributionEngine:
                 await self._store_attribution_result(result)  # ✅ Store rejected
                 return result
 
-            # ✅ SCENARIO 22: Check for recommendation timing
+            # ✅ PRIORITY 1: Extract tracking data from extensions FIRST (source of truth)
+            # This must happen before timing adjustment so tracking data is always used
+            logger.info(
+                f"🔍 Extracting tracking data for order {context.order_id} "
+                f"(products: {len(context.purchase_products)}, "
+                f"metafields: {len(context.order_metafields) if context.order_metafields else 0})"
+            )
+            tracking_interactions = self._extract_tracking_data_from_extensions(context)
+
+            # ✅ PRIORITY 2: Fall back to UserInteraction records if no tracking data
+            attribution_window = self._determine_attribution_window(context)
+            logger.debug(
+                f"📊 Fetching UserInteraction records for order {context.order_id} "
+                f"(window: {attribution_window})"
+            )
+            user_interactions = await self._get_relevant_interactions(
+                context, attribution_window
+            )
+
+            # Combine tracking interactions (priority) with user interactions (fallback)
+            # Tracking interactions take precedence as they represent actual checkout data
+            all_interactions = tracking_interactions + user_interactions
+
+            logger.info(
+                f"📈 Interaction summary for order {context.order_id}: "
+                f"{len(tracking_interactions)} tracking, "
+                f"{len(user_interactions)} user interactions, "
+                f"{len(all_interactions)} total"
+            )
+
+            # ✅ SCENARIO 22: Check for recommendation timing AFTER extracting interactions
+            # Timing adjustment applies to the combined interactions (tracking + user)
             timing_analysis = await self._analyze_recommendation_timing(context)
             if timing_analysis["requires_adjustment"]:
                 logger.info(
                     f"⏰ Recommendation timing adjustment needed for order {context.order_id}"
                 )
-                result = await self._handle_timing_adjustment(context, timing_analysis)
-                await self._store_attribution_result(result)  # ✅ Store rejected
+                result = await self._handle_timing_adjustment(
+                    context, timing_analysis, all_interactions
+                )
+                attribution_id = await self._store_attribution_result(
+                    result
+                )  # ✅ Store rejected
+                # ✅ FIX: Create commission for timing-adjusted attributions too
+                if attribution_id:
+                    await self._create_commission_for_attribution(
+                        attribution_id=attribution_id, shop_id=context.shop_id
+                    )
                 return result
 
-            # ✅ SCENARIO 9: Get all interactions for this customer/session with configurable window
-            attribution_window = self._determine_attribution_window(context)
-            interactions = await self._get_relevant_interactions(
-                context, attribution_window
-            )
-
-            if not interactions:
+            if not all_interactions:
                 result = self._create_empty_attribution(context)
                 await self._store_attribution_result(result)  # ✅ Store rejected
                 return result
 
             attribution_breakdown = self._calculate_attribution_breakdown(
-                context, interactions
+                context, all_interactions
             )
 
             # 4. Create attribution result
@@ -162,25 +197,43 @@ class AttributionEngine:
                 # No attribution-eligible interactions found - do NOT attribute any revenue
                 total_attributed_revenue = Decimal("0.00")
 
+            # ✅ FIX: Extract session_id from tracking interactions if context.session_id is None
+            # This ensures attributions from Phoenix line items (which have _bb_rec_session_id)
+            # can be saved even when no UserSession record exists in the database
+            final_session_id = context.session_id
+            if not final_session_id and tracking_interactions:
+                # Use session_id from first tracking interaction (from line item properties)
+                for tracking_int in tracking_interactions:
+                    session_id_from_tracking = tracking_int.get("session_id")
+                    if session_id_from_tracking:
+                        final_session_id = session_id_from_tracking
+                        logger.info(
+                            f"✅ Using session_id from tracking data: {final_session_id} "
+                            f"for order {context.order_id}"
+                        )
+                        break
+
             result = AttributionResult(
                 order_id=context.order_id,
                 shop_id=context.shop_id,
                 customer_id=context.customer_id,
-                session_id=context.session_id,
+                session_id=final_session_id,
                 total_attributed_revenue=total_attributed_revenue,
                 attribution_breakdown=attribution_breakdown,
                 attribution_type=AttributionType.DIRECT_CLICK,
                 status=AttributionStatus.CALCULATED,
                 calculated_at=now_utc(),
                 metadata={
-                    "interaction_count": len(interactions),
+                    "interaction_count": len(all_interactions),
+                    "tracking_interactions": len(tracking_interactions),
+                    "user_interactions": len(user_interactions),
                     "calculation_method": "multi_touch_attribution",
                 },
             )
 
             # 5. Store attribution result
             logger.info(f"💾 Storing attribution result for order {context.order_id}")
-            await self._store_attribution_result(result)
+            attribution_id = await self._store_attribution_result(result)
             logger.info(
                 f"✅ Attribution calculation completed for order {context.order_id}"
             )
@@ -190,11 +243,9 @@ class AttributionEngine:
             )
 
             # ========================================
-            # 🆕 NEW: Step 5 - CREATE COMMISSION RECORD
+            # 🆕 NEW: Step 6 - CREATE COMMISSION RECORD
             # ========================================
             # Store returns created attribution id (or existing one)
-            attribution_id = await self._store_attribution_result(result)
-
             if attribution_id:
                 await self._create_commission_for_attribution(
                     attribution_id=attribution_id, shop_id=context.shop_id
@@ -273,6 +324,11 @@ class AttributionEngine:
         - Cap limit check
         - Warnings
 
+        Design Principle:
+        - Always use billing cycle as source of truth for cap amount
+        - Commission.capped_amount is only for historical reference/reporting
+        - Check against the cycle's current_cap_amount (supports mid-cycle increases)
+
         Args:
             commission: Created commission record
             shop_id: Shop ID
@@ -286,34 +342,62 @@ class AttributionEngine:
                 )
 
             elif commission.billing_phase == BillingPhase.PAID:
-                # Check usage percentage
-                usage_percentage = (
-                    commission.cycle_usage_after / commission.capped_amount * 100
-                )
+                # ✅ DESIGN: Always fetch cap from billing cycle (single source of truth)
+                # Use commission.billing_cycle_id to get the cycle directly
+                from ..repositories.billing_repository_v2 import BillingRepositoryV2
+                from app.repository.BillingCycleRepository import BillingCycleRepository
 
-                # Warning at 75%
-                if usage_percentage >= 75 and usage_percentage < 90:
-                    logger.warning(
-                        f"⚠️ Usage at {usage_percentage:.1f}% of cap for shop {shop_id}"
-                    )
-                    # TODO: Send notification to merchant
+                async with get_session_context() as session:
+                    billing_cycle_repo = BillingCycleRepository(session)
 
-                # Urgent warning at 90%
-                elif usage_percentage >= 90 and usage_percentage < 100:
-                    logger.warning(
-                        f"🚨 Usage at {usage_percentage:.1f}% of cap for shop {shop_id}! "
-                        f"Approaching limit."
-                    )
-                    # TODO: Send urgent notification to merchant
+                    # Get the billing cycle this commission belongs to
+                    if not commission.billing_cycle_id:
+                        logger.warning(
+                            f"⚠️ Commission {commission.id} has no billing_cycle_id"
+                        )
+                        return
 
-                # Cap reached - log warning (suspension handled by billing service)
-                elif usage_percentage >= 100:
-                    logger.error(
-                        f"🛑 Cap reached for shop {shop_id}! "
-                        f"${commission.cycle_usage_after} >= ${commission.capped_amount}"
+                    billing_cycle = await billing_cycle_repo.get_by_id(
+                        commission.billing_cycle_id
                     )
-                    # Note: Service suspension will be handled by the billing service
-                    # when it processes the commission with CAPPED status
+
+                    if not billing_cycle:
+                        logger.warning(
+                            f"⚠️ Billing cycle {commission.billing_cycle_id} not found "
+                            f"for commission {commission.id}"
+                        )
+                        return
+
+                    # Use cycle's current_cap_amount (source of truth, supports mid-cycle updates)
+                    cap_amount = billing_cycle.current_cap_amount
+
+                    # Check usage percentage against current cap
+                    usage_percentage = commission.cycle_usage_after / cap_amount * 100
+
+                    # Warning at 75%
+                    if usage_percentage >= 75 and usage_percentage < 90:
+                        logger.warning(
+                            f"⚠️ Usage at {usage_percentage:.1f}% of cap for shop {shop_id} "
+                            f"(${commission.cycle_usage_after} / ${cap_amount})"
+                        )
+                        # TODO: Send notification to merchant
+
+                    # Urgent warning at 90%
+                    elif usage_percentage >= 90 and usage_percentage < 100:
+                        logger.warning(
+                            f"🚨 Usage at {usage_percentage:.1f}% of cap for shop {shop_id}! "
+                            f"Approaching limit (${commission.cycle_usage_after} / ${cap_amount})"
+                        )
+                        # TODO: Send urgent notification to merchant
+
+                    # Cap reached - log warning (suspension handled by billing service)
+                    elif usage_percentage >= 100:
+                        logger.error(
+                            f"🛑 Cap reached for shop {shop_id}! "
+                            f"${commission.cycle_usage_after} >= ${cap_amount}"
+                        )
+                        # Note: Service suspension will be handled by the billing service
+                        # when it processes the commission with CAPPED status
 
         except Exception as e:
             logger.error(f"❌ Error in post-commission checks: {e}")
@@ -477,23 +561,43 @@ class AttributionEngine:
             # Extract product_id using adapter factory
             product_id = None
             try:
-                interaction_dict = {
-                    "interactionType": interaction["interaction_type"],
-                    "metadata": interaction["metadata"],
-                    "customerId": interaction["customer_id"],
-                    "sessionId": interaction["session_id"],
-                    "shopId": interaction["shop_id"],
-                    "createdAt": interaction["created_at"],
-                }
-
-                product_id = self.adapter_factory.extract_product_id(interaction_dict)
-
-                if not product_id:
-                    logger.warning(
-                        f"⚠️ Could not extract product_id from {interaction['extension_type']} "
-                        f"interaction {interaction['id']}"
+                # ✅ FIX: For synthetic interactions (from line items/metafields), extract product_id directly
+                # Synthetic interactions have product_id in metadata._bb_rec_product_id or metadata.product_id
+                metadata = interaction.get("metadata", {})
+                if metadata.get("synthetic") is True:
+                    # Direct extraction for synthetic interactions
+                    product_id = metadata.get("_bb_rec_product_id") or metadata.get(
+                        "product_id"
                     )
-                    continue
+                    if product_id:
+                        product_id = str(product_id)
+                    else:
+                        logger.warning(
+                            f"⚠️ Could not extract product_id from synthetic interaction "
+                            f"{interaction['id']} - metadata: {metadata}"
+                        )
+                        continue
+                else:
+                    # Use adapter factory for regular UserInteraction records
+                    interaction_dict = {
+                        "interactionType": interaction["interaction_type"],
+                        "metadata": interaction["metadata"],
+                        "customerId": interaction["customer_id"],
+                        "sessionId": interaction["session_id"],
+                        "shopId": interaction["shop_id"],
+                        "createdAt": interaction["created_at"],
+                    }
+
+                    product_id = self.adapter_factory.extract_product_id(
+                        interaction_dict
+                    )
+
+                    if not product_id:
+                        logger.warning(
+                            f"⚠️ Could not extract product_id from {interaction['extension_type']} "
+                            f"interaction {interaction['id']}"
+                        )
+                        continue
 
             except Exception as e:
                 logger.error(f"Error extracting product_id: {e}")
@@ -1590,6 +1694,239 @@ class AttributionEngine:
             metadata={"reason": "no_interactions_found"},
         )
 
+    def _extract_tracking_data_from_extensions(
+        self, context: AttributionContext
+    ) -> List[Dict[str, Any]]:
+        """
+        ✅ PRIORITY 1: Extract tracking data from extension tracking mechanisms.
+
+        This prioritizes the actual checkout data over UserInteraction records:
+        - Phoenix: Uses _bb_rec_extension from line item properties
+        - Apollo: Uses bb_recommendation.extension from order metafields
+
+        Returns list of synthetic interactions created from tracking data.
+        """
+        tracking_interactions = []
+
+        # 1. Extract Phoenix tracking from line item properties
+        for product in context.purchase_products:
+            properties = product.get("properties", {})
+            if isinstance(properties, dict) and properties:
+                # Check for Phoenix tracking data
+                extension = properties.get("_bb_rec_extension")
+                session_id = properties.get("_bb_rec_session_id")
+                product_id = properties.get("_bb_rec_product_id") or product.get("id")
+                timestamp_str = properties.get("_bb_rec_timestamp")
+                position = properties.get("_bb_rec_position")
+
+                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
+                    # Create synthetic interaction from Phoenix line item data
+                    synthetic_interaction = (
+                        self._create_synthetic_interaction_from_line_item(
+                            product, context, properties
+                        )
+                    )
+                    if synthetic_interaction:
+                        tracking_interactions.append(synthetic_interaction)
+                        logger.info(
+                            f"✅ Extracted Phoenix tracking data for product {product_id}: "
+                            f"extension={extension}, session={session_id}"
+                        )
+
+        # 2. Extract Apollo tracking from order metafields
+        # Only use Apollo if Phoenix line items don't already have tracking data for that product
+        if context.order_metafields:
+            apollo_extension = self._extract_apollo_extension_from_metafields(
+                context.order_metafields
+            )
+            if apollo_extension:
+                # Track which products already have Phoenix tracking
+                products_with_tracking = {
+                    tracking_int["metadata"].get("_bb_rec_product_id")
+                    or tracking_int["metadata"].get("product_id")
+                    for tracking_int in tracking_interactions
+                }
+
+                # Create synthetic interactions for products that don't have Phoenix tracking
+                for product in context.purchase_products:
+                    product_id = product.get("id")
+                    # Skip if this product already has tracking from Phoenix line items
+                    if product_id in products_with_tracking:
+                        logger.debug(
+                            f"⏭️ Skipping Apollo tracking for product {product_id} - "
+                            f"already has Phoenix line item tracking"
+                        )
+                        continue
+
+                    synthetic_interaction = (
+                        self._create_synthetic_interaction_from_apollo_metafields(
+                            product, context, context.order_metafields
+                        )
+                    )
+                    if synthetic_interaction:
+                        tracking_interactions.append(synthetic_interaction)
+                        logger.info(
+                            f"✅ Extracted Apollo tracking data for product {product_id}: "
+                            f"extension={apollo_extension}"
+                        )
+
+        logger.info(
+            f"📊 Extracted {len(tracking_interactions)} tracking interactions from extensions "
+            f"(Phoenix line items + Apollo metafields)"
+        )
+
+        return tracking_interactions
+
+    def _extract_apollo_extension_from_metafields(
+        self, metafields: List[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Extract extension name from Apollo order metafields."""
+        for metafield in metafields:
+            if (
+                isinstance(metafield, dict)
+                and metafield.get("namespace") == "bb_recommendation"
+                and metafield.get("key") == "extension"
+            ):
+                return metafield.get("value", "").lower()
+        return None
+
+    def _create_synthetic_interaction_from_line_item(
+        self,
+        product: Dict[str, Any],
+        context: AttributionContext,
+        properties: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create synthetic interaction from Phoenix line item custom attributes.
+
+        This represents the actual checkout data - what extension showed the recommendation
+        at the time of purchase.
+        """
+        if properties is None:
+            properties = product.get("properties", {})
+
+        if not properties or not isinstance(properties, dict):
+            return None
+
+        extension = properties.get("_bb_rec_extension")
+        if not extension or extension.lower() not in ["phoenix", "venus", "apollo"]:
+            return None
+
+        product_id = properties.get("_bb_rec_product_id") or product.get("id")
+        session_id = properties.get("_bb_rec_session_id") or context.session_id
+        timestamp_str = properties.get("_bb_rec_timestamp")
+        position = properties.get("_bb_rec_position")
+
+        # Parse timestamp if available
+        created_at = context.purchase_time
+        if timestamp_str:
+            try:
+                from dateutil import parser
+
+                created_at = parser.parse(timestamp_str)
+            except Exception:
+                pass  # Use purchase_time as fallback
+
+        # Create synthetic interaction representing the checkout event
+        synthetic_interaction = {
+            "id": f"synthetic_lineitem_{context.order_id}_{product_id}",
+            "shop_id": context.shop_id,
+            "customer_id": context.customer_id,
+            "session_id": session_id,
+            "interaction_type": "recommendation_add_to_cart",  # Most specific for checkout
+            "extension_type": extension.lower(),
+            "created_at": created_at,
+            "metadata": {
+                "_bb_rec_extension": extension,
+                "_bb_rec_product_id": product_id,
+                "_bb_rec_position": position,
+                "_bb_rec_timestamp": timestamp_str,
+                "_bb_rec_context": properties.get("_bb_rec_context", "checkout"),
+                "_bb_rec_source": properties.get("_bb_rec_source", "betterbundle"),
+                "synthetic": True,
+                "source": "line_item_properties",
+            },
+        }
+
+        return synthetic_interaction
+
+    def _create_synthetic_interaction_from_apollo_metafields(
+        self,
+        product: Dict[str, Any],
+        context: AttributionContext,
+        metafields: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create synthetic interaction from Apollo order metafields.
+
+        This represents the actual checkout data from Apollo post-purchase recommendations.
+        """
+        # Extract metafield values
+        extension = None
+        session_id = None
+        timestamp_str = None
+        position = None
+        context_value = None
+
+        for metafield in metafields:
+            if not isinstance(metafield, dict):
+                continue
+
+            namespace = metafield.get("namespace")
+            key = metafield.get("key")
+            value = metafield.get("value")
+
+            if namespace == "bb_recommendation":
+                if key == "extension":
+                    extension = value.lower() if value else None
+                elif key == "session_id":
+                    session_id = value
+                elif key == "timestamp":
+                    timestamp_str = value
+                elif key == "position":
+                    position = value
+                elif key == "context":
+                    context_value = value
+
+        if not extension or extension != "apollo":
+            return None
+
+        product_id = product.get("id")
+        session_id = session_id or context.session_id
+
+        # Parse timestamp if available
+        created_at = context.purchase_time
+        if timestamp_str:
+            try:
+                from dateutil import parser
+
+                created_at = parser.parse(timestamp_str)
+            except Exception:
+                pass  # Use purchase_time as fallback
+
+        # Create synthetic interaction representing the Apollo checkout event
+        synthetic_interaction = {
+            "id": f"synthetic_apollo_{context.order_id}_{product_id}",
+            "shop_id": context.shop_id,
+            "customer_id": context.customer_id,
+            "session_id": session_id,
+            "interaction_type": "recommendation_add_to_cart",  # Most specific for checkout
+            "extension_type": "apollo",
+            "created_at": created_at,
+            "metadata": {
+                "extension": extension,
+                "product_id": product_id,  # ✅ Used for product_id extraction
+                "position": position,
+                "timestamp": timestamp_str,
+                "context": context_value or "post_purchase",
+                "source": "betterbundle",
+                "synthetic": True,  # ✅ Flag to indicate synthetic interaction
+                "source_data": "order_metafields",
+            },
+        }
+
+        return synthetic_interaction
+
     def _create_error_attribution(
         self, context: AttributionContext, error_message: str
     ) -> AttributionResult:
@@ -1729,21 +2066,30 @@ class AttributionEngine:
             }
 
     async def _handle_timing_adjustment(
-        self, context: AttributionContext, timing_analysis: Dict[str, Any]
+        self,
+        context: AttributionContext,
+        timing_analysis: Dict[str, Any],
+        interactions: Optional[List[Dict[str, Any]]] = None,
     ) -> AttributionResult:
         """
         Handle timing-based attribution adjustment.
+
+        Args:
+            context: Attribution context
+            timing_analysis: Timing analysis results
+            interactions: Pre-extracted interactions (tracking + user). If None, will fetch.
 
         IMPORTANT: Does NOT store result - that's done by the caller.
         """
         try:
             timing_score = timing_analysis.get("timing_score", 1.0)
 
-            # Get interactions and calculate attribution
-            attribution_window = self._determine_attribution_window(context)
-            interactions = await self._get_relevant_interactions(
-                context, attribution_window
-            )
+            # Use provided interactions (which include tracking data), or fetch if not provided
+            if interactions is None:
+                attribution_window = self._determine_attribution_window(context)
+                interactions = await self._get_relevant_interactions(
+                    context, attribution_window
+                )
 
             if not interactions:
                 logger.warning(f"No interactions found for timing adjustment")
@@ -1787,12 +2133,29 @@ class AttributionEngine:
                 f"Timing adjustment applied: Score {timing_score:.2%} -> ${total_adjusted_revenue}"
             )
 
+            # ✅ FIX: Extract session_id from tracking interactions if context.session_id is None
+            # This ensures attributions from Phoenix line items can be saved
+            final_session_id = context.session_id
+            if not final_session_id and interactions:
+                # Find session_id from synthetic interactions (tracking data)
+                for interaction in interactions:
+                    metadata = interaction.get("metadata", {})
+                    if metadata.get("synthetic") is True:
+                        session_id_from_tracking = interaction.get("session_id")
+                        if session_id_from_tracking:
+                            final_session_id = session_id_from_tracking
+                            logger.info(
+                                f"✅ Using session_id from tracking data for timing adjustment: "
+                                f"{final_session_id} for order {context.order_id}"
+                            )
+                            break
+
             # Return result WITHOUT storing (caller will store)
             return AttributionResult(
                 order_id=context.order_id,
                 shop_id=context.shop_id,
                 customer_id=context.customer_id,
-                session_id=context.session_id,
+                session_id=final_session_id,
                 total_attributed_revenue=total_adjusted_revenue,
                 attribution_breakdown=adjusted_breakdown,
                 attribution_type=AttributionType.TIME_DECAY,

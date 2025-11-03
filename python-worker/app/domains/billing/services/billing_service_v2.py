@@ -260,7 +260,11 @@ class BillingServiceV2:
         """Check if purchase has already been processed to prevent duplicate processing.
 
         Returns True if the order has been processed AND no new line items were added
-        since the last attribution calculation.
+        AND no existing line items were updated since the last attribution calculation
+        AND the attribution already used tracking data (if available).
+
+        This ensures that when line item data is fixed (e.g., custom attributes like _bb_rec_*),
+        OR when we add new tracking data extraction logic, republishing events will trigger recalculation.
         """
         try:
             from sqlalchemy import select, func
@@ -280,6 +284,31 @@ class BillingServiceV2:
             if not existing_attribution:
                 return False  # No attribution record, need to process
 
+            # ✅ NEW CHECK: Verify if attribution used tracking data when tracking data exists
+            # If tracking data exists in line items/metafields but attribution doesn't indicate
+            # it was used, we need to recalculate
+            has_tracking_data = self._check_if_tracking_data_exists(purchase_event)
+            if has_tracking_data:
+                # Check if attribution metadata indicates tracking data was used
+                attribution_metadata = existing_attribution.attribution_metadata
+                if isinstance(attribution_metadata, dict):
+                    tracking_interactions_count = attribution_metadata.get(
+                        "tracking_interactions", 0
+                    )
+                    if tracking_interactions_count == 0:
+                        logger.info(
+                            f"🔄 Tracking data exists but attribution doesn't show it was used - "
+                            f"will reprocess order {purchase_event.order_id} to use tracking data"
+                        )
+                        return False  # Force recalculation to use tracking data
+                else:
+                    # Old attribution format - likely didn't use tracking data
+                    logger.info(
+                        f"🔄 Attribution metadata format doesn't indicate tracking data usage - "
+                        f"will reprocess order {purchase_event.order_id}"
+                    )
+                    return False  # Force recalculation
+
             # ✅ FIX: LineItemData.order_id is a FK to OrderData.id (UUID), not Shopify order ID
             # First, get the OrderData record to find its UUID
             from app.core.database.models.order_data import OrderData
@@ -296,23 +325,97 @@ class BillingServiceV2:
                 )
                 return False  # If no order record, process it
 
+            # Use the later of created_at or updated_at as the reference timestamp
+            # This handles cases where attribution was already recalculated
+            attribution_reference_time = existing_attribution.created_at
+            if (
+                hasattr(existing_attribution, "updated_at")
+                and existing_attribution.updated_at
+                and existing_attribution.updated_at > existing_attribution.created_at
+            ):
+                attribution_reference_time = existing_attribution.updated_at
+
             # Check if new line items were added since last attribution
             # Get the count of line items that were created after the attribution
-            line_items_query = select(func.count(LineItemData.id)).where(
+            new_line_items_query = select(func.count(LineItemData.id)).where(
                 LineItemData.order_id == order_record_id,
-                LineItemData.created_at > existing_attribution.created_at,
+                LineItemData.created_at > attribution_reference_time,
             )
-            line_items_result = await self.session.execute(line_items_query)
-            new_line_items_count = line_items_result.scalar() or 0
+            new_line_items_result = await self.session.execute(new_line_items_query)
+            new_line_items_count = new_line_items_result.scalar() or 0
 
             if new_line_items_count > 0:
                 return False  # New line items added, need to re-process
 
-            return True  # No new line items, skip processing
+            # ✅ FIX: Also check if existing line items were updated after attribution
+            # This handles cases where line item data was fixed (e.g., custom attributes like _bb_rec_*)
+            # When line items are updated (e.g., properties field fixed), we need to recalculate attribution
+            # Use MAX(updated_at) to get the most recent line item update time
+            max_line_item_updated_query = select(
+                func.max(LineItemData.updated_at)
+            ).where(
+                LineItemData.order_id == order_record_id,
+            )
+            max_line_item_result = await self.session.execute(
+                max_line_item_updated_query
+            )
+            max_line_item_updated_at = max_line_item_result.scalar()
+
+            if max_line_item_updated_at:
+                # Check if any line item was updated after attribution was last calculated
+                if max_line_item_updated_at > attribution_reference_time:
+                    logger.info(
+                        f"🔄 Line items were updated after attribution "
+                        f"(max_line_item_updated_at={max_line_item_updated_at}, "
+                        f"attribution_ref_time={attribution_reference_time}) - "
+                        f"will reprocess order {purchase_event.order_id}"
+                    )
+                    return False  # Line items updated, need to re-process
+                else:
+                    logger.debug(
+                        f"✅ No line item updates detected "
+                        f"(max_line_item_updated_at={max_line_item_updated_at} <= "
+                        f"attribution_ref_time={attribution_reference_time}) for order {purchase_event.order_id}"
+                    )
+
+            return (
+                True  # No new or updated line items, and tracking data was already used
+            )
 
         except Exception as e:
             logger.error(f"Error checking if purchase already processed: {e}")
             return False
+
+    def _check_if_tracking_data_exists(self, purchase_event: PurchaseEvent) -> bool:
+        """
+        Check if purchase event has tracking data from extensions.
+
+        Returns True if:
+        - Line items have _bb_rec_extension properties (Phoenix)
+        - Order has bb_recommendation.extension metafield (Apollo)
+        """
+        # Check line item properties for Phoenix tracking
+        for product in purchase_event.products:
+            properties = product.get("properties", {})
+            if isinstance(properties, dict) and properties:
+                extension = properties.get("_bb_rec_extension")
+                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
+                    return True
+
+        # Check order metafields for Apollo tracking
+        order_metafields = getattr(purchase_event, "order_metafields", None)
+        if order_metafields:
+            for metafield in order_metafields:
+                if (
+                    isinstance(metafield, dict)
+                    and metafield.get("namespace") == "bb_recommendation"
+                    and metafield.get("key") == "extension"
+                ):
+                    extension_value = metafield.get("value", "").lower()
+                    if extension_value in ["apollo", "phoenix", "venus"]:
+                        return True
+
+        return False
 
     async def _has_post_purchase_line_items(
         self, order_id: int, order_created_at: datetime
@@ -608,6 +711,7 @@ class BillingServiceV2:
             purchase_amount=purchase_event.total_amount,
             purchase_products=purchase_event.products,
             purchase_time=purchase_time,
+            order_metafields=getattr(purchase_event, "order_metafields", None),
         )
 
         attribution_result = await self.attribution_engine.calculate_attribution(

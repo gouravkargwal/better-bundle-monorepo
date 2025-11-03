@@ -81,6 +81,7 @@ class PurchaseEvent(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None  # For post-purchase additions
     metadata: Dict[str, Any]
+    order_metafields: Optional[List[Dict[str, Any]]] = None  # For Apollo tracking data
 
 
 class AttributionBreakdown(BaseModel):
