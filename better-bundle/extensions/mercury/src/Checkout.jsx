@@ -2,6 +2,8 @@ import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { useRecommendations } from "./hooks/useRecommendations.js";
 import { trackAddToCart, getOrCreateSession } from "./api/analytics.js";
+import { ProductCard } from "./components/ProductCard.jsx";
+import { getOptionValueFromVariant } from "./utils/productUtils.js";
 
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
@@ -81,6 +83,7 @@ function Extension() {
     }
   }, [products, loading, trackRecommendationView]);
 
+  // Auto-select default variants when products load
   useEffect(() => {
     if (products && products.length > 0) {
       products.forEach((product) => {
@@ -141,7 +144,7 @@ function Extension() {
         ? variantId
         : `gid://shopify/ProductVariant/${variantId}`;
 
-      const quantity = getQuantity(productId);
+      const quantity = quantities[productId] || 1;
 
       const result = await shopify.applyCartLinesChange({
         type: "addCartLine",
@@ -273,159 +276,24 @@ function Extension() {
     }));
   }
 
-  function incrementQuantity(productId) {
-    const currentQuantity = quantities[productId] || 1;
-    handleQuantityChange(productId, currentQuantity + 1);
-  }
-
-  function decrementQuantity(productId) {
-    const currentQuantity = quantities[productId] || 1;
-    handleQuantityChange(productId, currentQuantity - 1);
-  }
-
-  function getQuantity(productId) {
-    return quantities[productId] || 1;
-  }
-
-  function getSelectedImageIndex(productId) {
-    return selectedImageIndex?.[productId] ?? 0;
-  }
-
-  function getProductImages(product) {
-    console.log("🔍 Product images for", product.title, ":", product);
-
-    if (!product.images || product.images.length === 0) {
-      if (product.image?.url) {
-        console.log("✅ Using fallback image:", product.image.url);
-        return [{ url: product.image.url }];
-      }
-      console.log("❌ No images found for product:", product.title);
-      return [];
-    }
-    console.log(
-      "✅ Using product images array:",
-      product.images.length,
-      "images",
-    );
-    return product.images;
-  }
-
-  function getAvailableOptions(product, selectedOptions = {}) {
-    if (!product.options || !product.variants) return product.options || [];
-    return product.options.map((option) => {
-      const availableValues = new Set();
-      const matchingVariants = product.variants.filter((variant) => {
-        return Object.keys(selectedOptions).every((optionName) => {
-          if (optionName === option.name) return true;
-          const selectedValue = selectedOptions[optionName];
-          return variant.title && variant.title.includes(selectedValue);
-        });
-      });
-      matchingVariants.forEach((variant) => {
-        if (variant.inventory > 0) {
-          const optionValue = getOptionValueFromVariant(
-            variant,
-            option.name,
-            product,
-          );
-          if (optionValue) {
-            availableValues.add(optionValue);
-          }
-        }
-      });
+  function handleImageSelect(productId, imageIndex) {
+    setSelectedImageIndex((prev) => {
+      if (!prev) prev = {};
       return {
-        ...option,
-        values: option.values.filter((value) => availableValues.has(value)),
+        ...prev,
+        [productId]: imageIndex,
       };
     });
   }
 
-  function getOptionValueFromVariant(variant, optionName, product) {
-    const option = product.options?.find((opt) => opt.name === optionName);
-    if (!option) return null;
-    const title = variant.title || "";
-    const parts = title.split(" / ");
-    const optionIndex = option.position - 1;
-    return parts[optionIndex] || null;
-  }
-
-  function getSelectedVariant(product) {
-    const selected = selectedVariants[product.id];
-
-    if (!selected || Object.keys(selected).length === 0 || !product.variants) {
-      const firstAvailableVariant = product.variants?.find(
-        (variant) => variant.inventory > 0,
-      );
-      return (
-        product.selectedVariantId ||
-        (firstAvailableVariant ? firstAvailableVariant.id : null) ||
-        (product.variants && product.variants.length > 0
-          ? product.variants[0].id
-          : null)
-      );
-    }
-
-    const requiredOptions = product.options || [];
-    const allOptionsSelected = requiredOptions.every((option) => {
-      return selected[option.name] && selected[option.name] !== "";
+  function handleGalleryToggle(productId, isOpen) {
+    setExpandedGalleries((prev) => {
+      if (!prev) prev = {};
+      return {
+        ...prev,
+        [productId]: isOpen,
+      };
     });
-
-    if (!allOptionsSelected) {
-      const firstAvailableVariant = product.variants?.find(
-        (variant) => variant.inventory > 0,
-      );
-      return firstAvailableVariant
-        ? firstAvailableVariant.id
-        : product.variants && product.variants.length > 0
-          ? product.variants[0].id
-          : null;
-    }
-
-    const matchingVariant = product.variants.find((variant) => {
-      return Object.keys(selected).every((optionName) => {
-        const optionValue = selected[optionName];
-        return variant.title && variant.title.includes(optionValue);
-      });
-    });
-
-    return matchingVariant ? matchingVariant.id : product.selectedVariantId;
-  }
-
-  function hasValidVariantSelected(product) {
-    const variantId = getSelectedVariant(product);
-    if (!variantId || !product.variants) return false;
-
-    const selected = selectedVariants[product.id] || {};
-    const requiredOptions = product.options || [];
-    const allOptionsSelected = requiredOptions.every((option) => {
-      return selected[option.name] && selected[option.name] !== "";
-    });
-
-    return requiredOptions.length === 0 || allOptionsSelected;
-  }
-
-  function isVariantInStock(product) {
-    const selectedVariantId = getSelectedVariant(product);
-    if (!selectedVariantId || !product.variants) return true;
-    const variant = product.variants.find((v) => v.id === selectedVariantId);
-    return variant ? variant.inventory > 0 : true;
-  }
-
-  // Get the primary image URL safely
-  function getPrimaryImageUrl(product) {
-    const images = getProductImages(product);
-    if (images.length === 0) {
-      console.log("❌ No primary image URL for product:", product.title);
-      return null;
-    }
-
-    const selectedIndex = getSelectedImageIndex(product.id);
-    const selectedImage = images[selectedIndex];
-    const fallbackImage = images[0];
-    const imageUrl = selectedImage?.url || fallbackImage?.url || null;
-
-    console.log("🖼️ Primary image URL for", product.title, ":", imageUrl);
-    return imageUrl;
   }
 
   if (!shopifyPlusValidated && !loading) {
@@ -472,282 +340,23 @@ function Extension() {
       )}
 
       <s-stack direction="block" gap="base">
-        {availableProducts.map((product, index) => {
-          const images = getProductImages(product);
-          const hasMultipleImages = images.length > 1;
-          const availableOptions = getAvailableOptions(
-            product,
-            selectedVariants[product.id] || {},
-          );
-          const primaryImageUrl = getPrimaryImageUrl(product);
-
-          console.log(
-            "🖼️ Rendering product:",
-            product.title,
-            "Primary URL:",
-            primaryImageUrl,
-            "Images count:",
-            images.length,
-          );
-
-          return (
-            <s-stack key={product.id} direction="block" gap="small-200">
-              {/* 🎯 MAIN PRODUCT CARD */}
-              <s-box
-                padding="base"
-                border="base"
-                borderRadius="base"
-                borderWidth="base"
-              >
-                <s-stack direction="block" gap="small-200">
-                  {/* TOP ROW: Image | Content */}
-                  <s-stack direction="inline" gap="base" alignItems="start">
-                    {/* LEFT SIDE: MAIN IMAGE */}
-                    <s-box minInlineSize="80px">
-                      {primaryImageUrl ? (
-                        <s-box
-                          background="subdued"
-                          borderRadius="base"
-                          padding="base"
-                        >
-                          <s-image
-                            src={primaryImageUrl}
-                            alt={product.title}
-                            aspectRatio="1/1"
-                            borderRadius="base"
-                            objectFit="cover"
-                          />
-                        </s-box>
-                      ) : (
-                        <s-box
-                          minInlineSize="80px"
-                          minBlockSize="80px"
-                          background="subdued"
-                          borderRadius="base"
-                          padding="base"
-                        >
-                          <s-text>No Image</s-text>
-                        </s-box>
-                      )}
-                    </s-box>
-
-                    {/* RIGHT SIDE: Content */}
-                    <s-stack
-                      direction="block"
-                      gap="small-200"
-                      inlineSize="auto"
-                    >
-                      {/* ROW 1: Title/Price | Quantity */}
-                      <s-stack
-                        direction="inline"
-                        gap="base"
-                        alignItems="center"
-                        justifyContent="space-between"
-                      >
-                        <s-stack direction="block" gap="small-100">
-                          <s-text>{product.title}</s-text>
-                          <s-text type="strong">{product.price}</s-text>
-                        </s-stack>
-
-                        <s-stack
-                          direction="inline"
-                          gap="small-100"
-                          alignItems="center"
-                        >
-                          <s-button
-                            onClick={() => decrementQuantity(product.id)}
-                            disabled={
-                              adding[product.id] || getQuantity(product.id) <= 1
-                            }
-                          >
-                            <s-icon type="minus" />
-                          </s-button>
-                          <s-text>{getQuantity(product.id)}</s-text>
-                          <s-button
-                            onClick={() => incrementQuantity(product.id)}
-                            disabled={
-                              adding[product.id] ||
-                              getQuantity(product.id) >= 10
-                            }
-                          >
-                            <s-icon type="plus" />
-                          </s-button>
-                        </s-stack>
-                      </s-stack>
-
-                      {/* ROW 2: Options | Cart Button */}
-                      <s-stack
-                        direction="inline"
-                        gap="small-200"
-                        alignItems="center"
-                        justifyContent="space-between"
-                      >
-                        {availableOptions.length > 0 ? (
-                          <s-stack direction="inline" gap="small-200">
-                            {availableOptions.map((option) => (
-                              <s-select
-                                key={option.id}
-                                label={option.name}
-                                value={
-                                  selectedVariants[product.id]?.[option.name] ||
-                                  ""
-                                }
-                                onChange={(e) => {
-                                  const value =
-                                    e.currentTarget &&
-                                    "value" in e.currentTarget
-                                      ? e.currentTarget.value
-                                      : "";
-                                  handleOptionChange(
-                                    product.id,
-                                    option.name,
-                                    value,
-                                  );
-                                }}
-                              >
-                                <s-option value="">Select</s-option>
-                                {option.values.map((value) => (
-                                  <s-option key={value} value={value}>
-                                    {value}
-                                  </s-option>
-                                ))}
-                              </s-select>
-                            ))}
-                          </s-stack>
-                        ) : (
-                          <s-box></s-box>
-                        )}
-
-                        <s-button
-                          onClick={() => {
-                            const variantId = getSelectedVariant(product);
-                            handleAddToCart(variantId, product.id, index);
-                          }}
-                          loading={adding[product.id]}
-                          disabled={
-                            adding[product.id] ||
-                            !hasValidVariantSelected(product) ||
-                            !isVariantInStock(product)
-                          }
-                          variant="primary"
-                        >
-                          <s-icon type="cart" />
-                        </s-button>
-                      </s-stack>
-                    </s-stack>
-                  </s-stack>
-
-                  {/* 🎯 COLLAPSIBLE IMAGE GALLERY using s-details */}
-                  {hasMultipleImages && (
-                    <s-details
-                      open={expandedGalleries?.[product.id] || false}
-                      onToggle={(e) => {
-                        if (!e || !e.currentTarget) return;
-                        const isOpen =
-                          "open" in e.currentTarget
-                            ? e.currentTarget.open
-                            : false;
-                        console.log(
-                          `Gallery ${isOpen ? "opened" : "closed"} for:`,
-                          product.title,
-                        );
-                        setExpandedGalleries((prev) => {
-                          if (!prev) prev = {};
-                          return {
-                            ...prev,
-                            [product.id]: isOpen,
-                          };
-                        });
-                      }}
-                    >
-                      <s-summary>
-                        <s-text>View all {images.length} images</s-text>
-                      </s-summary>
-
-                      {/* Gallery Content */}
-                      <s-box
-                        padding="base"
-                        background="subdued"
-                        borderRadius="base"
-                      >
-                        {/* Current Image */}
-                        <s-box paddingBlockEnd="base">
-                          <s-image
-                            src={
-                              images[getSelectedImageIndex(product.id)]?.url ||
-                              ""
-                            }
-                            alt={`${product.title} - Image ${getSelectedImageIndex(product.id) + 1}`}
-                            aspectRatio="4/3"
-                            inlineSize="fill"
-                            borderRadius="base"
-                            objectFit="cover"
-                          />
-                        </s-box>
-
-                        {/* Image Counter */}
-                        <s-box paddingBlockEnd="base">
-                          <s-text type="small" color="subdued">
-                            {getSelectedImageIndex(product.id) + 1} of{" "}
-                            {images.length}
-                          </s-text>
-                        </s-box>
-
-                        {/* Thumbnails */}
-                        <s-stack
-                          direction="inline"
-                          gap="small-100"
-                          justifyContent="center"
-                        >
-                          {images.map((image, index) => (
-                            <s-clickable
-                              key={index}
-                              onClick={() => {
-                                setSelectedImageIndex((prev) => {
-                                  if (!prev) prev = {};
-                                  return {
-                                    ...prev,
-                                    [product.id]: index,
-                                  };
-                                });
-                              }}
-                              accessibilityLabel={`View image ${index + 1}`}
-                            >
-                              <s-box
-                                inlineSize="50px"
-                                blockSize="50px"
-                                border={
-                                  getSelectedImageIndex(product.id) === index
-                                    ? "base"
-                                    : "none"
-                                }
-                                borderWidth={
-                                  getSelectedImageIndex(product.id) === index
-                                    ? "base"
-                                    : "none"
-                                }
-                                borderRadius="small"
-                                overflow="hidden"
-                                padding="none"
-                              >
-                                <s-image
-                                  src={image.url || ""}
-                                  alt={`Thumbnail ${index + 1}`}
-                                  aspectRatio="1/1"
-                                  objectFit="cover"
-                                />
-                              </s-box>
-                            </s-clickable>
-                          ))}
-                        </s-stack>
-                      </s-box>
-                    </s-details>
-                  )}
-                </s-stack>
-              </s-box>
-            </s-stack>
-          );
-        })}
+        {availableProducts.map((product, index) => (
+          <ProductCard
+            key={product.id}
+            product={product}
+            index={index}
+            selectedVariants={selectedVariants}
+            quantities={quantities}
+            selectedImageIndex={selectedImageIndex}
+            expandedGalleries={expandedGalleries}
+            adding={adding}
+            onOptionChange={handleOptionChange}
+            onQuantityChange={handleQuantityChange}
+            onImageSelect={handleImageSelect}
+            onGalleryToggle={handleGalleryToggle}
+            onAddToCart={handleAddToCart}
+          />
+        ))}
       </s-stack>
     </s-section>
   );
