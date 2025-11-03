@@ -536,7 +536,6 @@ class AttributionEngine:
             ExtensionType.PHOENIX.value,  # Recommendation engine
             ExtensionType.VENUS.value,  # Customer account extensions
             ExtensionType.APOLLO.value,  # Post-purchase extensions
-            ExtensionType.MERCURY.value,  # Shopify Plus checkout extensions
         }
 
         # 🆕 NEW: Accept ALL recommendation interaction types
@@ -1771,103 +1770,9 @@ class AttributionEngine:
                             f"extension={apollo_extension}"
                         )
 
-        # 3. Extract Mercury tracking from order metafields (cart metafields become order metafields)
-        # Mercury uses same namespace as Apollo but different extension value
-        # Mercury stores multiple products in a JSON array to handle multiple additions
-        # Only use Mercury if Phoenix line items don't already have tracking data for that product
-        if context.order_metafields:
-            mercury_extension = self._extract_mercury_extension_from_metafields(
-                context.order_metafields
-            )
-            if mercury_extension:
-                # Extract Mercury-specific data from metafields
-                mercury_products = []  # JSON array of products
-                mercury_session_id = None
-
-                for metafield in context.order_metafields:
-                    if (
-                        isinstance(metafield, dict)
-                        and metafield.get("namespace") == "bb_recommendation"
-                    ):
-                        key = metafield.get("key")
-                        value = metafield.get("value")
-                        if key == "products":
-                            # Parse JSON array of products
-                            try:
-                                import json
-
-                                if isinstance(value, str):
-                                    mercury_products = json.loads(value)
-                                elif isinstance(value, list):
-                                    mercury_products = value
-                                else:
-                                    mercury_products = []
-
-                                if not isinstance(mercury_products, list):
-                                    mercury_products = []
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to parse Mercury products JSON: {e}, value: {value}"
-                                )
-                                mercury_products = []
-                        elif key == "session_id":
-                            mercury_session_id = value
-
-                # Track which products already have Phoenix tracking
-                products_with_tracking = {
-                    tracking_int["metadata"].get("_bb_rec_product_id")
-                    or tracking_int["metadata"].get("product_id")
-                    for tracking_int in tracking_interactions
-                }
-
-                # Create synthetic interactions for each product in Mercury's products array
-                for mercury_product_data in mercury_products:
-                    if not isinstance(mercury_product_data, dict):
-                        continue
-
-                    mercury_product_id = mercury_product_data.get("product_id")
-                    if not mercury_product_id:
-                        continue
-
-                    # Find the matching product in purchase_products
-                    matching_product = None
-                    for product in context.purchase_products:
-                        if str(product.get("id")) == str(mercury_product_id):
-                            matching_product = product
-                            break
-
-                    if not matching_product:
-                        logger.debug(
-                            f"⏭️ Mercury product {mercury_product_id} not found in order products"
-                        )
-                        continue
-
-                    # Skip if this product already has tracking from Phoenix line items
-                    if str(mercury_product_id) in products_with_tracking:
-                        logger.debug(
-                            f"⏭️ Skipping Mercury tracking for product {mercury_product_id} - "
-                            f"already has Phoenix line item tracking"
-                        )
-                        continue
-
-                    synthetic_interaction = (
-                        self._create_synthetic_interaction_from_mercury_metafields(
-                            matching_product,
-                            context,
-                            context.order_metafields,
-                            mercury_product_data,
-                        )
-                    )
-                    if synthetic_interaction:
-                        tracking_interactions.append(synthetic_interaction)
-                        logger.info(
-                            f"✅ Extracted Mercury tracking data for product {mercury_product_id}: "
-                            f"extension={mercury_extension}, position={mercury_product_data.get('position')}"
-                        )
-
         logger.info(
             f"📊 Extracted {len(tracking_interactions)} tracking interactions from extensions "
-            f"(Phoenix line items + Apollo metafields + Mercury metafields)"
+            f"(Phoenix line items + Apollo metafields)"
         )
 
         return tracking_interactions
@@ -1882,24 +1787,7 @@ class AttributionEngine:
                 and metafield.get("namespace") == "bb_recommendation"
                 and metafield.get("key") == "extension"
             ):
-                value = metafield.get("value", "").lower()
-                if value == "apollo":
-                    return value
-        return None
-
-    def _extract_mercury_extension_from_metafields(
-        self, metafields: List[Dict[str, Any]]
-    ) -> Optional[str]:
-        """Extract Mercury extension name from order metafields."""
-        for metafield in metafields:
-            if (
-                isinstance(metafield, dict)
-                and metafield.get("namespace") == "bb_recommendation"
-                and metafield.get("key") == "extension"
-            ):
-                value = metafield.get("value", "").lower()
-                if value == "mercury":
-                    return value
+                return metafield.get("value", "").lower()
         return None
 
     def _create_synthetic_interaction_from_line_item(
@@ -1921,12 +1809,7 @@ class AttributionEngine:
             return None
 
         extension = properties.get("_bb_rec_extension")
-        if not extension or extension.lower() not in [
-            "phoenix",
-            "venus",
-            "apollo",
-            "mercury",
-        ]:
+        if not extension or extension.lower() not in ["phoenix", "venus", "apollo"]:
             return None
 
         product_id = properties.get("_bb_rec_product_id") or product.get("id")
@@ -2039,112 +1922,6 @@ class AttributionEngine:
                 "source": "betterbundle",
                 "synthetic": True,  # ✅ Flag to indicate synthetic interaction
                 "source_data": "order_metafields",
-            },
-        }
-
-        return synthetic_interaction
-
-    def _create_synthetic_interaction_from_mercury_metafields(
-        self,
-        product: Dict[str, Any],
-        context: AttributionContext,
-        metafields: List[Dict[str, Any]],
-        mercury_product_data: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Create synthetic interaction from Mercury cart/order metafields.
-
-        Mercury stores cart metafields which become order metafields at checkout.
-        This represents the actual checkout data from Mercury recommendations.
-
-        Args:
-            product: Product data from purchase
-            context: Attribution context
-            metafields: Order metafields (cart metafields become order metafields)
-            mercury_product_data: Optional product-specific data from products JSON array
-        """
-        # Extract metafield values
-        extension = None
-        session_id = None
-        context_value = None
-
-        for metafield in metafields:
-            if not isinstance(metafield, dict):
-                continue
-
-            namespace = metafield.get("namespace")
-            key = metafield.get("key")
-            value = metafield.get("value")
-
-            if namespace == "bb_recommendation":
-                if key == "extension":
-                    extension = value.lower() if value else None
-                elif key == "session_id":
-                    session_id = value
-                elif key == "context":
-                    context_value = value
-
-        if not extension or extension != "mercury":
-            return None
-
-        # Extract product-specific data from mercury_product_data (if provided)
-        # or fallback to extracting from metafields (legacy support)
-        product_id = product.get("id")
-        position = None
-        timestamp_str = None
-        quantity = None
-
-        if mercury_product_data:
-            # ✅ NEW: Use data from products JSON array
-            product_id = mercury_product_data.get("product_id") or product.get("id")
-            position = mercury_product_data.get("position")
-            timestamp_str = mercury_product_data.get("timestamp")
-            quantity = mercury_product_data.get("quantity")
-        else:
-            # Legacy: Extract from individual metafields (for backward compatibility)
-            for metafield in metafields:
-                if (
-                    isinstance(metafield, dict)
-                    and metafield.get("namespace") == "bb_recommendation"
-                ):
-                    key = metafield.get("key")
-                    value = metafield.get("value")
-                    if key == "position":
-                        position = value
-                    elif key == "timestamp":
-                        timestamp_str = value
-
-        session_id = session_id or context.session_id
-
-        # Parse timestamp if available
-        created_at = context.purchase_time
-        if timestamp_str:
-            try:
-                from dateutil import parser
-
-                created_at = parser.parse(timestamp_str)
-            except Exception:
-                pass  # Use purchase_time as fallback
-
-        # Create synthetic interaction representing the Mercury checkout event
-        synthetic_interaction = {
-            "id": f"synthetic_mercury_{context.order_id}_{product_id}",
-            "shop_id": context.shop_id,
-            "customer_id": context.customer_id,
-            "session_id": session_id,
-            "interaction_type": "recommendation_add_to_cart",  # Most specific for checkout
-            "extension_type": "mercury",
-            "created_at": created_at,
-            "metadata": {
-                "extension": extension,
-                "product_id": product_id,  # ✅ Used for product_id extraction
-                "position": position,
-                "quantity": quantity,
-                "timestamp": timestamp_str,
-                "context": context_value or "checkout_page",
-                "source": "betterbundle",
-                "synthetic": True,  # ✅ Flag to indicate synthetic interaction
-                "source_data": "order_metafields",  # Cart metafields become order metafields
             },
         }
 

@@ -59,7 +59,6 @@ export function useRecommendations({
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const hasFetchedRecommendations = useRef(false);
-  const previousCartItemsRef = useRef([]); // Track previous cart items to detect real changes
 
   // Initialize session
   useEffect(() => {
@@ -174,27 +173,14 @@ export function useRecommendations({
   };
 
   // Fetch recommendations
-  // ✅ Only refetch if cart items actually changed (new items added), not just cart value
   useEffect(() => {
     if (!storage || !sessionId) {
       return;
     }
 
-    // Check if cart items actually changed (new items added)
-    const currentCartItems = JSON.stringify(memoizedCartData.cartItems.sort());
-    const previousCartItems = JSON.stringify(previousCartItemsRef.current.sort());
-    const cartItemsChanged = currentCartItems !== previousCartItems;
-
-    // Only refetch if:
-    // 1. First load (hasFetchedRecommendations is false), OR
-    // 2. Cart items actually changed (new product added/removed)
-    // Don't refetch just because cart value changed
-    if (hasFetchedRecommendations.current && !cartItemsChanged) {
+    if (hasFetchedRecommendations.current) {
       return;
     }
-
-    // Update previous cart items for next comparison
-    previousCartItemsRef.current = [...(memoizedCartData.cartItems || [])];
 
     const fetchRecommendations = async () => {
       try {
@@ -264,7 +250,6 @@ export function useRecommendations({
       }
     };
 
-    // ✅ Fetch recommendations (only if cart items changed or first load)
     fetchRecommendations();
   }, [customerId, context, limit, sessionId, shopDomain, memoizedCartData, storage]);
 

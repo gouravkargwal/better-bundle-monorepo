@@ -186,21 +186,6 @@ export class OnboardingService {
     tx: any,
   ) {
     try {
-      // ✅ Check if subscription already exists (idempotent)
-      const existingSubscription = await tx.shop_subscriptions.findFirst({
-        where: {
-          shop_id: shopRecord.id,
-          is_active: true,
-        },
-      });
-
-      if (existingSubscription) {
-        logger.warn(
-          `Shop ${shopRecord.id} already has an active subscription ${existingSubscription.id}. Skipping subscription creation.`,
-        );
-        return existingSubscription;
-      }
-
       // Get default subscription plan
       const defaultPlan = await tx.subscription_plans.findFirst({
         where: {

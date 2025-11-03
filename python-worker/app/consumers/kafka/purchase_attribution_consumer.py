@@ -364,7 +364,7 @@ class PurchaseAttributionKafkaConsumer:
                     )
                     return True
 
-        # 2. Check for Apollo/Mercury tracking in order metafields
+        # 2. Check for Apollo tracking in order metafields
         if order_metafields:
             for metafield in order_metafields:
                 if (
@@ -373,21 +373,9 @@ class PurchaseAttributionKafkaConsumer:
                     and metafield.get("key") == "extension"
                 ):
                     extension_value = metafield.get("value", "").lower()
-                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                    if extension_value in ["apollo", "phoenix", "venus"]:
                         logger.debug(
-                            f"✅ Found tracking data in metafields: {extension_value}"
-                        )
-                        return True
-                # Also check for Mercury products array (different structure)
-                if (
-                    isinstance(metafield, dict)
-                    and metafield.get("namespace") == "bb_recommendation"
-                    and metafield.get("key") == "products"
-                ):
-                    products_value = metafield.get("value")
-                    if products_value:
-                        logger.debug(
-                            f"✅ Found Mercury products array in metafields"
+                            f"✅ Found Apollo tracking data in metafields: {extension_value}"
                         )
                         return True
 

@@ -33,26 +33,12 @@ network_access = true
 # products, customers, and more. Learn more:
 # https://shopify.dev/docs/api/checkout-ui-extensions/latest/configuration#metafields
 
-# ✅ Mercury attribution tracking metafields (cart metafields become order metafields)
-[[extensions.metafields]]
-namespace = "bb_recommendation"
-key = "extension"
-
-[[extensions.metafields]]
-namespace = "bb_recommendation"
-key = "session_id"
-
-[[extensions.metafields]]
-namespace = "bb_recommendation"
-key = "context"
-
-[[extensions.metafields]]
-namespace = "bb_recommendation"
-key = "products"
-
-[[extensions.metafields]]
-namespace = "bb_recommendation"
-key = "source"
+# [[extensions.metafields]]
+# namespace = "my_namespace"
+# key = "my_key"
+# [[extensions.metafields]]
+# namespace = "my_namespace"
+# key = "my_other_key"
 
 # Defines settings that will be collected from merchants installing
 # your extension. Learn more:
