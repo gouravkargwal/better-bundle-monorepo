@@ -303,8 +303,51 @@ function Extension() {
     return (
       <s-section heading="Recommended for you">
         <s-stack direction="block" gap="base">
-          <s-skeleton-paragraph></s-skeleton-paragraph>
-          <s-skeleton-paragraph></s-skeleton-paragraph>
+          {[1].map((i) => (
+            <s-box
+              key={i}
+              padding="base"
+              border="base"
+              borderRadius="base"
+              borderWidth="base"
+            >
+              <s-stack direction="block" gap="small-200">
+                {/* Skeleton Image - Landscape */}
+                <s-box background="subdued" borderRadius="base" padding="base">
+                  <s-skeleton-paragraph content="Image"></s-skeleton-paragraph>
+                </s-box>
+
+                {/* Skeleton Title and Price - Inline */}
+                <s-stack direction="inline" justifyContent="space-between">
+                  <s-skeleton-paragraph content="Product Title"></s-skeleton-paragraph>
+                  <s-skeleton-paragraph content="$99.99"></s-skeleton-paragraph>
+                </s-stack>
+
+                {/* Skeleton Options - Inline */}
+                <s-stack direction="inline" gap="small-200">
+                  <s-box inlineSize="48%" minInlineSize="0">
+                    <s-skeleton-paragraph content="Option 1"></s-skeleton-paragraph>
+                  </s-box>
+                  <s-box inlineSize="48%" minInlineSize="0">
+                    <s-skeleton-paragraph content="Option 2"></s-skeleton-paragraph>
+                  </s-box>
+                </s-stack>
+
+                {/* Skeleton Quantity and Button - Inline */}
+                <s-stack
+                  direction="inline"
+                  gap="base"
+                  alignItems="center"
+                  justifyContent="space-between"
+                >
+                  <s-skeleton-paragraph content="Quantity"></s-skeleton-paragraph>
+                  <s-box minInlineSize="0" inlineSize="60%">
+                    <s-skeleton-paragraph content="Add to Cart"></s-skeleton-paragraph>
+                  </s-box>
+                </s-stack>
+              </s-stack>
+            </s-box>
+          ))}
         </s-stack>
       </s-section>
     );
