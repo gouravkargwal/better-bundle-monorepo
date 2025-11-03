@@ -66,6 +66,7 @@ class ExtensionType(str, Enum):
     ATLAS = "atlas"
     PHOENIX = "phoenix"
     VENUS = "venus"
+    MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class AppBlockTarget(str, Enum):
