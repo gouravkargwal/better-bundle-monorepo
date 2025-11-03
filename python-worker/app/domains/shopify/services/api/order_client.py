@@ -456,11 +456,11 @@ class OrderAPIClient(BaseShopifyAPIClient):
 
         # Reuse the same logic for fetching additional line items
         # Check and fetch additional line items if needed
-        line_items = order.get("lineItems", {})
-        line_items_page_info = line_items.get("pageInfo", {})
-        if line_items_page_info.get("hasNextPage"):
+        line_items = order.get("line_items", {})
+        line_items_page_info = line_items.get("page_info", {})
+        if line_items_page_info.get("has_next_page"):
             all_line_items = line_items.get("edges", []).copy()
-            line_items_cursor = line_items_page_info.get("endCursor")
+            line_items_cursor = line_items_page_info.get("end_cursor")
 
             while line_items_cursor:
                 rate_limit_info = await self.check_rate_limit(shop_domain)
@@ -496,11 +496,11 @@ class OrderAPIClient(BaseShopifyAPIClient):
                 # Process refund line items with pagination (similar to order line items)
                 refund_line_items = refund.get("refund_line_items", {})
                 if refund_line_items:
-                    line_items_page_info = refund_line_items.get("pageInfo", {})
-                    if line_items_page_info.get("hasNextPage"):
+                    line_items_page_info = refund_line_items.get("page_info", {})
+                    if line_items_page_info.get("has_next_page"):
                         # Fetch additional refund line items
                         all_line_items = refund_line_items.get("edges", []).copy()
-                        line_items_cursor = line_items_page_info.get("endCursor")
+                        line_items_cursor = line_items_page_info.get("end_cursor")
 
                         while line_items_cursor:
                             rate_limit_info = await self.check_rate_limit(shop_domain)
