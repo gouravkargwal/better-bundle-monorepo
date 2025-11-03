@@ -1015,7 +1015,7 @@ async def main():
     """Main function to run the deletion script"""
 
     shop_domain = "better-bundle-dev.myshopify.com"
-    access_token = "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"
+    # access_token = "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"
 
     if not shop_domain or not access_token:
         logger.error(
