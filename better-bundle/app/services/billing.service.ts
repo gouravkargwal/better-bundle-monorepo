@@ -322,12 +322,30 @@ export async function getBillingSummary(
 
 /**
  * Create a new shop subscription (when shop installs)
+ * ✅ IDEMPOTENT: Returns existing subscription if one already exists
  */
 export async function createShopSubscription(
   shopId: string,
   shopDomain: string,
 ): Promise<any> {
   try {
+    // ✅ Check if subscription already exists
+    const existingSubscription = await prisma.shop_subscriptions.findFirst({
+      where: {
+        shop_id: shopId,
+        is_active: true,
+      },
+    });
+
+    if (existingSubscription) {
+      logger.warning(
+        `Shop ${shopId} already has an active subscription ${existingSubscription.id}. Returning existing subscription.`,
+      );
+      return {
+        shop_subscription: existingSubscription,
+      };
+    }
+
     // Get default subscription plan
     const defaultPlan = await prisma.subscription_plans.findFirst({
       where: {

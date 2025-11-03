@@ -402,7 +402,7 @@ class BillingServiceV2:
                 if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
                     return True
 
-        # Check order metafields for Apollo tracking
+        # Check order metafields for Apollo/Mercury tracking
         order_metafields = getattr(purchase_event, "order_metafields", None)
         if order_metafields:
             for metafield in order_metafields:
@@ -412,7 +412,16 @@ class BillingServiceV2:
                     and metafield.get("key") == "extension"
                 ):
                     extension_value = metafield.get("value", "").lower()
-                    if extension_value in ["apollo", "phoenix", "venus"]:
+                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                        return True
+                # Also check for Mercury products array (different structure)
+                if (
+                    isinstance(metafield, dict)
+                    and metafield.get("namespace") == "bb_recommendation"
+                    and metafield.get("key") == "products"
+                ):
+                    products_value = metafield.get("value")
+                    if products_value:
                         return True
 
         return False

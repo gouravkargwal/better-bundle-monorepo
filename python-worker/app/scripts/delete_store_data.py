@@ -24,6 +24,7 @@ import sys
 from typing import Dict, Any, List
 from datetime import datetime
 
+
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
 
@@ -1013,8 +1014,8 @@ class ShopifyStoreDeleter:
 async def main():
     """Main function to run the deletion script"""
 
-    shop_domain = "gk-sphere.myshopify.com"
-    access_token = os.getenv("SHOPIFY_ACCESS_TOKEN")
+    shop_domain = "better-bundle-dev.myshopify.com"
+    access_token = "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"
 
     if not shop_domain or not access_token:
         logger.error(

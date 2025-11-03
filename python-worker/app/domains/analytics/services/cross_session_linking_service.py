@@ -462,8 +462,8 @@ class CrossSessionLinkingService:
         This also handles multiple sessions for the same customer.
         """
         try:
-            from app.core.database.models.interaction import (
-                Interaction as SAInteraction,
+            from app.core.database.models.user_interaction import (
+                UserInteraction as SAUserInteraction,
             )
             from app.core.database.models.user_session import (
                 UserSession as SAUserSession,
@@ -482,8 +482,8 @@ class CrossSessionLinkingService:
                 session_ids = [s.id for s in customer_sessions]
 
                 # Get all interactions across all customer sessions
-                interactions_query = select(SAInteraction).where(
-                    SAInteraction.session_id.in_(session_ids)
+                interactions_query = select(SAUserInteraction).where(
+                    SAUserInteraction.session_id.in_(session_ids)
                 )
                 interactions_result = await session.execute(interactions_query)
                 all_interactions = interactions_result.scalars().all()
@@ -491,7 +491,8 @@ class CrossSessionLinkingService:
                 # Group interactions by product for attribution
                 product_interactions = {}
                 for interaction in all_interactions:
-                    product_id = interaction.product_id
+                    meta = interaction.interaction_metadata or {}
+                    product_id = meta.get("product_id") or "unknown"
                     if product_id not in product_interactions:
                         product_interactions[product_id] = []
 
@@ -501,9 +502,9 @@ class CrossSessionLinkingService:
                             "session_id": interaction.session_id,
                             "extension_type": interaction.extension_type,
                             "interaction_type": interaction.interaction_type,
-                            "product_id": interaction.product_id,
+                            "product_id": meta.get("product_id"),
                             "created_at": interaction.created_at,
-                            "metadata": interaction.metadata or {},
+                            "metadata": meta,
                         }
                     )
 
@@ -568,8 +569,8 @@ class CrossSessionLinkingService:
             Cross-session attribution data
         """
         try:
-            from app.core.database.models.interaction import (
-                Interaction as SAInteraction,
+            from app.core.database.models.user_interaction import (
+                UserInteraction as SAUserInteraction,
             )
             from app.core.database.models.user_session import (
                 UserSession as SAUserSession,
@@ -587,10 +588,12 @@ class CrossSessionLinkingService:
 
                 # Get all interactions for this product across all customer sessions
                 session_ids = [s.id for s in customer_sessions]
-                interactions_query = select(SAInteraction).where(
+                # Filter by product_id stored inside interaction_metadata JSON
+                interactions_query = select(SAUserInteraction).where(
                     and_(
-                        SAInteraction.session_id.in_(session_ids),
-                        SAInteraction.product_id == product_id,
+                        SAUserInteraction.session_id.in_(session_ids),
+                        SAUserInteraction.interaction_metadata["product_id"].astext
+                        == str(product_id),
                     )
                 )
                 interactions_result = await session.execute(interactions_query)

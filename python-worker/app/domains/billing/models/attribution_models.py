@@ -47,6 +47,7 @@ class ExtensionType(str, Enum):
     PHOENIX = "phoenix"
     APOLLO = "apollo"
     ATLAS = "atlas"
+    MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class UserInteraction(BaseModel):
