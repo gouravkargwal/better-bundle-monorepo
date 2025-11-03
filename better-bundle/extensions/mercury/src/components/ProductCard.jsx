@@ -98,7 +98,7 @@ export function ProductCard({
             direction="inline"
             gap="base"
             alignItems="center"
-            inlineSize="100%"
+            justifyContent="space-between"
           >
             <QuantitySelector
               productId={product.id}
@@ -107,19 +107,23 @@ export function ProductCard({
               onIncrement={() => onQuantityChange(product.id, quantity + 1)}
               disabled={isAdding}
             />
-            <s-button
-              onClick={handleAddToCart}
-              loading={isAdding}
-              disabled={
-                isAdding ||
-                !hasValidVariantSelected(product, selectedVariants) ||
-                !isVariantInStock(product, selectedVariants)
-              }
-              variant="primary"
-              inlineSize="fit-content"
-            >
-              <s-icon type="cart" />
-            </s-button>
+
+            {/* Wrapper box to allow button to expand - using percentage to fill remaining space */}
+            <s-box minInlineSize="0" inlineSize="60%">
+              <s-button
+                onClick={handleAddToCart}
+                loading={isAdding}
+                disabled={
+                  isAdding ||
+                  !hasValidVariantSelected(product, selectedVariants) ||
+                  !isVariantInStock(product, selectedVariants)
+                }
+                variant="primary"
+                inlineSize="fill"
+              >
+                <s-icon type="cart" />
+              </s-button>
+            </s-box>
           </s-stack>
 
           {/* 🎯 COLLAPSIBLE IMAGE GALLERY */}
