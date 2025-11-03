@@ -1,23 +1,10 @@
-/**
- * Utility functions for product operations
- */
-
 export function getProductImages(product) {
-  console.log("🔍 Product images for", product.title, ":", product);
-
   if (!product.images || product.images.length === 0) {
     if (product.image?.url) {
-      console.log("✅ Using fallback image:", product.image.url);
       return [{ url: product.image.url }];
     }
-    console.log("❌ No images found for product:", product.title);
     return [];
   }
-  console.log(
-    "✅ Using product images array:",
-    product.images.length,
-    "images",
-  );
   return product.images;
 }
 
@@ -125,7 +112,6 @@ export function isVariantInStock(product, selectedVariants) {
 export function getPrimaryImageUrl(product, selectedImageIndex) {
   const images = getProductImages(product);
   if (images.length === 0) {
-    console.log("❌ No primary image URL for product:", product.title);
     return null;
   }
 
@@ -134,7 +120,5 @@ export function getPrimaryImageUrl(product, selectedImageIndex) {
   const fallbackImage = images[0];
   const imageUrl = selectedImage?.url || fallbackImage?.url || null;
 
-  console.log("🖼️ Primary image URL for", product.title, ":", imageUrl);
   return imageUrl;
 }
-

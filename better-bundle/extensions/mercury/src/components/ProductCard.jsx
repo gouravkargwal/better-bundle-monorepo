@@ -37,15 +37,6 @@ export function ProductCard({
   const quantity = quantities[product.id] || 1;
   const isAdding = adding[product.id] || false;
 
-  console.log(
-    "🖼️ Rendering product:",
-    product.title,
-    "Primary URL:",
-    primaryImageUrl,
-    "Images count:",
-    images.length,
-  );
-
   const handleAddToCart = () => {
     const variantId = getSelectedVariant(product, selectedVariants);
     onAddToCart(variantId, product.id, index);
@@ -54,7 +45,6 @@ export function ProductCard({
   const handleGalleryToggle = (e) => {
     if (!e || !e.currentTarget) return;
     const isOpen = "open" in e.currentTarget ? e.currentTarget.open : false;
-    console.log(`Gallery ${isOpen ? "opened" : "closed"} for:`, product.title);
     onGalleryToggle(product.id, isOpen);
   };
 

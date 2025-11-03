@@ -4,6 +4,7 @@ import { useRecommendations } from "./hooks/useRecommendations.js";
 import { trackAddToCart, getOrCreateSession } from "./api/analytics.js";
 import { ProductCard } from "./components/ProductCard.jsx";
 import { getOptionValueFromVariant } from "./utils/productUtils.js";
+import { logger } from "./utils/logger.js";
 
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
@@ -124,7 +125,9 @@ function Extension() {
 
   useEffect(() => {
     if (!successMessage) return;
-    const t = setTimeout(() => setSuccessMessage(""), 3000);
+    const t = setTimeout(() => {
+      setSuccessMessage("");
+    }, 5000); // Increased to 5 seconds for better visibility
     return () => clearTimeout(t);
   }, [successMessage]);
 
@@ -133,10 +136,6 @@ function Extension() {
       setAdding((prev) => ({ ...prev, [productId]: true }));
 
       if (!variantId) {
-        console.error(
-          "❌ Mercury: No variant ID available for product",
-          productId,
-        );
         return;
       }
 
@@ -154,81 +153,77 @@ function Extension() {
 
       if (result.type === "success") {
         setAddedProducts((prev) => new Set([...prev, productId]));
-        setSuccessMessage("Added to cart successfully");
+        // Find product name for the success message
+        const product = products?.find((p) => p.id === productId);
+        const productName = product?.title || "Product";
+        setSuccessMessage(`${productName} added to cart successfully`);
 
-        try {
-          const sessionId = await getOrCreateSession(
-            storage,
-            shopDomain,
-            customerId,
-            null,
-            null,
-            null,
-            null,
-          );
+        const sessionId = await getOrCreateSession(
+          storage,
+          shopDomain,
+          customerId,
+          null,
+          null,
+          null,
+          null,
+        );
 
-          const allAddedProducts = Array.from(addedProducts);
-          const productsArray = allAddedProducts.map((addedProductId) => ({
-            product_id: addedProductId,
+        const allAddedProducts = Array.from(addedProducts);
+        const productsArray = allAddedProducts.map((addedProductId) => ({
+          product_id: addedProductId,
+          position: position,
+          quantity: quantity,
+          timestamp: new Date().toISOString(),
+        }));
+
+        if (!allAddedProducts.includes(productId)) {
+          productsArray.push({
+            product_id: productId,
             position: position,
             quantity: quantity,
             timestamp: new Date().toISOString(),
-          }));
-
-          if (!allAddedProducts.includes(productId)) {
-            productsArray.push({
-              product_id: productId,
-              position: position,
-              quantity: quantity,
-              timestamp: new Date().toISOString(),
-            });
-          }
-
-          await shopify.applyMetafieldChange({
-            type: "updateMetafield",
-            namespace: "bb_recommendation",
-            key: "extension",
-            value: "mercury",
-            valueType: "string",
           });
-
-          await shopify.applyMetafieldChange({
-            type: "updateMetafield",
-            namespace: "bb_recommendation",
-            key: "session_id",
-            value: sessionId,
-            valueType: "string",
-          });
-
-          await shopify.applyMetafieldChange({
-            type: "updateMetafield",
-            namespace: "bb_recommendation",
-            key: "context",
-            value: "checkout_page",
-            valueType: "string",
-          });
-
-          await shopify.applyMetafieldChange({
-            type: "updateMetafield",
-            namespace: "bb_recommendation",
-            key: "source",
-            value: "betterbundle",
-            valueType: "string",
-          });
-
-          await shopify.applyMetafieldChange({
-            type: "updateMetafield",
-            namespace: "bb_recommendation",
-            key: "products",
-            value: JSON.stringify(productsArray),
-            valueType: "json_string",
-          });
-        } catch (metafieldError) {
-          console.error(
-            "❌ Mercury: Failed to set cart metafields:",
-            metafieldError,
-          );
         }
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "extension",
+          value: "mercury",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "session_id",
+          value: sessionId,
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "context",
+          value: "checkout_page",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "source",
+          value: "betterbundle",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "products",
+          value: JSON.stringify(productsArray),
+          valueType: "json_string",
+        });
 
         await trackAddToCart(
           storage,
@@ -246,11 +241,15 @@ function Extension() {
             cart_value: cartValue,
           },
         );
-      } else {
-        console.error("❌ Mercury: Failed to add product to cart");
       }
     } catch (err) {
-      console.error("❌ Mercury: Error adding to cart:", err);
+      logger.error({
+        msg: "Error adding to cart",
+        error: err,
+        productId: productId,
+        variantId: variantId,
+        position: position,
+      });
     } finally {
       setAdding((prev) => ({ ...prev, [productId]: false }));
     }
@@ -325,8 +324,6 @@ function Extension() {
       return !isInCart && !isRecentlyAdded;
     }) || [];
 
-  console.log("🛒 Available products:", availableProducts.length);
-
   if (!products || products.length === 0 || availableProducts.length === 0) {
     return null;
   }
@@ -334,8 +331,14 @@ function Extension() {
   return (
     <s-section heading="Recommended for you">
       {successMessage && (
-        <s-banner tone="success" dismissible>
-          <s-text>{successMessage}</s-text>
+        <s-banner
+          tone="success"
+          dismissible
+          onDismiss={() => {
+            setSuccessMessage("");
+          }}
+        >
+          <s-text type="strong">{successMessage}</s-text>
         </s-banner>
       )}
 
