@@ -18,6 +18,7 @@ function Extension() {
   const [successMessage, setSuccessMessage] = useState("");
   const hasTrackedView = useRef(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState({});
+  const [expandedGalleries, setExpandedGalleries] = useState({});
   const { lines, cost, buyerIdentity, storage } = shopify;
   const shopDomain = shopify.shop.myshopifyDomain;
   const customerId = buyerIdentity?.customer?.value?.id || null;
@@ -28,7 +29,6 @@ function Extension() {
         ?.map((line) => {
           const productId = line.merchandise?.product?.id;
           if (!productId) return null;
-          // Extract numeric ID from GID format (gid://shopify/Product/123456 -> 123456)
           if (productId.startsWith("gid://shopify/Product/")) {
             return productId.split("/").pop();
           }
@@ -38,20 +38,13 @@ function Extension() {
     );
   }, [lines.value]);
 
-  // ✅ Sync addedProducts with actual cart items when cart changes
-  // This ensures we filter out products that are actually in cart (from any source)
   useEffect(() => {
     const cartProductIds = new Set(cartItems);
     setAddedProducts((prev) => {
-      // Update: Keep products that are in cart (regardless of source)
-      // Also keep products we just added (for immediate UI feedback)
       const newSet = new Set();
       cartProductIds.forEach((id) => newSet.add(id));
-      // Keep products we added even if not yet in cart (pending add)
       prev.forEach((id) => {
         if (!cartProductIds.has(id)) {
-          // Only keep if we recently added it (within last 5 seconds)
-          // This provides immediate UI feedback while cart updates
           newSet.add(id);
         }
       });
@@ -88,41 +81,32 @@ function Extension() {
     }
   }, [products, loading, trackRecommendationView]);
 
-  // ✅ Auto-select first available variant for each product on load (better UX)
   useEffect(() => {
     if (products && products.length > 0) {
       products.forEach((product) => {
-        // Skip if already has selection
         if (selectedVariants[product.id]) return;
 
-        // Auto-select first available option value for each option
         if (product.options && product.options.length > 0) {
           const autoSelected = {};
           product.options.forEach((option) => {
-            // Find first available variant and get its option value
             const firstAvailableVariant =
               product.variants?.find((variant) => variant.inventory > 0) ||
               product.variants?.[0];
 
             if (firstAvailableVariant && option.values.length > 0) {
-              // Extract option value from variant title
               const optionValue = getOptionValueFromVariant(
                 firstAvailableVariant,
                 option.name,
                 product,
               );
-
-              // Use option value if found, otherwise use first value
               autoSelected[option.name] = optionValue || option.values[0];
             } else if (option.values.length > 0) {
-              // Fallback to first value if no variant found
               autoSelected[option.name] = option.values[0];
             }
           });
 
           if (Object.keys(autoSelected).length > 0) {
             setSelectedVariants((prev) => {
-              // Only update if product doesn't already have selection
               if (prev[product.id]) return prev;
               return {
                 ...prev,
@@ -133,10 +117,8 @@ function Extension() {
         }
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [products]);
 
-  // Auto-dismiss success banner
   useEffect(() => {
     if (!successMessage) return;
     const t = setTimeout(() => setSuccessMessage(""), 3000);
@@ -171,8 +153,6 @@ function Extension() {
         setAddedProducts((prev) => new Set([...prev, productId]));
         setSuccessMessage("Added to cart successfully");
 
-        // ✅ NEW: Set cart metafields for Mercury attribution (similar to Apollo)
-        // ✅ FIX: Accumulate multiple products in JSON array to handle multiple additions
         try {
           const sessionId = await getOrCreateSession(
             storage,
@@ -184,18 +164,14 @@ function Extension() {
             null,
           );
 
-          // ✅ Build products array from addedProducts state (tracks products added in this session)
-          // Since we can't read cart metafields directly, we use component state to accumulate
-          // The backend will handle deduplication when parsing the products array
           const allAddedProducts = Array.from(addedProducts);
           const productsArray = allAddedProducts.map((addedProductId) => ({
             product_id: addedProductId,
-            position: position, // Use current position (will be updated per product if needed)
-            quantity: quantity, // Use current quantity (will be updated per product if needed)
+            position: position,
+            quantity: quantity,
             timestamp: new Date().toISOString(),
           }));
 
-          // Add current product if not already in the list
           if (!allAddedProducts.includes(productId)) {
             productsArray.push({
               product_id: productId,
@@ -205,10 +181,6 @@ function Extension() {
             });
           }
 
-          // Store Mercury tracking data in cart metafields
-          // Cart metafields become order metafields when order is created
-
-          // Always set extension, session_id, context, source (these don't change per product)
           await shopify.applyMetafieldChange({
             type: "updateMetafield",
             namespace: "bb_recommendation",
@@ -241,7 +213,6 @@ function Extension() {
             valueType: "string",
           });
 
-          // ✅ Store all products as JSON array (accumulates multiple products)
           await shopify.applyMetafieldChange({
             type: "updateMetafield",
             namespace: "bb_recommendation",
@@ -254,10 +225,8 @@ function Extension() {
             "❌ Mercury: Failed to set cart metafields:",
             metafieldError,
           );
-          // Don't block add to cart if metafield setting fails
         }
 
-        // Track add to cart event (not click event)
         await trackAddToCart(
           storage,
           shopDomain,
@@ -319,14 +288,25 @@ function Extension() {
   }
 
   function getSelectedImageIndex(productId) {
-    return selectedImageIndex[productId] || 0;
+    return selectedImageIndex?.[productId] ?? 0;
   }
 
-  // Carousel functions
   function getProductImages(product) {
+    console.log("🔍 Product images for", product.title, ":", product);
+
     if (!product.images || product.images.length === 0) {
-      return product.image?.url ? [{ url: product.image.url }] : [];
+      if (product.image?.url) {
+        console.log("✅ Using fallback image:", product.image.url);
+        return [{ url: product.image.url }];
+      }
+      console.log("❌ No images found for product:", product.title);
+      return [];
     }
+    console.log(
+      "✅ Using product images array:",
+      product.images.length,
+      "images",
+    );
     return product.images;
   }
 
@@ -370,11 +350,9 @@ function Extension() {
   }
 
   function getSelectedVariant(product) {
-    // If no selection made, auto-select first available variant (better UX)
     const selected = selectedVariants[product.id];
 
     if (!selected || Object.keys(selected).length === 0 || !product.variants) {
-      // Auto-select first available variant (in stock)
       const firstAvailableVariant = product.variants?.find(
         (variant) => variant.inventory > 0,
       );
@@ -387,14 +365,12 @@ function Extension() {
       );
     }
 
-    // Check if all required options are selected
     const requiredOptions = product.options || [];
     const allOptionsSelected = requiredOptions.every((option) => {
       return selected[option.name] && selected[option.name] !== "";
     });
 
     if (!allOptionsSelected) {
-      // Not all options selected - return first available variant as fallback
       const firstAvailableVariant = product.variants?.find(
         (variant) => variant.inventory > 0,
       );
@@ -405,7 +381,6 @@ function Extension() {
           : null;
     }
 
-    // Find matching variant based on selected options
     const matchingVariant = product.variants.find((variant) => {
       return Object.keys(selected).every((optionName) => {
         const optionValue = selected[optionName];
@@ -420,15 +395,12 @@ function Extension() {
     const variantId = getSelectedVariant(product);
     if (!variantId || !product.variants) return false;
 
-    // Check if all required options are selected
     const selected = selectedVariants[product.id] || {};
     const requiredOptions = product.options || [];
     const allOptionsSelected = requiredOptions.every((option) => {
       return selected[option.name] && selected[option.name] !== "";
     });
 
-    // If product has options, all must be selected
-    // If no options, variant is valid
     return requiredOptions.length === 0 || allOptionsSelected;
   }
 
@@ -437,6 +409,23 @@ function Extension() {
     if (!selectedVariantId || !product.variants) return true;
     const variant = product.variants.find((v) => v.id === selectedVariantId);
     return variant ? variant.inventory > 0 : true;
+  }
+
+  // Get the primary image URL safely
+  function getPrimaryImageUrl(product) {
+    const images = getProductImages(product);
+    if (images.length === 0) {
+      console.log("❌ No primary image URL for product:", product.title);
+      return null;
+    }
+
+    const selectedIndex = getSelectedImageIndex(product.id);
+    const selectedImage = images[selectedIndex];
+    const fallbackImage = images[0];
+    const imageUrl = selectedImage?.url || fallbackImage?.url || null;
+
+    console.log("🖼️ Primary image URL for", product.title, ":", imageUrl);
+    return imageUrl;
   }
 
   if (!shopifyPlusValidated && !loading) {
@@ -455,23 +444,21 @@ function Extension() {
   }
 
   if (error) {
+    console.error("❌ Error in useRecommendations:", error);
     return null;
   }
 
-  // ✅ Filter out products that are already in cart
   const availableProducts =
     products?.filter((product) => {
       const productId = product.id;
-      // Extract numeric ID if needed for comparison
       const numericId = productId.toString();
-      // Check if product is in cart (by actual cart items, not just addedProducts state)
       const isInCart = cartItems.includes(numericId);
-      // Also check addedProducts for immediate filtering (cart might not have updated yet)
       const isRecentlyAdded = addedProducts.has(productId);
       return !isInCart && !isRecentlyAdded;
     }) || [];
 
-  // ✅ Don't show section if no products available (following Venus pattern)
+  console.log("🛒 Available products:", availableProducts.length);
+
   if (!products || products.length === 0 || availableProducts.length === 0) {
     return null;
   }
@@ -483,179 +470,282 @@ function Extension() {
           <s-text>{successMessage}</s-text>
         </s-banner>
       )}
-      <s-stack direction="inline" gap="base">
+
+      <s-stack direction="block" gap="base">
         {availableProducts.map((product, index) => {
           const images = getProductImages(product);
           const hasMultipleImages = images.length > 1;
+          const availableOptions = getAvailableOptions(
+            product,
+            selectedVariants[product.id] || {},
+          );
+          const primaryImageUrl = getPrimaryImageUrl(product);
+
+          console.log(
+            "🖼️ Rendering product:",
+            product.title,
+            "Primary URL:",
+            primaryImageUrl,
+            "Images count:",
+            images.length,
+          );
 
           return (
-            <s-box
-              key={product.id}
-              padding="base"
-              border="base"
-              borderRadius="base"
-              borderWidth="base"
-              inlineSize="100%"
-            >
-              <s-stack direction="block" gap="base">
-                {/* Image at the top - Phoenix style */}
-                <s-box>
-                  <s-stack direction="block" gap="small-100">
-                    {/* Main Product Image */}
-                    <s-box>
-                      <s-image
-                        src={images[getSelectedImageIndex(product.id)]?.url}
-                        alt={product.title}
-                        aspectRatio="16/9"
-                        loading="lazy"
-                      />
+            <s-stack key={product.id} direction="block" gap="small-200">
+              {/* 🎯 MAIN PRODUCT CARD */}
+              <s-box
+                padding="base"
+                border="base"
+                borderRadius="base"
+                borderWidth="base"
+              >
+                <s-stack direction="block" gap="small-200">
+                  {/* TOP ROW: Image | Content */}
+                  <s-stack direction="inline" gap="base" alignItems="start">
+                    {/* LEFT SIDE: MAIN IMAGE */}
+                    <s-box minInlineSize="80px">
+                      {primaryImageUrl ? (
+                        <s-box
+                          background="subdued"
+                          borderRadius="base"
+                          padding="base"
+                        >
+                          <s-image
+                            src={primaryImageUrl}
+                            alt={product.title}
+                            aspectRatio="1/1"
+                            borderRadius="base"
+                            objectFit="cover"
+                          />
+                        </s-box>
+                      ) : (
+                        <s-box
+                          minInlineSize="80px"
+                          minBlockSize="80px"
+                          background="subdued"
+                          borderRadius="base"
+                          padding="base"
+                        >
+                          <s-text>No Image</s-text>
+                        </s-box>
+                      )}
                     </s-box>
 
-                    {/* Product Gallery with Thumbnails - Only show if multiple images */}
-                    {hasMultipleImages && (
-                      <s-scroll-box>
+                    {/* RIGHT SIDE: Content */}
+                    <s-stack
+                      direction="block"
+                      gap="small-200"
+                      inlineSize="auto"
+                    >
+                      {/* ROW 1: Title/Price | Quantity */}
+                      <s-stack
+                        direction="inline"
+                        gap="base"
+                        alignItems="center"
+                        justifyContent="space-between"
+                      >
+                        <s-stack direction="block" gap="small-100">
+                          <s-text>{product.title}</s-text>
+                          <s-text type="strong">{product.price}</s-text>
+                        </s-stack>
+
+                        <s-stack
+                          direction="inline"
+                          gap="small-100"
+                          alignItems="center"
+                        >
+                          <s-button
+                            onClick={() => decrementQuantity(product.id)}
+                            disabled={
+                              adding[product.id] || getQuantity(product.id) <= 1
+                            }
+                          >
+                            <s-icon type="minus" />
+                          </s-button>
+                          <s-text>{getQuantity(product.id)}</s-text>
+                          <s-button
+                            onClick={() => incrementQuantity(product.id)}
+                            disabled={
+                              adding[product.id] ||
+                              getQuantity(product.id) >= 10
+                            }
+                          >
+                            <s-icon type="plus" />
+                          </s-button>
+                        </s-stack>
+                      </s-stack>
+
+                      {/* ROW 2: Options | Cart Button */}
+                      <s-stack
+                        direction="inline"
+                        gap="small-200"
+                        alignItems="center"
+                        justifyContent="space-between"
+                      >
+                        {availableOptions.length > 0 ? (
+                          <s-stack direction="inline" gap="small-200">
+                            {availableOptions.map((option) => (
+                              <s-select
+                                key={option.id}
+                                label={option.name}
+                                value={
+                                  selectedVariants[product.id]?.[option.name] ||
+                                  ""
+                                }
+                                onChange={(e) => {
+                                  const value =
+                                    e.currentTarget &&
+                                    "value" in e.currentTarget
+                                      ? e.currentTarget.value
+                                      : "";
+                                  handleOptionChange(
+                                    product.id,
+                                    option.name,
+                                    value,
+                                  );
+                                }}
+                              >
+                                <s-option value="">Select</s-option>
+                                {option.values.map((value) => (
+                                  <s-option key={value} value={value}>
+                                    {value}
+                                  </s-option>
+                                ))}
+                              </s-select>
+                            ))}
+                          </s-stack>
+                        ) : (
+                          <s-box></s-box>
+                        )}
+
+                        <s-button
+                          onClick={() => {
+                            const variantId = getSelectedVariant(product);
+                            handleAddToCart(variantId, product.id, index);
+                          }}
+                          loading={adding[product.id]}
+                          disabled={
+                            adding[product.id] ||
+                            !hasValidVariantSelected(product) ||
+                            !isVariantInStock(product)
+                          }
+                          variant="primary"
+                        >
+                          <s-icon type="cart" />
+                        </s-button>
+                      </s-stack>
+                    </s-stack>
+                  </s-stack>
+
+                  {/* 🎯 COLLAPSIBLE IMAGE GALLERY using s-details */}
+                  {hasMultipleImages && (
+                    <s-details
+                      open={expandedGalleries?.[product.id] || false}
+                      onToggle={(e) => {
+                        if (!e || !e.currentTarget) return;
+                        const isOpen =
+                          "open" in e.currentTarget
+                            ? e.currentTarget.open
+                            : false;
+                        console.log(
+                          `Gallery ${isOpen ? "opened" : "closed"} for:`,
+                          product.title,
+                        );
+                        setExpandedGalleries((prev) => {
+                          if (!prev) prev = {};
+                          return {
+                            ...prev,
+                            [product.id]: isOpen,
+                          };
+                        });
+                      }}
+                    >
+                      <s-summary>
+                        <s-text>View all {images.length} images</s-text>
+                      </s-summary>
+
+                      {/* Gallery Content */}
+                      <s-box
+                        padding="base"
+                        background="subdued"
+                        borderRadius="base"
+                      >
+                        {/* Current Image */}
+                        <s-box paddingBlockEnd="base">
+                          <s-image
+                            src={
+                              images[getSelectedImageIndex(product.id)]?.url ||
+                              ""
+                            }
+                            alt={`${product.title} - Image ${getSelectedImageIndex(product.id) + 1}`}
+                            aspectRatio="4/3"
+                            inlineSize="fill"
+                            borderRadius="base"
+                            objectFit="cover"
+                          />
+                        </s-box>
+
+                        {/* Image Counter */}
+                        <s-box paddingBlockEnd="base">
+                          <s-text type="small" color="subdued">
+                            {getSelectedImageIndex(product.id) + 1} of{" "}
+                            {images.length}
+                          </s-text>
+                        </s-box>
+
+                        {/* Thumbnails */}
                         <s-stack
                           direction="inline"
                           gap="small-100"
                           justifyContent="center"
                         >
                           {images.map((image, index) => (
-                            <s-link
+                            <s-clickable
                               key={index}
-                              onClick={() =>
-                                setSelectedImageIndex((prev) => ({
-                                  ...prev,
-                                  [product.id]: index,
-                                }))
-                              }
-                              aria-label={`View image ${index + 1} of ${images.length}`}
-                              aria-pressed={
-                                selectedImageIndex[product.id] === index
-                              }
+                              onClick={() => {
+                                setSelectedImageIndex((prev) => {
+                                  if (!prev) prev = {};
+                                  return {
+                                    ...prev,
+                                    [product.id]: index,
+                                  };
+                                });
+                              }}
+                              accessibilityLabel={`View image ${index + 1}`}
                             >
-                              <s-product-thumbnail
-                                key={index}
-                                src={image.url}
-                                alt={`${product.title} - Image ${index + 1}`}
-                              />
-                            </s-link>
+                              <s-box
+                                inlineSize="50px"
+                                blockSize="50px"
+                                border={
+                                  getSelectedImageIndex(product.id) === index
+                                    ? "base"
+                                    : "none"
+                                }
+                                borderWidth={
+                                  getSelectedImageIndex(product.id) === index
+                                    ? "base"
+                                    : "none"
+                                }
+                                borderRadius="small"
+                                overflow="hidden"
+                                padding="none"
+                              >
+                                <s-image
+                                  src={image.url || ""}
+                                  alt={`Thumbnail ${index + 1}`}
+                                  aspectRatio="1/1"
+                                  objectFit="cover"
+                                />
+                              </s-box>
+                            </s-clickable>
                           ))}
                         </s-stack>
-                      </s-scroll-box>
-                    )}
-                  </s-stack>
-                </s-box>
-
-                {/* Content - Phoenix style layout */}
-                <s-stack direction="block" gap="small">
-                  {/* Title */}
-                  <s-text>{product.title}</s-text>
-
-                  {/* Price and Quantity on same line - Phoenix style */}
-                  <s-stack
-                    direction="inline"
-                    gap="base"
-                    justifyContent="space-between"
-                    alignItems="center"
-                  >
-                    <s-text type="strong">{product.price}</s-text>
-                    <s-stack direction="inline" gap="small">
-                      <s-button
-                        onClick={() => decrementQuantity(product.id)}
-                        disabled={
-                          adding[product.id] || getQuantity(product.id) <= 1
-                        }
-                        inlineSize="fit-content"
-                      >
-                        −
-                      </s-button>
-                      <s-number-field
-                        value={getQuantity(product.id)}
-                        min={1}
-                        max={10}
-                        onChange={(e) => {
-                          const value = e.currentTarget.value;
-                          handleQuantityChange(
-                            product.id,
-                            parseInt(value) || 1,
-                          );
-                        }}
-                      />
-                      <s-button
-                        onClick={() => incrementQuantity(product.id)}
-                        disabled={
-                          adding[product.id] || getQuantity(product.id) >= 10
-                        }
-                      >
-                        +
-                      </s-button>
-                    </s-stack>
-                  </s-stack>
-
-                  <s-box>
-                    {/* Variant Options - Responsive layout */}
-                    {product.options && product.options.length > 0 && (
-                      <s-stack
-                        direction="inline"
-                        gap="small"
-                        justifyContent="space-between"
-                      >
-                        {getAvailableOptions(
-                          product,
-                          selectedVariants[product.id] || {},
-                        ).map((option) => (
-                          <s-select
-                            key={option.id}
-                            label={option.name}
-                            value={
-                              selectedVariants[product.id]?.[option.name] || ""
-                            }
-                            onChange={(e) => {
-                              const value = e.currentTarget.value;
-                              handleOptionChange(
-                                product.id,
-                                option.name,
-                                value,
-                              );
-                            }}
-                          >
-                            <s-option value="">Select {option.name}</s-option>
-                            {option.values.map((value) => (
-                              <s-option key={value} value={value}>
-                                {value}
-                              </s-option>
-                            ))}
-                          </s-select>
-                        ))}
-                      </s-stack>
-                    )}
-                  </s-box>
-                  {/* Add to Cart Button - Phoenix style (full width) */}
-                  <s-box>
-                    <s-button
-                      inlineSize="fill"
-                      onClick={() => {
-                        const variantId = getSelectedVariant(product);
-                        handleAddToCart(variantId, product.id, index);
-                      }}
-                      loading={adding[product.id]}
-                      disabled={
-                        adding[product.id] ||
-                        !hasValidVariantSelected(product) ||
-                        !isVariantInStock(product)
-                      }
-                      variant="primary"
-                    >
-                      {!hasValidVariantSelected(product)
-                        ? "Please select options"
-                        : !isVariantInStock(product)
-                          ? "Out of Stock"
-                          : "Add to cart"}
-                    </s-button>
-                  </s-box>
+                      </s-box>
+                    </s-details>
+                  )}
                 </s-stack>
-              </s-stack>
-            </s-box>
+              </s-box>
+            </s-stack>
           );
         })}
       </s-stack>

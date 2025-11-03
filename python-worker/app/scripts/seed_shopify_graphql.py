@@ -1002,8 +1002,6 @@ class ShopifyGraphQLSeeder:
 
 async def main() -> bool:
     # Get shop details from arguments or environment variables
-    shop_domain = "better-bundle-dev.myshopify.com"
-    # access_token = "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"
 
     seeder = ShopifyGraphQLSeeder(shop_domain, access_token)
     return await seeder.run()

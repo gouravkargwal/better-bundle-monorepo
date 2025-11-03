@@ -328,6 +328,25 @@ export async function createShopSubscription(
   shopDomain: string,
 ): Promise<any> {
   try {
+    // Idempotency: return existing active or pending subscription if present
+    const existing = await prisma.shop_subscriptions.findFirst({
+      where: {
+        shop_id: shopId,
+        OR: [
+          { is_active: true },
+          {
+            status: {
+              in: ["TRIAL", "PENDING_APPROVAL", "ACTIVE", "SUSPENDED"] as any,
+            },
+          },
+        ],
+      },
+      orderBy: { created_at: "desc" },
+    });
+
+    if (existing) {
+      return { shop_subscription: existing };
+    }
     // Get default subscription plan
     const defaultPlan = await prisma.subscription_plans.findFirst({
       where: {

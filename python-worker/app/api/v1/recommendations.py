@@ -362,6 +362,36 @@ async def fetch_recommendations_logic(
                         "reason": "fbt_complementary_upsells",
                         "primary_product": primary_product,
                     }
+
+                # If FBT failed or returned no items, fallback to normal Gorse
+                if not result.get("success") or not result.get("items"):
+                    # Ensure session-based fallback can use cart contents
+                    fallback_metadata = dict(request.metadata or {})
+                    if cart_items:
+                        fallback_metadata["cart_contents"] = cart_items
+
+                    # Skip FBT in fallback to avoid retrying it; prefer session/user/popular
+                    custom_levels = {
+                        "checkout_page": [
+                            "session_recommendations",
+                            "user_recommendations",
+                            "popular_category",
+                            "popular",
+                        ]
+                    }
+
+                    result = await services.executor.execute_fallback_chain(
+                        context="checkout_page",
+                        shop_id=shop.id,
+                        product_ids=request.product_ids,
+                        user_id=effective_user_id,
+                        session_id=request.session_id,
+                        category=category,
+                        limit=request.limit,
+                        metadata=fallback_metadata,
+                        exclude_items=final_exclude_items,
+                        fallback_levels=custom_levels,
+                    )
         else:  # Default fallback for other contexts
             result = await services.executor.execute_fallback_chain(
                 context=request.context,
