@@ -369,28 +369,11 @@ class BillingRepositoryV2:
                 )
                 return True
 
-            # ✅ SUSPEND SHOP: When trial is completed, suspend the shop
-            await self.session.execute(
-                update(Shop)
-                .where(
-                    and_(
-                        Shop.id == shop_id,
-                        Shop.is_active == True,  # Only suspend if currently active
-                    )
-                )
-                .values(
-                    is_active=False,
-                    suspended_at=now_utc(),
-                    suspension_reason="trial_completed",
-                    service_impact="suspended",
-                    updated_at=now_utc(),
-                )
-            )
-
+            # ✅ Do NOT deactivate or suspend the shop on trial completion
             logger.info(
                 f"✅ Trial completed for shop {shop_id}. "
                 f"Revenue: {actual_revenue} >= {threshold} {subscription.currency}. "
-                f"Shop suspended - awaiting user billing setup."
+                f"Awaiting user billing setup."
             )
 
             await self.session.flush()
