@@ -429,7 +429,6 @@ services:
           memory: 256M
     security_opt:
       - no-new-privileges:true
-    user: "10001"
     logging:
       driver: "json-file"
       options:
