@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
+import { getRecommendations } from "../api/recommendations";
 import {
-  recommendationApi,
-} from "../api/recommendations";
-import { analyticsApi } from "../api/analytics";
-import { JWTManager } from "../utils/jwtManager";
+  getOrCreateSession,
+  trackRecommendationView,
+  trackRecommendationClick,
+} from "../api/analytics";
 import { logger } from "../utils/logger";
+import { STORAGE_KEYS } from "../config/constants";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount, currencyCode) => {
@@ -56,49 +58,37 @@ export function useRecommendations({
   const [products, setProducts] = useState([]);
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(null);
-  const [jwtManager, setJwtManager] = useState(null);
   const hasFetchedRecommendations = useRef(false);
+  const previousCartItemsRef = useRef([]); // Track previous cart items to detect real changes
 
-  // Initialize JWT Manager
+  // Initialize session
   useEffect(() => {
-    if (storage && shopDomain) {
-      const jwt = new JWTManager(storage);
-      setJwtManager(jwt);
-
-      // Set JWT manager on API clients
-      recommendationApi.setJWTManager(jwt);
-      analyticsApi.setJWTManager(jwt);
-    }
-  }, [storage, shopDomain]);
-
-  useEffect(() => {
-    if (!jwtManager) {
+    if (!storage || !shopDomain) {
       return;
     }
 
     const initializeSession = async () => {
       try {
         // 1. Try reading from storage first (fastest) - with expiration check
-        const cachedSessionId = await storage.read("unified_session_id");
-        const cachedExpiry = await storage.read("unified_session_expires_at");
+        const cachedSessionId = await storage.read(STORAGE_KEYS.SESSION_ID);
+        const cachedExpiry = await storage.read(STORAGE_KEYS.SESSION_EXPIRES_AT);
 
         if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-
           setSessionId(cachedSessionId);
           return;
         }
 
-
         // 2. If not in storage, fetch from backend API
-        const sessionId = await analyticsApi.getOrCreateSession(
+        const sessionId = await getOrCreateSession(
+          storage,
           shopDomain,
           customerId,
         );
 
         // Store session with expiration (30 minutes like Atlas)
         const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
-        await storage.write("unified_session_id", sessionId);
-        await storage.write("unified_session_expires_at", expiresAt.toString());
+        await storage.write(STORAGE_KEYS.SESSION_ID, sessionId);
+        await storage.write(STORAGE_KEYS.SESSION_EXPIRES_AT, expiresAt.toString());
 
         setSessionId(sessionId);
       } catch (err) {
@@ -108,7 +98,7 @@ export function useRecommendations({
     };
 
     initializeSession();
-  }, [jwtManager, storage, shopDomain, customerId]);
+  }, [storage, shopDomain, customerId]);
 
   // Memoize cart data to prevent infinite re-renders
   const memoizedCartData = useMemo(() => ({
@@ -117,13 +107,18 @@ export function useRecommendations({
     checkoutStep: checkoutStep || "order_summary",
   }), [cartItems, cartValue, checkoutStep]);
 
-  const trackRecommendationClick = async (
+  const trackRecommendationClickHandler = async (
     productId,
     position,
     productUrl,
   ) => {
     try {
-      const success = await analyticsApi.trackRecommendationClick(
+      if (!sessionId || !storage) {
+        return productUrl;
+      }
+
+      const success = await trackRecommendationClick(
+        storage,
         shopDomain,
         context,
         productId,
@@ -135,13 +130,13 @@ export function useRecommendations({
 
       if (!success) {
         // If tracking failed, clear cached session
-        await storage.remove("unified_session_id");
+        await storage.remove(STORAGE_KEYS.SESSION_ID);
         setSessionId(null);
       }
     } catch (error) {
       logger.error(`Failed to track ${context} click:`, error);
       // Clear cached session on error
-      await storage.remove("unified_session_id");
+      await storage.remove(STORAGE_KEYS.SESSION_ID);
       setSessionId(null);
     }
 
@@ -149,14 +144,15 @@ export function useRecommendations({
   };
 
   // Track recommendation view when user actually views them
-  const trackRecommendationView = async () => {
-    if (products.length === 0) {
+  const trackRecommendationViewHandler = async () => {
+    if (products.length === 0 || !sessionId || !storage) {
       return;
     }
 
     try {
       const productIds = products.map((product) => product.id);
-      const success = await analyticsApi.trackRecommendationView(
+      const success = await trackRecommendationView(
+        storage,
         shopDomain,
         context,
         sessionId,
@@ -166,33 +162,46 @@ export function useRecommendations({
       );
 
       if (!success) {
-        await storage.remove("unified_session_id");
+        await storage.remove(STORAGE_KEYS.SESSION_ID);
         setSessionId(null);
       }
     } catch (error) {
       logger.error(`Failed to track recommendation view:`, error);
       // Clear cached session on error
-      await storage.remove("unified_session_id");
+      await storage.remove(STORAGE_KEYS.SESSION_ID);
       setSessionId(null);
     }
   };
 
   // Fetch recommendations
+  // ✅ Only refetch if cart items actually changed (new items added), not just cart value
   useEffect(() => {
-    if (!jwtManager || !sessionId) {
+    if (!storage || !sessionId) {
       return;
     }
 
-    if (hasFetchedRecommendations.current) {
+    // Check if cart items actually changed (new items added)
+    const currentCartItems = JSON.stringify(memoizedCartData.cartItems.sort());
+    const previousCartItems = JSON.stringify(previousCartItemsRef.current.sort());
+    const cartItemsChanged = currentCartItems !== previousCartItems;
+
+    // Only refetch if:
+    // 1. First load (hasFetchedRecommendations is false), OR
+    // 2. Cart items actually changed (new product added/removed)
+    // Don't refetch just because cart value changed
+    if (hasFetchedRecommendations.current && !cartItemsChanged) {
       return;
     }
+
+    // Update previous cart items for next comparison
+    previousCartItemsRef.current = [...(memoizedCartData.cartItems || [])];
 
     const fetchRecommendations = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        const response = await recommendationApi.getRecommendations({
+        const response = await getRecommendations(storage, {
           context,
           limit,
           user_id: customerId,
@@ -255,14 +264,15 @@ export function useRecommendations({
       }
     };
 
+    // ✅ Fetch recommendations (only if cart items changed or first load)
     fetchRecommendations();
-  }, [jwtManager, customerId, context, limit, sessionId, shopDomain, memoizedCartData]);
+  }, [customerId, context, limit, sessionId, shopDomain, memoizedCartData, storage]);
 
   return {
     loading,
     products,
     error,
-    trackRecommendationClick,
-    trackRecommendationView,
+    trackRecommendationClick: trackRecommendationClickHandler,
+    trackRecommendationView: trackRecommendationViewHandler,
   };
 }

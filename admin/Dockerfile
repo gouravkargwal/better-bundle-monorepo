@@ -6,6 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PORT=8000
 ENV HOST=0.0.0.0
+ENV ENVIRONMENT=production
 
 # Set work directory
 WORKDIR /app
@@ -28,8 +29,10 @@ COPY . /app/
 # Create static files directory
 RUN mkdir -p /app/staticfiles
 
-# Collect static files
-RUN python manage.py collectstatic --noinput
+# NOTE: Do not collect static at build time; run at container start after envs are present
+
+# Ensure log directory exists for production logging
+RUN mkdir -p /var/log/betterbundle-admin
 
 # Create entrypoint script
 RUN echo '#!/bin/bash\n\
@@ -37,7 +40,13 @@ set -e\n\
 \n\
 # Wait for database\n\
 echo "Waiting for database..."\n\
-while ! pg_isready -h $DB_HOST -p $DB_PORT -U $DB_USER; do\n\
+DB_HOST_ENV="${DB_HOST:-postgres}"\n\
+DB_PORT_ENV="${DB_PORT:-5432}"\n\
+DB_USER_FLAG=""\n\
+if [ -n "${DB_USER}" ]; then\n\
+  DB_USER_FLAG="-U ${DB_USER}"\n\
+fi\n\
+while ! pg_isready -h "${DB_HOST_ENV}" -p "${DB_PORT_ENV}" ${DB_USER_FLAG}; do\n\
   sleep 1\n\
 done\n\
 echo "Database is ready!"\n\
@@ -45,9 +54,12 @@ echo "Database is ready!"\n\
 # Run migrations\n\
 python manage.py migrate\n\
 \n\
+# Collect static files now that env vars are available\n\
+python manage.py collectstatic --noinput\n\
+\n\
 # Create admin user if it doesn\'t exist\n\
 python manage.py create_admin_user --username admin --email admin@betterbundle.com --password admin123\n\
-\n\
+\
 # Start server with environment-based configuration\n\
 python manage.py runserver $HOST:$PORT' > /app/entrypoint.sh
 

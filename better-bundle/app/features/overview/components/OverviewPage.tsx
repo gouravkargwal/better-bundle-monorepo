@@ -55,6 +55,8 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                 commissionRate={
                   data.overviewData.activePlan?.commissionRate || 0.03
                 }
+                commissionCharged={data.overviewData.commissionCharged}
+                isTrialPhase={data.overviewData.isTrialPhase}
               />
 
               {/* Key Performance Metrics */}
@@ -68,6 +70,7 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                   data.overviewData.activePlan?.commissionRate || 0.03
                 }
                 isTrialPhase={data.overviewData.isTrialPhase}
+                commissionCharged={data.overviewData.commissionCharged}
               />
 
               {/* Billing Status and Help Section */}

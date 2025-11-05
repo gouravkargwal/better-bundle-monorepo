@@ -1,19 +1,18 @@
 import { extend, render } from "@shopify/post-purchase-ui-extensions-react";
 
-import { apolloRecommendationApi } from "./api/recommendations";
-import { JWTManager } from "./utils/jwtManager";
+import { getSessionAndRecommendations } from "./api/recommendations";
+import { initializeJWTStorage, getStoredTokenSync } from "./utils/jwt";
 import App from "./App";
-
-// Create JWT manager with storage for persistence
-function createJWTManager(storage: any): JWTManager {
-  return new JWTManager(storage);
-}
 
 extend(
   "Checkout::PostPurchase::ShouldRender",
   async ({ inputData, storage }) => {
     try {
+      // Initialize JWT storage for token persistence
+      initializeJWTStorage(storage);
+
       const { initialPurchase, shop, locale } = inputData;
+
       const shopDomain = shop.domain;
       const customerId = initialPurchase.customerId
         ? String(initialPurchase.customerId)
@@ -28,12 +27,8 @@ extend(
         totalPrice: item.totalPriceSet,
       }));
 
-      // Create JWT Manager with storage for API calls
-      const jwtManager = createJWTManager(storage);
-      apolloRecommendationApi.setJWTManager(jwtManager);
-
       // Call your API that returns the exact structure from your example
-      const result = await apolloRecommendationApi.getSessionAndRecommendations(
+      const result = await getSessionAndRecommendations(
         shopDomain,
         customerId,
         orderId,
@@ -57,10 +52,13 @@ extend(
           return { render: false };
         }
 
-        // Store the API response data directly
+        // Get token from storage (it was stored during the API call)
+        const tokenData = getStoredTokenSync();
+
+        // Store recommendations and token together (same storage update)
         await storage.update({
-          recommendations: result.recommendations, // Your API structure
-          sessionId: result.sessionId, // ✅ From our fixed API client
+          recommendations: result.recommendations,
+          sessionId: result.sessionId,
           orderId,
           customerId,
           shopDomain,
@@ -74,6 +72,15 @@ extend(
             totalPriceSet: initialPurchase.totalPriceSet,
             lineItems: initialPurchase.lineItems,
           },
+          // Include token so it's available in App component's storage.initialData
+          ...(tokenData && {
+            bb_jwt_access_token: tokenData.token,
+            bb_jwt_token_expiry: tokenData.expiresIn,
+            bb_jwt_shop_domain: tokenData.shopDomain,
+            ...(tokenData.refreshToken && {
+              bb_jwt_refresh_token: tokenData.refreshToken,
+            }),
+          }),
         });
       }
 

@@ -30,7 +30,9 @@ class UserSession(BaseModel):
         None, description="Customer identifier (null for anonymous)"
     )
     client_id: Optional[str] = None  # ✅ NEW
-    browser_session_id: str = Field(..., description="Browser's session identifier")
+    browser_session_id: Optional[str] = Field(
+        None, description="Browser's session identifier (fallback only)"
+    )
     status: SessionStatus = Field(
         default=SessionStatus.ACTIVE, description="Session status"
     )

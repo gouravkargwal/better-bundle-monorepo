@@ -85,6 +85,7 @@ class RecommendationAPI {
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
       // Use JWT authentication for the request
+      // Pass customerId for customer-specific token generation
       const response = await this.phoenixJWT.makeAuthenticatedRequest(apiUrl, {
         method: 'POST',
         headers: {
@@ -92,7 +93,8 @@ class RecommendationAPI {
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
-        keepalive: true // Keep connection alive for better performance
+        keepalive: true, // Keep connection alive for better performance
+        customerId: customerId || null, // Pass customerId for token context
       });
 
       clearTimeout(timeoutId);
@@ -158,7 +160,26 @@ class RecommendationAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`Cart API error: ${response.status}`);
+        // Parse error response for better error handling
+        let errorMessage = `Cart API error: ${response.status}`;
+        let errorData = null;
+
+        try {
+          errorData = await response.json();
+          if (errorData && errorData.description) {
+            errorMessage = errorData.description;
+          }
+        } catch (e) {
+          // If response isn't JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+
+        // Create error object with status code for proper handling
+        const error = new Error(errorMessage);
+        error.status = response.status;
+        error.statusCode = response.status;
+        error.data = errorData;
+        throw error;
       }
 
       const data = await response.json();

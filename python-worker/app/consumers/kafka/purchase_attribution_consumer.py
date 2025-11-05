@@ -3,7 +3,7 @@ Kafka-based purchase attribution consumer for processing purchase attribution ev
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
 from app.shared.helpers import now_utc
@@ -234,13 +234,38 @@ class PurchaseAttributionKafkaConsumer:
                                 f"⚠️ No fallback session found for customer {customer_id}"
                             )
 
-                # PRE-CHECK: Only process if customer has extension interactions
+                # Extract order metafields for Apollo tracking data FIRST (needed for pre-check)
+                order_metafields_list = None
+                order_metafields = getattr(order, "metafields", None)
+                if order_metafields:
+                    if isinstance(order_metafields, list):
+                        order_metafields_list = order_metafields
+                    elif isinstance(order_metafields, dict):
+                        # Convert dict to list format if needed
+                        order_metafields_list = [
+                            {
+                                "namespace": k.split(".")[0] if "." in k else k,
+                                "key": k.split(".")[1] if "." in k else k,
+                                "value": v,
+                            }
+                            for k, v in order_metafields.items()
+                        ]
+
+                # ✅ UPDATED: Check for tracking data in addition to UserInteraction records
+                # This ensures orders with line item properties (Phoenix) or metafields (Apollo)
+                # are processed even if UserInteraction records don't exist
+                has_tracking_data = self._has_tracking_data_from_extensions(
+                    products, order_metafields_list
+                )
                 has_interactions = await self._has_extension_interactions(
                     session, shop_id, customer_id, user_session
                 )
 
-                # TEMPORARY: Process all orders for testing (remove this later)
-                if not has_interactions:
+                # Process if we have either tracking data OR interactions
+                if not has_tracking_data and not has_interactions:
+                    logger.debug(
+                        f"⏭️ Skipping order {order_id} - no tracking data or interactions found"
+                    )
                     return
 
                 purchase_event = PurchaseEvent(
@@ -259,6 +284,7 @@ class PurchaseAttributionKafkaConsumer:
                         "source": "normalization",
                         "line_item_count": len(products),
                     },
+                    order_metafields=order_metafields_list,
                 )
 
                 # Process attribution
@@ -315,3 +341,54 @@ class PurchaseAttributionKafkaConsumer:
             logger.error(f"Error checking extension interactions: {e}")
             # If we can't check, err on the side of processing to avoid missing attributions
             return True
+
+    def _has_tracking_data_from_extensions(
+        self,
+        products: List[Dict[str, Any]],
+        order_metafields: Optional[List[Dict[str, Any]]],
+    ) -> bool:
+        """
+        Check if order has tracking data from extensions (Phoenix line items or Apollo metafields).
+
+        This is the PRIORITY source of truth - what extensions actually added to the order
+        at checkout time, regardless of whether UserInteraction records exist.
+        """
+        # 1. Check for Phoenix tracking in line item properties
+        for product in products:
+            properties = product.get("properties", {})
+            if isinstance(properties, dict) and properties:
+                extension = properties.get("_bb_rec_extension")
+                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
+                    logger.debug(
+                        f"✅ Found Phoenix tracking data in line item: {extension}"
+                    )
+                    return True
+
+        # 2. Check for Apollo/Mercury tracking in order metafields
+        if order_metafields:
+            for metafield in order_metafields:
+                if (
+                    isinstance(metafield, dict)
+                    and metafield.get("namespace") == "bb_recommendation"
+                    and metafield.get("key") == "extension"
+                ):
+                    extension_value = metafield.get("value", "").lower()
+                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                        logger.debug(
+                            f"✅ Found tracking data in metafields: {extension_value}"
+                        )
+                        return True
+                # Also check for Mercury products array (different structure)
+                if (
+                    isinstance(metafield, dict)
+                    and metafield.get("namespace") == "bb_recommendation"
+                    and metafield.get("key") == "products"
+                ):
+                    products_value = metafield.get("value")
+                    if products_value:
+                        logger.debug(
+                            f"✅ Found Mercury products array in metafields"
+                        )
+                        return True
+
+        return False

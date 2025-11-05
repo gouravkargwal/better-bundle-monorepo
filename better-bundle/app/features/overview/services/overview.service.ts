@@ -115,8 +115,8 @@ export class OverviewService {
         },
       });
     } else {
-      // PAID PHASE: Show actual charged commission data
-      attributedRevenue = await prisma.commission_records.aggregate({
+      // PAID PHASE: Get both attributed revenue AND commission charged separately
+      const paidCommissionsData = await prisma.commission_records.aggregate({
         where: {
           shop_id: shopId,
           billing_phase: "PAID",
@@ -125,9 +125,16 @@ export class OverviewService {
           },
         },
         _sum: {
-          commission_charged: true, // Use actual charged amount, not attributed revenue
+          attributed_revenue: true, // Actual revenue generated
+          commission_charged: true, // Actual commission charged to Shopify
         },
       });
+
+      attributedRevenue = {
+        _sum: {
+          attributed_revenue: paidCommissionsData._sum.attributed_revenue,
+        },
+      } as any;
 
       attributedOrders = await prisma.commission_records.count({
         where: {
@@ -175,10 +182,27 @@ export class OverviewService {
       },
     });
 
+    // ✅ Get commission charged separately for PAID phase
+    let commissionCharged = 0;
+    if (!isTrialPhase) {
+      const paidCommissions = await prisma.commission_records.aggregate({
+        where: {
+          shop_id: shopId,
+          billing_phase: "PAID",
+          status: {
+            in: ["RECORDED", "INVOICED"],
+          },
+        },
+        _sum: {
+          commission_charged: true,
+        },
+      });
+      commissionCharged = Number(paidCommissions._sum.commission_charged || 0);
+    }
+
     return {
-      totalRevenue: isTrialPhase
-        ? (attributedRevenue._sum as any).attributed_revenue || 0
-        : (attributedRevenue._sum as any).commission_charged || 0,
+      totalRevenue: (attributedRevenue._sum as any).attributed_revenue || 0,
+      commissionCharged, // Actual commission charged to Shopify (PAID phase only)
       currency: currencyCode,
       conversionRate: Math.round(conversionRate * 100) / 100, // Round to 2 decimal places
       revenueChange: null, // TODO: Calculate period-over-period change

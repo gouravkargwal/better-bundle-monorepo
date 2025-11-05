@@ -66,6 +66,7 @@ class ExtensionType(str, Enum):
     ATLAS = "atlas"
     PHOENIX = "phoenix"
     VENUS = "venus"
+    MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class AppBlockTarget(str, Enum):
@@ -146,6 +147,8 @@ class SubscriptionStatus(Enum):
     SUSPENDED = "SUSPENDED"  # Temporarily suspended
     EXPIRED = "EXPIRED"  # Naturally expired
     TRIAL = "TRIAL"  # Trial in progress
+    TRIAL_COMPLETED = "TRIAL_COMPLETED"  # Trial completed, awaiting billing setup
+    PENDING_APPROVAL = "PENDING_APPROVAL"  # Awaiting approval
 
 
 class BillingCycleStatus(str, Enum):

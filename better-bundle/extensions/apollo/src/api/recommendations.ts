@@ -1,41 +1,70 @@
-import { BACKEND_URL } from "../constant";
+import { BACKEND_URL } from "../config/constants";
 import type { ProductRecommendation, CombinedAPIResponse } from "../types";
-import { type Logger, logger } from "../utils/logger";
-import type { JWTManager } from "../utils/jwtManager";
+import { logger } from "../utils/logger";
+import { makeAuthenticatedRequest } from "../utils/jwt";
 
-class ApolloRecommendationClient {
-  private baseUrl: string;
-  private logger: Logger;
-  private jwtManager: JWTManager | null = null;
-
-  constructor() {
-    this.baseUrl = BACKEND_URL as string;
-    this.logger = logger;
-  }
-
-  setJWTManager(jwtManager: JWTManager) {
-    this.jwtManager = jwtManager;
-  }
-
-  async getSessionAndRecommendations(
-    shopDomain: string,
-    customerId?: string,
-    orderId?: string,
-    purchasedProductIds?: string[],
-    limit: number = 3,
-    metadata?: Record<string, any>,
-  ): Promise<{
+// Module-level cache to prevent duplicate API calls for the same order
+const resultCache = new Map<
+  string,
+  {
     sessionId: string;
     recommendations: ProductRecommendation[];
     success: boolean;
     error?: string;
-  }> {
-    try {
-      if (!this.jwtManager) {
-        throw new Error("JWT Manager not initialized");
-      }
+  }
+>();
 
-      const url = `${this.baseUrl}/api/apollo/get-session-and-recommendations`;
+// Module-level promise to prevent concurrent session creation calls for the same order
+const sessionCreationPromises = new Map<
+  string,
+  Promise<{
+    sessionId: string;
+    recommendations: ProductRecommendation[];
+    success: boolean;
+    error?: string;
+  }>
+>();
+
+/**
+ * Get session and recommendations
+ */
+export const getSessionAndRecommendations = async (
+  shopDomain: string,
+  customerId?: string,
+  orderId?: string,
+  purchasedProductIds?: string[],
+  limit: number = 3,
+  metadata?: Record<string, any>,
+): Promise<{
+  sessionId: string;
+  recommendations: ProductRecommendation[];
+  success: boolean;
+  error?: string;
+}> => {
+  // Create cache key from orderId (most important) and shopDomain
+  const cacheKey = `${shopDomain}:${orderId || "no-order"}`;
+
+  // Check if we already have a cached result for this order
+  if (resultCache.has(cacheKey)) {
+    const cachedResult = resultCache.get(cacheKey)!;
+    logger.info(
+      `Apollo: Reusing cached result for order ${orderId}, skipping API call`,
+    );
+    return cachedResult;
+  }
+
+  // Prevent concurrent calls for the same order to avoid race conditions on backend
+  const existingPromise = sessionCreationPromises.get(cacheKey);
+  if (existingPromise) {
+    logger.warn(
+      `Apollo: Concurrent session creation detected for order ${orderId}, reusing existing promise`,
+    );
+    return await existingPromise;
+  }
+
+  const promise = (async () => {
+    try {
+      const url = `${BACKEND_URL}/api/session/get-session-and-recommendations`;
 
       const payload = {
         shop_domain: shopDomain,
@@ -54,16 +83,15 @@ class ApolloRecommendationClient {
         order_id: orderId ? String(orderId) : null,
         purchased_products: purchasedProductIds || [],
         limit: Math.min(Math.max(limit, 1), 3),
-
+        extension_type: "apollo",
         // Additional metadata
         metadata: {
-          extension_type: "apollo",
           source: "apollo_post_purchase",
           ...metadata,
         },
       };
 
-      const response = await this.jwtManager.makeAuthenticatedRequest(url, {
+      const response = await makeAuthenticatedRequest(url, {
         method: "POST",
         body: JSON.stringify(payload),
         keepalive: true,
@@ -76,7 +104,7 @@ class ApolloRecommendationClient {
           throw new Error("Services suspended");
         }
         const errorText = await response.text();
-        this.logger.error(
+        logger.error(
           {
             error: new Error(
               `API call failed with status ${response.status}: ${errorText}`,
@@ -96,7 +124,7 @@ class ApolloRecommendationClient {
       const result: CombinedAPIResponse = await response.json();
 
       if (!result.success) {
-        this.logger.error(
+        logger.error(
           {
             error: new Error(result.message || "API returned success: false"),
             shop_domain: shopDomain,
@@ -110,7 +138,7 @@ class ApolloRecommendationClient {
       }
 
       if (!result.session_data || !result.session_data.session_id) {
-        this.logger.error(
+        logger.error(
           {
             error: new Error("Invalid response: missing session data"),
             shop_domain: shopDomain,
@@ -123,13 +151,17 @@ class ApolloRecommendationClient {
         throw new Error("Invalid response: missing session data");
       }
 
-      return {
+      const finalResult = {
         sessionId: result.session_data.session_id,
         recommendations: result.recommendations || [],
         success: true,
       };
+
+      // Cache the successful result
+      resultCache.set(cacheKey, finalResult);
+      return finalResult;
     } catch (error) {
-      this.logger.error(
+      logger.error(
         {
           error: error instanceof Error ? error.message : String(error),
           shop_domain: shopDomain,
@@ -140,15 +172,25 @@ class ApolloRecommendationClient {
         "Failed to get session and recommendations",
       );
 
-      return {
+      const errorResult = {
         sessionId: "",
         recommendations: [],
         success: false,
         error:
           error instanceof Error ? error.message : "Unknown error occurred",
       };
-    }
-  }
-}
 
-export const apolloRecommendationApi = new ApolloRecommendationClient();
+      // Also cache error results to prevent retrying failed calls
+      resultCache.set(cacheKey, errorResult);
+      return errorResult;
+    } finally {
+      // Remove the promise from the map after completion
+      sessionCreationPromises.delete(cacheKey);
+    }
+  })();
+
+  // Store the promise in the map
+  sessionCreationPromises.set(cacheKey, promise);
+
+  return await promise;
+};

@@ -186,6 +186,25 @@ export class OnboardingService {
     tx: any,
   ) {
     try {
+      // Idempotency: do not create another subscription if one already exists
+      const existing = await tx.shop_subscriptions.findFirst({
+        where: {
+          shop_id: shopRecord.id,
+          OR: [
+            { is_active: true },
+            {
+              status: {
+                in: ["TRIAL", "PENDING_APPROVAL", "ACTIVE", "SUSPENDED"] as any,
+              },
+            },
+          ],
+        },
+        orderBy: { created_at: "desc" },
+      });
+
+      if (existing) {
+        return existing;
+      }
       // Get default subscription plan
       const defaultPlan = await tx.subscription_plans.findFirst({
         where: {

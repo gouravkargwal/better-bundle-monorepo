@@ -1,6 +1,6 @@
-import { Page, Tabs, BlockStack, Banner } from "@shopify/polaris";
+import { Page, Tabs, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "@remix-run/react";
 import type { BillingState } from "../types/billing.types";
 import { BillingPlan } from "./BillingPlan";
@@ -35,9 +35,6 @@ export function TabbedBillingPage({
         case 2:
           navigate("/app/billing/cycles");
           break;
-        case 3:
-          navigate("/app/billing/commissions");
-          break;
         default:
           navigate("/app/billing");
       }
@@ -53,7 +50,7 @@ export function TabbedBillingPage({
     },
     {
       id: "invoices",
-      content: "📄 Invoices",
+      content: "📄 Usage Charges",
       panelID: "invoices-panel",
     },
     {
@@ -61,25 +58,21 @@ export function TabbedBillingPage({
       content: "🔄 Billing Cycles",
       panelID: "cycles-panel",
     },
-    {
-      id: "commissions",
-      content: "💰 Commission Records",
-      panelID: "commissions-panel",
-    },
   ];
 
-  // Determine which tab is active based on current route
-  const getActiveTab = () => {
-    if (location.pathname === "/app/billing") return 0;
-    if (location.pathname === "/app/billing/invoices") return 1;
-    if (location.pathname === "/app/billing/cycles") return 2;
-    if (location.pathname === "/app/billing/commissions") return 3;
+  // Determine which tab is active based on current route - memoized to prevent re-renders
+  const activeTab = useMemo(() => {
+    if (
+      location.pathname === "/app/billing" ||
+      location.pathname === "/app/billing/"
+    )
+      return 0;
+    if (location.pathname.startsWith("/app/billing/invoices")) return 1;
+    if (location.pathname.startsWith("/app/billing/cycles")) return 2;
     return 0;
-  };
+  }, [location.pathname]);
 
   const renderTabContent = () => {
-    const activeTab = getActiveTab();
-
     switch (activeTab) {
       case 0:
         return (
@@ -100,14 +93,14 @@ export function TabbedBillingPage({
       <BlockStack gap="300">
         <HeroHeader
           badge="💳 Billing Management"
-          title="Billing & Commission"
-          subtitle="Manage your billing plans, invoices, and commission records"
+          title="Billing & Usage Charges"
+          subtitle="Manage your billing plan and view usage charges with order details"
           gradient="green"
         />
 
         <Tabs
           tabs={tabs}
-          selected={getActiveTab()}
+          selected={activeTab}
           onSelect={handleTabChange}
           fitted
         >

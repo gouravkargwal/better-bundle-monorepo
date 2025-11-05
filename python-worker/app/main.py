@@ -33,9 +33,10 @@ from app.api.v1.fbt_status import router as fbt_status_router
 from app.api.v1.logs import router as logs_router
 from app.api.v1.data_collection import router as data_collection_router
 from app.domains.billing.api.billing_api import router as billing_api_router
-from app.api.v1.suspension import router as suspension_router
-from app.api.v1.auth import router as auth_router
-
+from app.routes.auth_routes import router as auth_router
+from app.routes.session_routes import router as session_router
+from app.routes.interaction_routes import router as interaction_router
+from app.routes.recommendation_routes import router as recommendation_router
 
 logger = get_logger(__name__)
 
@@ -87,25 +88,11 @@ app.include_router(fbt_status_router)
 app.include_router(logs_router)
 app.include_router(data_collection_router)
 app.include_router(billing_api_router)
-app.include_router(suspension_router)
 app.include_router(auth_router)
-
-# Include unified analytics routers
-from app.domains.analytics.api import (
-    venus_router,
-    atlas_router,
-    phoenix_router,
-    apollo_router,
-    mercury_router,
-    session_router,
-)
-
-app.include_router(venus_router)
-app.include_router(atlas_router)
-app.include_router(phoenix_router)
-app.include_router(apollo_router)
-app.include_router(mercury_router)
 app.include_router(session_router)
+app.include_router(interaction_router)
+app.include_router(recommendation_router)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,

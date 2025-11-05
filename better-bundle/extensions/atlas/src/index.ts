@@ -1,5 +1,5 @@
 import { register } from "@shopify/web-pixels-extension";
-import { SUBSCRIBABLE_EVENTS } from "./config/constants";
+import { SUBSCRIBABLE_EVENTS, STORAGE_KEYS } from "./config/constants";
 import { trackInteraction } from "./utils/api-client";
 import { logger } from "./utils/logger";
 
@@ -24,7 +24,7 @@ register(({ analytics, init, browser }) => {
   const referrer = init?.context?.document?.referrer;
   const shopDomain = init?.data?.shop?.myshopifyDomain;
   const sessionStorage = browser?.sessionStorage;
-  const sendBeacon = browser?.sendBeacon;
+  const localStorage = browser?.localStorage;
 
   // ✅ Use an object to hold mutable state (reference type)
   const state = {
@@ -62,23 +62,39 @@ register(({ analytics, init, browser }) => {
 
       // Fire customer_linked event when we have BOTH clientId and customerId
       if (state.clientId && state.customerId) {
-        await trackInteraction(
-          {
-            name: "customer_linked",
-            id: `customer_linked_${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            customerId: state.customerId,
-            clientId: state.clientId,
-          },
-          shopDomain,
-          userAgent,
-          state.customerId,
-          "customer_linked",
-          pageUrl,
-          referrer,
-          sessionStorage,
-          sendBeacon,
-        );
+        // Check session storage to see if we've already fired this event
+        const storedLinkedCustomerId = sessionStorage
+          ? await sessionStorage.getItem(STORAGE_KEYS.LINKED_CUSTOMER_ID)
+          : null;
+
+        // Only fire if we haven't fired for this customer ID before
+        if (storedLinkedCustomerId !== state.customerId) {
+          await trackInteraction(
+            {
+              name: "customer_linked",
+              id: `customer_linked_${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              customerId: state.customerId,
+              clientId: state.clientId,
+            },
+            shopDomain,
+            userAgent,
+            state.customerId,
+            "customer_linked",
+            pageUrl,
+            referrer,
+            sessionStorage,
+            localStorage, // ✅ Pass localStorage for browser_session_id storage
+          );
+
+          // Save customer ID to session storage after successful event
+          if (sessionStorage) {
+            await sessionStorage.setItem(
+              STORAGE_KEYS.LINKED_CUSTOMER_ID,
+              state.customerId,
+            );
+          }
+        }
       }
     }, "handleCustomerLinking");
   };
@@ -110,7 +126,7 @@ register(({ analytics, init, browser }) => {
 
         if (browser?.sessionStorage) {
           await browser.sessionStorage.setItem(
-            "recommendation_attribution",
+            STORAGE_KEYS.RECOMMENDATION_ATTRIBUTION,
             JSON.stringify(attributionData),
           );
         }
@@ -126,7 +142,7 @@ register(({ analytics, init, browser }) => {
       }
 
       const stored = await browser.sessionStorage.getItem(
-        "recommendation_attribution",
+        STORAGE_KEYS.RECOMMENDATION_ATTRIBUTION,
       );
       if (stored) {
         const attribution = JSON.parse(stored);
@@ -188,7 +204,7 @@ register(({ analytics, init, browser }) => {
           pageUrl,
           referrer,
           sessionStorage,
-          sendBeacon,
+          localStorage, // ✅ Pass localStorage for browser_session_id storage
         );
       }, eventType);
     };
@@ -215,7 +231,7 @@ register(({ analytics, init, browser }) => {
         pageUrl,
         referrer,
         sessionStorage,
-        sendBeacon,
+        localStorage, // ✅ Pass localStorage for browser_session_id storage
       );
     }, "PAGE_VIEWED");
   });

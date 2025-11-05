@@ -31,7 +31,10 @@ export interface SubscriptionData {
   id: string;
   status: "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED";
   spendingLimit: number;
-  currentUsage: number;
+  currentUsage: number; // Total: shopifyUsage + expectedCharge
+  shopifyUsage: number; // What's actually recorded to Shopify (RECORDED commissions)
+  expectedCharge: number; // Pending commissions not yet recorded (PENDING status only, excluding REJECTED)
+  rejectedAmount?: number; // Optional: Show rejected commissions separately for transparency
   usagePercentage: number;
   confirmationUrl?: string;
   currency: string;

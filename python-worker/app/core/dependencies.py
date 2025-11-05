@@ -1,89 +1,73 @@
-"""
-Dependency injection functions for BetterBundle Python Worker
-
-This module provides FastAPI-style dependency injection for:
-- Database sessions
-- Repositories
-- Services
-- Configuration
-"""
-
-from typing import AsyncGenerator, Annotated
-from functools import lru_cache
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.database.session import get_session_context, get_transaction_context
+from fastapi import HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Dict, Any
+from app.services.jwt_service import jwt_service
 from app.core.logging import get_logger
-from app.repository.ShopRepository import ShopRepository
 
 logger = get_logger(__name__)
 
+security = HTTPBearer()
 
-# Database Session Dependencies
-async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+
+async def get_shop_authorization(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> Dict[str, Any]:
     """
-    Dependency for database sessions.
+    Dependency to validate JWT access token and extract shop authorization
 
-    Usage:
-        async def my_handler(session: AsyncSession = Depends(get_db_session)):
-            # Use session here
+    Returns:
+        Dict containing validated shop info and token metadata
+
+    Raises:
+        HTTPException: 401 if token invalid or expired
+        HTTPException: 403 if token type incorrect
     """
-    async with get_session_context() as session:
-        yield session
+    token = credentials.credentials
 
+    try:
+        # Validate access token
+        validation_result = jwt_service.validate_access_token(token)
 
-async def get_db_transaction() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Dependency for database transactions with automatic commit/rollback.
+        if not validation_result.get("is_valid"):
+            error_msg = validation_result.get("error", "Invalid token")
+            logger.warning(f"Token validation failed: {error_msg}")
 
-    Usage:
-        async def my_handler(session: AsyncSession = Depends(get_db_transaction)):
-            # Use session here - will auto-commit on success, rollback on error
-    """
-    async with get_transaction_context() as session:
-        yield session
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=error_msg,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
+        # Extract shop info
+        shop_auth = {
+            "shop_id": validation_result["shop_id"],
+            "shop_domain": validation_result["shop_domain"],
+            "is_service_active": validation_result.get("is_service_active", False),
+            "shopify_plus": validation_result.get("shopify_plus", False),
+            "jwt_token": token,
+            "needs_refresh": validation_result.get("needs_refresh", False),
+        }
 
-# Repository Dependencies
-@lru_cache()
-def get_shop_repository() -> ShopRepository:
-    """
-    Dependency for ShopRepository.
+        # Check if service is active (simple boolean check)
+        if not validation_result.get("is_service_active", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "Services suspended",
+                    "message": "This shop's services are currently inactive",
+                    "is_service_active": False,
+                },
+            )
 
-    Usage:
-        async def my_handler(repo: ShopRepository = Depends(get_shop_repository)):
-            # Use repository here
-    """
-    return ShopRepository()
+        logger.debug(f"Shop authorized: {shop_auth['shop_id']}")
+        return shop_auth
 
-
-# Type aliases for better IDE support
-DatabaseSession = Annotated[AsyncSession, "Database session dependency"]
-DatabaseTransaction = Annotated[AsyncSession, "Database transaction dependency"]
-ShopRepo = Annotated[ShopRepository, "Shop repository dependency"]
-
-
-# Service Dependencies (you can add more as needed)
-@lru_cache()
-def get_shopify_service():
-    """Dependency for Shopify service"""
-    from app.domains.shopify.services import ShopifyDataCollectionService
-
-    return ShopifyDataCollectionService()
-
-
-# Configuration Dependencies
-@lru_cache()
-def get_kafka_settings():
-    """Dependency for Kafka settings"""
-    from app.core.config.kafka_settings import kafka_settings
-
-    return kafka_settings
-
-
-@lru_cache()
-def get_app_settings():
-    """Dependency for application settings"""
-    from app.core.config.settings import settings
-
-    return settings
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Authorization dependency error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )

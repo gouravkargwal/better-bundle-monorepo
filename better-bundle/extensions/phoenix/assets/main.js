@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     // Initialize Phoenix JWT authentication first
-    const phoenixJWT = new window.PhoenixJWT();
+    const phoenixJWT = new window.JWTTokenManager();
     await phoenixJWT.initialize();
 
     // Store Phoenix JWT instance globally

@@ -1,7 +1,10 @@
 import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
-import { useRecommendations } from "./hooks/useMercuryRecommendations.js";
-import { analyticsApi } from "./api/analytics.js";
+import { useRecommendations } from "./hooks/useRecommendations.js";
+import { trackAddToCart, getOrCreateSession } from "./api/analytics.js";
+import { ProductCard } from "./components/ProductCard.jsx";
+import { getOptionValueFromVariant } from "./utils/productUtils.js";
+import { logger } from "./utils/logger.js";
 
 const shopifyPlusValidated =
   shopify.instructions.value.attributes.canUpdateAttributes;
@@ -15,8 +18,10 @@ function Extension() {
   const [selectedVariants, setSelectedVariants] = useState({});
   const [quantities, setQuantities] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
+  const [successMessage, setSuccessMessage] = useState("");
   const hasTrackedView = useRef(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState({});
+  const [expandedGalleries, setExpandedGalleries] = useState({});
   const { lines, cost, buyerIdentity, storage } = shopify;
   const shopDomain = shopify.shop.myshopifyDomain;
   const customerId = buyerIdentity?.customer?.value?.id || null;
@@ -27,7 +32,6 @@ function Extension() {
         ?.map((line) => {
           const productId = line.merchandise?.product?.id;
           if (!productId) return null;
-          // Extract numeric ID from GID format (gid://shopify/Product/123456 -> 123456)
           if (productId.startsWith("gid://shopify/Product/")) {
             return productId.split("/").pop();
           }
@@ -36,6 +40,20 @@ function Extension() {
         .filter(Boolean) || []
     );
   }, [lines.value]);
+
+  useEffect(() => {
+    const cartProductIds = new Set(cartItems);
+    setAddedProducts((prev) => {
+      const newSet = new Set();
+      cartProductIds.forEach((id) => newSet.add(id));
+      prev.forEach((id) => {
+        if (!cartProductIds.has(id)) {
+          newSet.add(id);
+        }
+      });
+      return newSet;
+    });
+  }, [cartItems]);
 
   const cartValue = useMemo(() => {
     const amount = cost.totalAmount?.value?.amount;
@@ -66,15 +84,58 @@ function Extension() {
     }
   }, [products, loading, trackRecommendationView]);
 
+  // Auto-select default variants when products load
+  useEffect(() => {
+    if (products && products.length > 0) {
+      products.forEach((product) => {
+        if (selectedVariants[product.id]) return;
+
+        if (product.options && product.options.length > 0) {
+          const autoSelected = {};
+          product.options.forEach((option) => {
+            const firstAvailableVariant =
+              product.variants?.find((variant) => variant.inventory > 0) ||
+              product.variants?.[0];
+
+            if (firstAvailableVariant && option.values.length > 0) {
+              const optionValue = getOptionValueFromVariant(
+                firstAvailableVariant,
+                option.name,
+                product,
+              );
+              autoSelected[option.name] = optionValue || option.values[0];
+            } else if (option.values.length > 0) {
+              autoSelected[option.name] = option.values[0];
+            }
+          });
+
+          if (Object.keys(autoSelected).length > 0) {
+            setSelectedVariants((prev) => {
+              if (prev[product.id]) return prev;
+              return {
+                ...prev,
+                [product.id]: autoSelected,
+              };
+            });
+          }
+        }
+      });
+    }
+  }, [products]);
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const t = setTimeout(() => {
+      setSuccessMessage("");
+    }, 5000); // Increased to 5 seconds for better visibility
+    return () => clearTimeout(t);
+  }, [successMessage]);
+
   async function handleAddToCart(variantId, productId, position) {
     try {
       setAdding((prev) => ({ ...prev, [productId]: true }));
 
       if (!variantId) {
-        console.error(
-          "❌ Mercury: No variant ID available for product",
-          productId,
-        );
         return;
       }
 
@@ -82,7 +143,7 @@ function Extension() {
         ? variantId
         : `gid://shopify/ProductVariant/${variantId}`;
 
-      const quantity = getQuantity(productId);
+      const quantity = quantities[productId] || 1;
 
       const result = await shopify.applyCartLinesChange({
         type: "addCartLine",
@@ -92,9 +153,80 @@ function Extension() {
 
       if (result.type === "success") {
         setAddedProducts((prev) => new Set([...prev, productId]));
+        // Find product name for the success message
+        const product = products?.find((p) => p.id === productId);
+        const productName = product?.title || "Product";
+        setSuccessMessage(`${productName} added to cart successfully`);
 
-        // Track add to cart event (not click event)
-        await analyticsApi.trackAddToCart(
+        const sessionId = await getOrCreateSession(
+          storage,
+          shopDomain,
+          customerId,
+          null,
+          null,
+          null,
+          null,
+        );
+
+        const allAddedProducts = Array.from(addedProducts);
+        const productsArray = allAddedProducts.map((addedProductId) => ({
+          product_id: addedProductId,
+          position: position,
+          quantity: quantity,
+          timestamp: new Date().toISOString(),
+        }));
+
+        if (!allAddedProducts.includes(productId)) {
+          productsArray.push({
+            product_id: productId,
+            position: position,
+            quantity: quantity,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "extension",
+          value: "mercury",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "session_id",
+          value: sessionId,
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "context",
+          value: "checkout_page",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "source",
+          value: "betterbundle",
+          valueType: "string",
+        });
+
+        await shopify.applyMetafieldChange({
+          type: "updateMetafield",
+          namespace: "bb_recommendation",
+          key: "products",
+          value: JSON.stringify(productsArray),
+          valueType: "json_string",
+        });
+
+        await trackAddToCart(
+          storage,
           shopDomain,
           "checkout_page",
           productId,
@@ -109,11 +241,15 @@ function Extension() {
             cart_value: cartValue,
           },
         );
-      } else {
-        console.error("❌ Mercury: Failed to add product to cart");
       }
     } catch (err) {
-      console.error("❌ Mercury: Error adding to cart:", err);
+      logger.error({
+        msg: "Error adding to cart",
+        error: err,
+        productId: productId,
+        variantId: variantId,
+        position: position,
+      });
     } finally {
       setAdding((prev) => ({ ...prev, [productId]: false }));
     }
@@ -139,95 +275,24 @@ function Extension() {
     }));
   }
 
-  function incrementQuantity(productId) {
-    const currentQuantity = quantities[productId] || 1;
-    handleQuantityChange(productId, currentQuantity + 1);
-  }
-
-  function decrementQuantity(productId) {
-    const currentQuantity = quantities[productId] || 1;
-    handleQuantityChange(productId, currentQuantity - 1);
-  }
-
-  function getQuantity(productId) {
-    return quantities[productId] || 1;
-  }
-
-  function getSelectedImageIndex(productId) {
-    return selectedImageIndex[productId] || 0;
-  }
-
-  // Carousel functions
-  function getProductImages(product) {
-    if (!product.images || product.images.length === 0) {
-      return product.image?.url ? [{ url: product.image.url }] : [];
-    }
-    return product.images;
-  }
-
-  function getAvailableOptions(product, selectedOptions = {}) {
-    if (!product.options || !product.variants) return product.options || [];
-    return product.options.map((option) => {
-      const availableValues = new Set();
-      const matchingVariants = product.variants.filter((variant) => {
-        return Object.keys(selectedOptions).every((optionName) => {
-          if (optionName === option.name) return true;
-          const selectedValue = selectedOptions[optionName];
-          return variant.title && variant.title.includes(selectedValue);
-        });
-      });
-      matchingVariants.forEach((variant) => {
-        if (variant.inventory > 0) {
-          const optionValue = getOptionValueFromVariant(
-            variant,
-            option.name,
-            product,
-          );
-          if (optionValue) {
-            availableValues.add(optionValue);
-          }
-        }
-      });
+  function handleImageSelect(productId, imageIndex) {
+    setSelectedImageIndex((prev) => {
+      if (!prev) prev = {};
       return {
-        ...option,
-        values: option.values.filter((value) => availableValues.has(value)),
+        ...prev,
+        [productId]: imageIndex,
       };
     });
   }
 
-  function getOptionValueFromVariant(variant, optionName, product) {
-    const option = product.options?.find((opt) => opt.name === optionName);
-    if (!option) return null;
-    const title = variant.title || "";
-    const parts = title.split(" / ");
-    const optionIndex = option.position - 1;
-    return parts[optionIndex] || null;
-  }
-
-  function getSelectedVariant(product) {
-    const selected = selectedVariants[product.id];
-    if (!selected || !product.variants) {
-      return (
-        product.selectedVariantId ||
-        (product.variants && product.variants.length > 0
-          ? product.variants[0].id
-          : null)
-      );
-    }
-    const matchingVariant = product.variants.find((variant) => {
-      return Object.keys(selected).every((optionName) => {
-        const optionValue = selected[optionName];
-        return variant.title && variant.title.includes(optionValue);
-      });
+  function handleGalleryToggle(productId, isOpen) {
+    setExpandedGalleries((prev) => {
+      if (!prev) prev = {};
+      return {
+        ...prev,
+        [productId]: isOpen,
+      };
     });
-    return matchingVariant ? matchingVariant.id : product.selectedVariantId;
-  }
-
-  function isVariantInStock(product) {
-    const selectedVariantId = getSelectedVariant(product);
-    if (!selectedVariantId || !product.variants) return true;
-    const variant = product.variants.find((v) => v.id === selectedVariantId);
-    return variant ? variant.inventory > 0 : true;
   }
 
   if (!shopifyPlusValidated && !loading) {
@@ -238,197 +303,106 @@ function Extension() {
     return (
       <s-section heading="Recommended for you">
         <s-stack direction="block" gap="base">
-          <s-skeleton-paragraph></s-skeleton-paragraph>
-          <s-skeleton-paragraph></s-skeleton-paragraph>
+          {[1].map((i) => (
+            <s-box
+              key={i}
+              padding="base"
+              border="base"
+              borderRadius="base"
+              borderWidth="base"
+            >
+              <s-stack direction="block" gap="small-200">
+                {/* Skeleton Image - Landscape */}
+                <s-box background="subdued" borderRadius="base" padding="base">
+                  <s-skeleton-paragraph content="Image"></s-skeleton-paragraph>
+                </s-box>
+
+                {/* Skeleton Title and Price - Inline */}
+                <s-stack direction="inline" justifyContent="space-between">
+                  <s-skeleton-paragraph content="Product Title"></s-skeleton-paragraph>
+                  <s-skeleton-paragraph content="$99.99"></s-skeleton-paragraph>
+                </s-stack>
+
+                {/* Skeleton Options - Inline */}
+                <s-stack direction="inline" gap="small-200">
+                  <s-box inlineSize="48%" minInlineSize="0">
+                    <s-skeleton-paragraph content="Option 1"></s-skeleton-paragraph>
+                  </s-box>
+                  <s-box inlineSize="48%" minInlineSize="0">
+                    <s-skeleton-paragraph content="Option 2"></s-skeleton-paragraph>
+                  </s-box>
+                </s-stack>
+
+                {/* Skeleton Quantity and Button - Inline */}
+                <s-stack
+                  direction="inline"
+                  gap="base"
+                  alignItems="center"
+                  justifyContent="space-between"
+                >
+                  <s-skeleton-paragraph content="Quantity"></s-skeleton-paragraph>
+                  <s-box minInlineSize="0" inlineSize="60%">
+                    <s-skeleton-paragraph content="Add to Cart"></s-skeleton-paragraph>
+                  </s-box>
+                </s-stack>
+              </s-stack>
+            </s-box>
+          ))}
         </s-stack>
       </s-section>
     );
   }
 
   if (error) {
+    console.error("❌ Error in useRecommendations:", error);
     return null;
   }
 
   const availableProducts =
-    products?.filter((product) => !addedProducts.has(product.id)) || [];
+    products?.filter((product) => {
+      const productId = product.id;
+      const numericId = productId.toString();
+      const isInCart = cartItems.includes(numericId);
+      const isRecentlyAdded = addedProducts.has(productId);
+      return !isInCart && !isRecentlyAdded;
+    }) || [];
 
-  if (availableProducts.length === 0) {
+  if (!products || products.length === 0 || availableProducts.length === 0) {
     return null;
   }
 
   return (
     <s-section heading="Recommended for you">
-      <s-stack direction="inline" gap="base">
-        {availableProducts.map((product, index) => {
-          const images = getProductImages(product);
-          const hasMultipleImages = images.length > 1;
+      {successMessage && (
+        <s-banner
+          tone="success"
+          dismissible
+          onDismiss={() => {
+            setSuccessMessage("");
+          }}
+        >
+          <s-text type="strong">{successMessage}</s-text>
+        </s-banner>
+      )}
 
-          return (
-            <s-box
-              key={product.id}
-              padding="base"
-              border="base"
-              borderRadius="base"
-              borderWidth="base"
-              inlineSize="100%"
-            >
-              <s-stack direction="block" gap="base">
-                {/* Image at the top - Phoenix style */}
-                <s-box>
-                  <s-stack direction="block" gap="small-100">
-                    {/* Main Product Image */}
-                    <s-box>
-                      <s-image
-                        src={images[getSelectedImageIndex(product.id)]?.url}
-                        alt={product.title}
-                        aspectRatio="16/9"
-                        loading="lazy"
-                      />
-                    </s-box>
-
-                    {/* Product Gallery with Thumbnails - Only show if multiple images */}
-                    {hasMultipleImages && (
-                      <s-scroll-box>
-                        <s-stack
-                          direction="inline"
-                          gap="small-100"
-                          justifyContent="center"
-                        >
-                          {images.map((image, index) => (
-                            <s-link
-                              key={index}
-                              onClick={() =>
-                                setSelectedImageIndex((prev) => ({
-                                  ...prev,
-                                  [product.id]: index,
-                                }))
-                              }
-                              aria-label={`View image ${index + 1} of ${images.length}`}
-                              aria-pressed={
-                                selectedImageIndex[product.id] === index
-                              }
-                            >
-                              <s-product-thumbnail
-                                key={index}
-                                src={image.url}
-                                alt={`${product.title} - Image ${index + 1}`}
-                              />
-                            </s-link>
-                          ))}
-                        </s-stack>
-                      </s-scroll-box>
-                    )}
-                  </s-stack>
-                </s-box>
-
-                {/* Content - Phoenix style layout */}
-                <s-stack direction="block" gap="small">
-                  {/* Title */}
-                  <s-text>{product.title}</s-text>
-
-                  {/* Price and Quantity on same line - Phoenix style */}
-                  <s-stack
-                    direction="inline"
-                    gap="base"
-                    justifyContent="space-between"
-                    alignItems="center"
-                  >
-                    <s-text type="strong">{product.price}</s-text>
-                    <s-stack direction="inline" gap="small">
-                      <s-button
-                        onClick={() => decrementQuantity(product.id)}
-                        disabled={
-                          adding[product.id] || getQuantity(product.id) <= 1
-                        }
-                        inlineSize="fit-content"
-                      >
-                        −
-                      </s-button>
-                      <s-number-field
-                        value={getQuantity(product.id)}
-                        min={1}
-                        max={10}
-                        onChange={(e) => {
-                          const value = e.currentTarget.value;
-                          handleQuantityChange(
-                            product.id,
-                            parseInt(value) || 1,
-                          );
-                        }}
-                      />
-                      <s-button
-                        onClick={() => incrementQuantity(product.id)}
-                        disabled={
-                          adding[product.id] || getQuantity(product.id) >= 10
-                        }
-                      >
-                        +
-                      </s-button>
-                    </s-stack>
-                  </s-stack>
-
-                  <s-box>
-                    {/* Variant Options - Responsive layout */}
-                    {product.options && product.options.length > 0 && (
-                      <s-stack
-                        direction="inline"
-                        gap="small"
-                        justifyContent="space-between"
-                      >
-                        {getAvailableOptions(
-                          product,
-                          selectedVariants[product.id] || {},
-                        ).map((option) => (
-                          <s-select
-                            key={option.id}
-                            label={option.name}
-                            value={
-                              selectedVariants[product.id]?.[option.name] || ""
-                            }
-                            onChange={(e) => {
-                              const value = e.currentTarget.value;
-                              handleOptionChange(
-                                product.id,
-                                option.name,
-                                value,
-                              );
-                            }}
-                          >
-                            <s-option value="">Select {option.name}</s-option>
-                            {option.values.map((value) => (
-                              <s-option key={value} value={value}>
-                                {value}
-                              </s-option>
-                            ))}
-                          </s-select>
-                        ))}
-                      </s-stack>
-                    )}
-                  </s-box>
-                  {/* Add to Cart Button - Phoenix style (full width) */}
-                  <s-box>
-                    <s-button
-                      inlineSize="fill"
-                      onClick={() => {
-                        const variantId = getSelectedVariant(product);
-                        handleAddToCart(variantId, product.id, index);
-                      }}
-                      loading={adding[product.id]}
-                      disabled={
-                        adding[product.id] || !isVariantInStock(product)
-                      }
-                      variant="primary"
-                    >
-                      {!isVariantInStock(product)
-                        ? "Out of Stock"
-                        : "Add to cart"}
-                    </s-button>
-                  </s-box>
-                </s-stack>
-              </s-stack>
-            </s-box>
-          );
-        })}
+      <s-stack direction="block" gap="base">
+        {availableProducts.map((product, index) => (
+          <ProductCard
+            key={product.id}
+            product={product}
+            index={index}
+            selectedVariants={selectedVariants}
+            quantities={quantities}
+            selectedImageIndex={selectedImageIndex}
+            expandedGalleries={expandedGalleries}
+            adding={adding}
+            onOptionChange={handleOptionChange}
+            onQuantityChange={handleQuantityChange}
+            onImageSelect={handleImageSelect}
+            onGalleryToggle={handleGalleryToggle}
+            onAddToCart={handleAddToCart}
+          />
+        ))}
       </s-stack>
     </s-section>
   );

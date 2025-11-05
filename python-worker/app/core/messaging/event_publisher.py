@@ -164,6 +164,32 @@ class EventPublisher:
             logger.error(f"Failed to publish billing event: {e}")
             raise
 
+    async def publish_shopify_usage_event(self, usage_data: Dict[str, Any]) -> str:
+        """Publish Shopify usage event (for async usage recording and reprocessing)"""
+        if not self._initialized:
+            await self.initialize()
+
+        # Add metadata
+        usage_with_metadata = {
+            **usage_data,
+            "timestamp": int(time.time() * 1000),
+            "worker_id": self.config.get("worker_id", "unknown"),
+            "source": "shopify_usage",
+        }
+
+        key = usage_data.get("shop_id") or usage_data.get("commission_id")
+
+        try:
+            message_id = await self._producer.send(
+                "shopify-usage-events", usage_with_metadata, key
+            )
+
+            return message_id
+
+        except Exception as e:
+            logger.error(f"Failed to publish Shopify usage event: {e}")
+            raise
+
     async def publish_access_control_event(self, access_data: Dict[str, Any]) -> str:
         """Publish access control event"""
         if not self._initialized:

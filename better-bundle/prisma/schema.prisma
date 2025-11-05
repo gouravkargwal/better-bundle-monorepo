@@ -894,7 +894,7 @@ model user_interactions {
 }
 
 model user_sessions {
-  browser_session_id    String                  @db.VarChar(255)
+  browser_session_id    String?                 @db.VarChar(255)
   status                String                  @db.VarChar(50)
   client_id             String?                 @db.VarChar
   last_active           DateTime                @db.Timestamptz(6)
@@ -913,19 +913,17 @@ model user_sessions {
   user_interactions     user_interactions[]
   shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@unique([shop_id, customer_id, browser_session_id], map: "ix_user_session_shop_id_customer_id_browser_session_id")
-  @@index([customer_id], map: "ix_user_session_customer_id")
-  @@index([expires_at], map: "ix_user_session_expires_at")
-  @@index([shop_id], map: "ix_user_session_shop_id")
-  @@index([shop_id, customer_id, status], map: "ix_user_session_shop_id_customer_id_status")
-  @@index([shop_id, status], map: "ix_user_session_shop_id_status")
-  @@index([status], map: "ix_user_session_status")
   @@index([client_id], map: "ix_user_sessions_client_id")
   @@index([customer_id], map: "ix_user_sessions_customer_id")
   @@index([expires_at], map: "ix_user_sessions_expires_at")
   @@index([shop_id], map: "ix_user_sessions_shop_id")
-  @@index([shop_id, client_id], map: "ix_user_sessions_shop_id_client_id")
   @@index([status], map: "ix_user_sessions_status")
+  @@index([created_at], map: "ix_created_at")
+  @@index([customer_id], map: "ix_customer_id")
+  @@index([expires_at], map: "ix_expires_at")
+  @@index([shop_id], map: "ix_shop_id")
+  @@index([shop_id, status], map: "ix_shop_status")
+  @@index([status], map: "ix_status")
 }
 
 model feedback {

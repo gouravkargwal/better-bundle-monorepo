@@ -35,13 +35,15 @@ class ProductCardRenderer {
     const slide = document.createElement("div");
     slide.className = "swiper-slide";
 
-    // Get default variant using selectedVariantId from API or first available variant
+    // ✅ Backend guarantees selectedVariantId is always in-stock, so trust it directly
     let defaultVariant = null;
     if (product.selectedVariantId && product.variants) {
-      defaultVariant = product.variants.find(v => v.variant_id === product.selectedVariantId);
+      defaultVariant = product.variants.find(v => String(v.variant_id) === String(product.selectedVariantId));
     }
+
+    // Fallback to first variant only if selectedVariantId not found (shouldn't happen with backend fix)
     if (!defaultVariant && product.variants && product.variants.length > 0) {
-      defaultVariant = product.variants.find((v) => v.inventory > 0) || product.variants[0];
+      defaultVariant = product.variants[0];
     }
 
     // Handle price data - could be from variant or product level
@@ -119,6 +121,7 @@ class ProductCardRenderer {
           </div>
           
           <!-- Line 3: Add to Cart Button -->
+          <!-- ✅ Backend ensures defaultVariant is in-stock, so button is always enabled initially -->
           <button class="product-card__btn" type="button" 
             data-product-id="${product.id}"
             onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variant_id || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
@@ -286,12 +289,35 @@ class ProductCardRenderer {
       if (defaultVariant && defaultVariant.title) {
         const variantParts = defaultVariant.title.split(' / ');
 
+        // Set all dropdown values first WITHOUT triggering selectVariant
         dropdowns.forEach((dropdown, index) => {
           if (variantParts[index]) {
             dropdown.value = variantParts[index];
             dropdown.classList.add('selected');
           }
         });
+
+        // Now trigger selectVariant once after ALL dropdowns are set
+        // This ensures we have complete selection context for variant matching
+        setTimeout(() => {
+          // Get all selected options from the dropdowns
+          const selectedOptions = {};
+          dropdowns.forEach(dropdown => {
+            const optionName = dropdown.dataset.option;
+            const value = dropdown.value;
+            if (optionName && value) {
+              selectedOptions[optionName] = value;
+            }
+          });
+
+          // Only trigger if we have at least one selection
+          if (Object.keys(selectedOptions).length > 0 && window.productCardManager) {
+            // Use the first option to trigger the update (which will handle all selections)
+            const firstOptionName = Object.keys(selectedOptions)[0];
+            const firstValue = selectedOptions[firstOptionName];
+            window.productCardManager.selectVariant(productId, firstOptionName, firstValue);
+          }
+        }, 50); // Increased delay to ensure DOM is ready
       } else {
         // Auto-select first available option for each dropdown
         this.autoSelectFirstAvailable(productId);
@@ -300,8 +326,10 @@ class ProductCardRenderer {
       // Mark as initialized to prevent multiple initializations
       productCard.dataset.initialized = 'true';
 
-      // Update button state
-      this.updateAddToCartButton(productId);
+      // Update button state after a delay to ensure variant selection has processed
+      setTimeout(() => {
+        this.updateAddToCartButton(productId);
+      }, 150);
     }, 50);
   }
 
@@ -324,7 +352,7 @@ class ProductCardRenderer {
     });
   }
 
-  // Update add to cart button state
+  // Update add to cart button state based on current selected variant
   updateAddToCartButton(productId) {
     const productCard = document.querySelector(`[data-product-id="${productId}"]`);
     if (!productCard) return;
@@ -332,11 +360,34 @@ class ProductCardRenderer {
     const button = productCard.querySelector('.product-card__btn');
     if (!button) return;
 
-    // Since we auto-select variants, button is always enabled
-    button.disabled = false;
-    button.textContent = 'Add to cart';
-    button.style.opacity = '1';
-    button.style.cursor = 'pointer';
+    // Get current selected variant
+    const productData = window.productCardManager?.productDataStore[productId];
+    if (!productData || !productData.variants) {
+      button.disabled = false;
+      button.textContent = 'Add to cart';
+      button.style.opacity = '1';
+      button.style.cursor = 'pointer';
+      return;
+    }
+
+    // Get selected options from dropdowns
+    const dropdownManager = window.productCardManager?.dropdownManager;
+    const selectedOptions = dropdownManager ? dropdownManager.getSelectedOptions(productCard) : {};
+
+    // Find matching variant
+    const variantManager = window.productCardManager?.variantManager;
+    const currentVariant = variantManager ? variantManager.findMatchingVariant(productData, selectedOptions) : null;
+
+    // Update button based on variant availability
+    if (currentVariant && variantManager) {
+      variantManager.updateAvailability(currentVariant, productCard);
+    } else {
+      // Fallback: enable button if no variant found
+      button.disabled = false;
+      button.textContent = 'Add to cart';
+      button.style.opacity = '1';
+      button.style.cursor = 'pointer';
+    }
   }
 }
 

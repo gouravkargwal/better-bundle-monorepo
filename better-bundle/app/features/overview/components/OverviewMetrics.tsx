@@ -12,6 +12,7 @@ import { getCurrencySymbol } from "../../../utils/currency";
 interface OverviewMetricsProps {
   overviewData: {
     totalRevenue: number;
+    commissionCharged?: number; // Actual commission charged (PAID phase only)
     currency: string;
     conversionRate: number;
     revenueChange: number | null;
@@ -52,10 +53,27 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
-  // Calculate ROI metrics
+  // ✅ FIX: Use actual commission charged, not calculated from revenue
+  // For PAID phase: commissionCharged is the actual amount charged to Shopify
+  // For TRIAL phase: calculate from revenue since commissions aren't charged yet
+  const isTrialPhase = overviewData.isTrialPhase;
   const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
-  const commissionPaid = overviewData.totalRevenue * commissionRate;
+
+  // Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
+  const commissionPaid = isTrialPhase
+    ? overviewData.totalRevenue * commissionRate // Trial: calculate expected commission
+    : (overviewData.commissionCharged ??
+      overviewData.totalRevenue * commissionRate); // Paid: use actual charged amount
+
   const netProfit = overviewData.totalRevenue - commissionPaid;
+
+  // Calculate percentage kept (more intuitive than ROI)
+  const percentageKept =
+    overviewData.totalRevenue > 0
+      ? (netProfit / overviewData.totalRevenue) * 100
+      : 0;
+
+  // ROI calculation (used to show "Exceptional ROI" for very high values)
   const roiPercentage =
     commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
 
@@ -213,7 +231,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               <div style={{ color: "#8B5CF6" }}>
                 <Text as="p" variant="heading2xl" fontWeight="bold">
                   {overviewData.totalRevenue > 0
-                    ? `${roiPercentage.toFixed(0)}% ROI`
+                    ? `You keep ${percentageKept.toFixed(1)}%`
                     : "Commission-Based"}
                 </Text>
               </div>
@@ -227,6 +245,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     )}
                     , paid only{" "}
                     {formatCurrencyValue(commissionPaid, overviewData.currency)}
+                    {roiPercentage > 1000 && <> • Exceptional ROI</>}
                   </>
                 ) : (
                   "No charges until revenue is generated"

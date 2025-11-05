@@ -21,7 +21,9 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
 
     __tablename__ = "user_sessions"
 
-    browser_session_id = Column(String(255), nullable=False)
+    browser_session_id = Column(
+        String(255), nullable=True
+    )  # Made nullable as fallback only
     status = Column(String(50), default="active", nullable=False, index=True)
     client_id = Column(String, nullable=True, index=True)  # ✅ NEW: Shopify client ID
     last_active = Column(
@@ -48,24 +50,38 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     # Indexes
     __table_args__ = (
         Index(
-            "ix_user_session_shop_id_customer_id_browser_session_id",
-            "shop_id",
-            "customer_id",
-            "browser_session_id",
-            unique=True,
-        ),
-        Index("ix_user_session_shop_id", "shop_id"),
-        Index("ix_user_session_customer_id", "customer_id"),
-        Index("ix_user_session_status", "status"),
-        Index("ix_user_session_expires_at", "expires_at"),
-        Index("ix_user_session_shop_id_status", "shop_id", "status"),
-        Index("ix_user_sessions_shop_id_client_id", "shop_id", "client_id"),  # ✅ NEW
-        Index(
-            "ix_user_session_shop_id_customer_id_status",
+            "ix_active_by_customer",
             "shop_id",
             "customer_id",
             "status",
+            "expires_at",
+            postgresql_where="customer_id IS NOT NULL AND status = 'active'",
         ),
+        # Priority 2: Look up by client_id (cross-device linking)
+        Index(
+            "ix_active_by_client_id",
+            "shop_id",
+            "client_id",
+            "status",
+            "expires_at",
+            postgresql_where="client_id IS NOT NULL AND status = 'active'",
+        ),
+        # Priority 3: Look up by browser_session_id (same device/tab)
+        Index(
+            "ix_active_by_browser_session",
+            "shop_id",
+            "browser_session_id",
+            "status",
+            "expires_at",
+            postgresql_where="browser_session_id IS NOT NULL AND status = 'active'",
+        ),
+        # Support queries
+        Index("ix_shop_id", "shop_id"),
+        Index("ix_customer_id", "customer_id"),
+        Index("ix_status", "status"),
+        Index("ix_expires_at", "expires_at"),
+        Index("ix_shop_status", "shop_id", "status"),
+        Index("ix_created_at", "created_at"),
     )
 
     def __repr__(self) -> str:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from pydantic import BaseModel
+import traceback
 
 from app.shared.helpers.datetime_utils import now_utc
 
@@ -17,11 +18,14 @@ from app.core.database.models import (
     PurchaseAttribution,
     CommissionRecord,
 )
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from app.core.logging import get_logger
+from app.core.messaging.event_publisher import EventPublisher
+from app.core.config.kafka_settings import kafka_settings
 from ..services.billing_scheduler_service import BillingSchedulerService
-from ..repositories.billing_repository_v2 import BillingPeriod
-from ..services.commission_service_v2 import CommissionServiceV2
+from ..repositories.billing_repository_v2 import BillingPeriod, BillingRepositoryV2
+from ..services.shopify_usage_billing_service_v2 import ShopifyUsageBillingServiceV2
+from app.repository.CommissionRepository import CommissionRepository
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
@@ -184,9 +188,70 @@ class CommissionBackfillResponse(BaseModel):
     success: bool
     shop_id: str
     total_candidates: int
-    created: int
+    events_published: int
     skipped_existing: int
     errors: List[Dict]
+
+
+async def _publish_purchase_attribution_events_for_commissions(
+    shop_id: str,
+    order_ids: List[str],
+) -> int:
+    """Publish purchase_ready_for_attribution events to trigger attribution recalculation and commission creation"""
+    logger.info(
+        f"📤 Publishing {len(order_ids)} purchase attribution events to trigger recalculation and commission creation (shop {shop_id})"
+    )
+
+    publisher = EventPublisher(kafka_settings.model_dump())
+    await publisher.initialize()
+
+    published = 0
+    failed = 0
+
+    try:
+        for i, order_id in enumerate(order_ids, 1):
+            try:
+                # Publish standard purchase attribution event
+                # Consumer will:
+                # 1. Check if line items were updated (via _is_purchase_already_processed)
+                # 2. Recalculate purchase attribution if line items were updated
+                # 3. Create/update commission records automatically
+                event = {
+                    "event_type": "purchase_ready_for_attribution",
+                    "shop_id": shop_id,
+                    "order_id": order_id,
+                    "timestamp": now_utc().isoformat(),
+                    "trigger_source": "commission_backfill_api",
+                }
+
+                await publisher.publish_purchase_attribution_event(event)
+                published += 1
+
+                if i % 10 == 0:
+                    logger.info(f"📊 Progress: {i}/{len(order_ids)} events published")
+
+            except Exception as e:
+                failed += 1
+                logger.error(
+                    f"❌ Failed to publish event for order {order_id}: {str(e)}"
+                )
+                logger.error(f"   Stack trace: {traceback.format_exc()}")
+                continue
+
+        logger.info(
+            f"✅ Purchase attribution events published for commission backfill (shop {shop_id})"
+        )
+        logger.info(f"   - Successfully published: {published}")
+        logger.info(f"   - Failed events: {failed}")
+
+    except Exception as e:
+        logger.error(f"❌ Critical error publishing commission events: {str(e)}")
+        logger.error(f"   Stack trace: {traceback.format_exc()}")
+        raise
+    finally:
+        await publisher.close()
+
+    return published
 
 
 @router.post(
@@ -194,8 +259,20 @@ class CommissionBackfillResponse(BaseModel):
 )
 async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest):
     """
-    Create missing commission records for a shop by scanning `purchase_attributions`.
-    - Idempotent: existing commissions are skipped
+    Recalculate purchase attributions and create/update commission records by republishing purchase attribution events.
+
+    This endpoint publishes Kafka `purchase_ready_for_attribution` events for ALL orders
+    that have purchase attributions. The existing purchase attribution consumer will:
+    1. Recalculate purchase attributions if line items were updated (e.g., _bb_rec_* fields fixed)
+    2. Automatically create/update commission records based on the recalculated attributions
+
+    Flow:
+    - Republishes events for all purchase attributions (not just those missing commissions)
+    - Consumer detects updated line items and recalculates attribution automatically
+    - Commissions are created/updated as a side effect of the attribution flow
+
+    - Idempotent: uses existing idempotency checks
+    - Uses existing Kafka infrastructure - no custom logic
     - Optional filters: specific `order_id`, `since` timestamp, and `limit`
     """
     try:
@@ -204,8 +281,8 @@ async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest
             f"since={request.since}, limit={request.limit}"
         )
         async with get_session_context() as session:
-            # Build base query
-            stmt = select(PurchaseAttribution.id).where(
+            # Build query to get purchase attributions with their order_ids
+            stmt = select(PurchaseAttribution).where(
                 PurchaseAttribution.shop_id == shop_id
             )
 
@@ -229,66 +306,79 @@ async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest
 
             logger.debug(f"[commission-backfill] Query built: {stmt}")
             res = await session.execute(stmt)
-            attribution_ids = [str(x) for x in res.scalars().all()]
+            all_attributions = list(res.scalars().all())
 
-            total_candidates = len(attribution_ids)
+            total_candidates = len(all_attributions)
             logger.info(f"[commission-backfill] Candidates fetched: {total_candidates}")
             if total_candidates == 0:
                 return CommissionBackfillResponse(
                     success=True,
                     shop_id=shop_id,
                     total_candidates=0,
-                    created=0,
+                    events_published=0,
                     skipped_existing=0,
                     errors=[],
                 )
 
-            # Find existing commissions
+            # Count existing commissions for reporting (but republish events for ALL attributions)
+            attribution_ids = [str(attr.id) for attr in all_attributions]
             existing_q = select(CommissionRecord.purchase_attribution_id).where(
                 CommissionRecord.purchase_attribution_id.in_(attribution_ids)
             )
             logger.debug(f"[commission-backfill] Existing check query: {existing_q}")
             existing_res = await session.execute(existing_q)
             existing_ids = {str(x) for x in existing_res.scalars().all()}
+            skipped_existing = len(existing_ids)
 
-            to_create = [pid for pid in attribution_ids if pid not in existing_ids]
+            # ✅ KEY CHANGE: Republish events for ALL purchase attributions (not just those missing commissions)
+            # This ensures:
+            # 1. Purchase attributions get recalculated if line items were updated (due to _is_purchase_already_processed fix)
+            # 2. Commissions are created/updated automatically based on recalculated attributions
+            # Remove duplicates (same order_id might have multiple attributions)
+            all_order_ids = list({attr.order_id for attr in all_attributions})
+
             logger.info(
-                f"[commission-backfill] Existing: {len(existing_ids)}, Missing: {len(to_create)}"
+                f"[commission-backfill] Analysis: total_attributions={total_candidates}, "
+                f"existing_commissions={skipped_existing}, "
+                f"unique_order_ids={len(all_order_ids)}"
+            )
+            logger.info(
+                f"[commission-backfill] Strategy: Republishing events for ALL orders with attributions "
+                f"to trigger recalculation and commission creation/updates"
             )
 
-            service = CommissionServiceV2(session)
-            created = 0
-            errors: List[Dict] = []
-            for pid in to_create:
-                try:
-                    logger.debug(
-                        f"[commission-backfill] Creating commission for attribution_id={pid}"
-                    )
-                    commission = await service.create_commission_record(
-                        purchase_attribution_id=pid, shop_id=shop_id
-                    )
-                    if commission:
-                        created += 1
-                        logger.debug(
-                            f"[commission-backfill] Created commission id={commission.id} for attribution_id={pid}"
-                        )
-                except Exception as e:  # pragma: no cover
-                    errors.append({"purchase_attribution_id": pid, "error": str(e)})
-                    logger.error(
-                        f"[commission-backfill] Error creating commission for attribution_id={pid}: {e}"
-                    )
+            if not all_order_ids:
+                return CommissionBackfillResponse(
+                    success=True,
+                    shop_id=shop_id,
+                    total_candidates=total_candidates,
+                    events_published=0,
+                    skipped_existing=skipped_existing,
+                    errors=[],
+                )
+
+            # Publish purchase attribution events for ALL orders
+            # Consumer will:
+            # 1. Check if line items were updated (via _is_purchase_already_processed)
+            # 2. Recalculate attribution if needed
+            # 3. Create/update commission records automatically
+            events_published = (
+                await _publish_purchase_attribution_events_for_commissions(
+                    shop_id, all_order_ids
+                )
+            )
 
             response = CommissionBackfillResponse(
-                success=len(errors) == 0,
+                success=True,
                 shop_id=shop_id,
                 total_candidates=total_candidates,
-                created=created,
-                skipped_existing=len(existing_ids),
-                errors=errors,
+                events_published=events_published,
+                skipped_existing=skipped_existing,
+                errors=[],
             )
             logger.info(
-                f"[commission-backfill] Done - created={created}, skipped={len(existing_ids)}, "
-                f"errors={len(errors)}"
+                f"[commission-backfill] Done - events_published={events_published}, "
+                f"total_attributions={total_candidates}, skipped_existing={skipped_existing}"
             )
             return response
 
@@ -296,4 +386,155 @@ async def retrigger_commissions(shop_id: str, request: CommissionBackfillRequest
         raise
     except Exception as e:
         logger.error(f"Error retriggering commissions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============= REPROCESS REJECTED COMMISSIONS =============
+
+
+class ReprocessRejectedCommissionsRequest(BaseModel):
+    """Request to reprocess rejected/pending commissions for a billing cycle.
+
+    Reprocessing means: re-evaluating charge amounts based on current cap
+    and re-recording to Shopify. Current cycle is determined by finding the
+    active billing cycle for the shop's subscription.
+    """
+
+    shop_id: str
+    billing_cycle_id: Optional[str] = None  # If not provided, uses current active cycle
+
+
+class ReprocessRejectedCommissionsResponse(BaseModel):
+    """Response from reprocessing rejected/pending commissions."""
+
+    success: bool
+    shop_id: str
+    billing_cycle_id: str
+    total_to_reprocess: int  # Count of REJECTED + PENDING commissions
+    total_reprocessed: int
+    total_charged: float
+    errors: List[Dict] = []
+
+
+@router.post(
+    "/shop/reprocess-rejected-commissions",
+    response_model=ReprocessRejectedCommissionsResponse,
+)
+async def reprocess_rejected_commissions(request: ReprocessRejectedCommissionsRequest):
+    try:
+        logger.info(
+            f"🔄 Reprocessing rejected/pending commissions for shop {request.shop_id}, cycle_id={request.billing_cycle_id if request.billing_cycle_id else 'current'}"
+        )
+
+        async with get_session_context() as session:
+            billing_repo = BillingRepositoryV2(session)
+            commission_repo = CommissionRepository(session)
+
+            # Get billing cycle (use provided cycle_id or current active cycle)
+            # Current cycle = active billing cycle for the shop's subscription
+            cycle_id = None
+            if request.billing_cycle_id:
+                cycle_id = request.billing_cycle_id
+                current_cycle = await billing_repo.get_billing_cycle_by_id(cycle_id)
+            else:
+                # Get current active billing cycle for shop
+                # Steps: shop_id -> shop_subscription -> current_billing_cycle (status=ACTIVE)
+                shop_subscription = await billing_repo.get_shop_subscription(
+                    request.shop_id
+                )
+                if not shop_subscription:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"No active subscription found for shop {request.shop_id}",
+                    )
+
+                current_cycle = await billing_repo.get_current_billing_cycle(
+                    shop_subscription.id
+                )
+                if current_cycle:
+                    cycle_id = current_cycle.id
+
+            if not current_cycle:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No active billing cycle found for shop {request.shop_id}",
+                )
+
+            logger.info(
+                f"📊 Current billing cycle: {cycle_id} (cap: {current_cycle.current_cap_amount}, usage: {current_cycle.usage_amount})"
+            )
+
+            # Count REJECTED and PENDING commissions before publishing event
+            # These need reprocessing: re-evaluate charges based on current cap and re-record to Shopify
+            from app.core.database.models.commission import CommissionRecord
+            from app.core.database.models.enums import ChargeType, CommissionStatus
+
+            query = select(CommissionRecord).where(
+                and_(
+                    CommissionRecord.shop_id == request.shop_id,
+                    CommissionRecord.billing_cycle_id == cycle_id,
+                    CommissionRecord.billing_phase
+                    == "PAID",  # Only PAID phase commissions
+                    # Include REJECTED commissions and PENDING commissions (might need re-evaluation)
+                    (
+                        (CommissionRecord.charge_type == ChargeType.REJECTED)
+                        | (CommissionRecord.status == CommissionStatus.PENDING)
+                    ),
+                )
+            )
+            result = await session.execute(query)
+            commissions_to_reprocess = result.scalars().all()
+            total_count = len(commissions_to_reprocess)
+
+            if total_count == 0:
+                logger.info(
+                    f"ℹ️ No rejected/pending commissions to reprocess for cycle {cycle_id}"
+                )
+                return ReprocessRejectedCommissionsResponse(
+                    success=True,
+                    shop_id=request.shop_id,
+                    billing_cycle_id=cycle_id,
+                    total_to_reprocess=0,
+                    total_reprocessed=0,
+                    total_charged=0.0,
+                    errors=[],
+                )
+
+            logger.info(
+                f"📋 Found {total_count} commissions to reprocess (REJECTED + PENDING) for cycle {cycle_id}"
+            )
+
+            # Publish Kafka event for async reprocessing
+            from app.core.messaging.event_publisher import EventPublisher
+            from app.core.config.kafka_settings import kafka_settings
+
+            event_publisher = EventPublisher(kafka_settings.model_dump())
+            await event_publisher.initialize()
+
+            await event_publisher.publish_shopify_usage_event(
+                {
+                    "event_type": "reprocess_rejected_commissions",
+                    "shop_id": request.shop_id,
+                    "billing_cycle_id": cycle_id,
+                }
+            )
+
+            logger.info(
+                f"📤 Published reprocess_rejected_commissions event for shop {request.shop_id}, cycle {cycle_id} ({total_count} commissions to reprocess)"
+            )
+
+            return ReprocessRejectedCommissionsResponse(
+                success=True,
+                shop_id=request.shop_id,
+                billing_cycle_id=cycle_id,
+                total_to_reprocess=total_count,
+                total_reprocessed=0,  # Will be processed asynchronously by Kafka consumer
+                total_charged=0.0,  # Will be calculated asynchronously by Kafka consumer
+                errors=[],
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reprocessing rejected commissions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

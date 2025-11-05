@@ -1,12 +1,4 @@
-// features/overview/components/ROIValueProofSection.tsx
-import {
-  Card,
-  Text,
-  BlockStack,
-  InlineStack,
-  Badge,
-  Divider,
-} from "@shopify/polaris";
+import { Card, Text, BlockStack, InlineStack, Badge } from "@shopify/polaris";
 import { getCurrencySymbol } from "../../../utils/currency";
 
 interface ROIValueProofSectionProps {
@@ -14,6 +6,7 @@ interface ROIValueProofSectionProps {
   currency: string;
   commissionRate: number;
   isTrialPhase: boolean;
+  commissionCharged?: number; // Actual commission charged (PAID phase only)
 }
 
 export function ROIValueProofSection({
@@ -21,6 +14,7 @@ export function ROIValueProofSection({
   currency,
   commissionRate,
   isTrialPhase,
+  commissionCharged,
 }: ROIValueProofSectionProps) {
   const formatCurrencyValue = (amount: number, currencyCode: string) => {
     const symbol = getCurrencySymbol(currencyCode);
@@ -28,10 +22,16 @@ export function ROIValueProofSection({
     return `${symbol}${numericAmount.toFixed(2)}`;
   };
 
-  const commissionPaid = totalRevenueGenerated * commissionRate;
+  // ✅ FIX: Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
+  const commissionPaid = isTrialPhase
+    ? totalRevenueGenerated * commissionRate // Trial: calculate expected commission
+    : (commissionCharged ?? totalRevenueGenerated * commissionRate); // Paid: use actual charged amount
+
   const netProfit = totalRevenueGenerated - commissionPaid;
-  const roiPercentage =
-    commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
+
+  // Calculate percentage kept (more intuitive than ROI)
+  const percentageKept =
+    totalRevenueGenerated > 0 ? (netProfit / totalRevenueGenerated) * 100 : 0;
 
   // Don't show ROI section if there's no revenue data
   if (totalRevenueGenerated === 0) {
@@ -124,7 +124,7 @@ export function ROIValueProofSection({
                 {!isTrialPhase && (
                   <div>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      ROI
+                      You Keep
                     </Text>
                     <Text
                       as="p"
@@ -132,7 +132,7 @@ export function ROIValueProofSection({
                       fontWeight="bold"
                       tone="success"
                     >
-                      {`${roiPercentage.toFixed(0)}%`}
+                      {`${percentageKept.toFixed(1)}%`}
                     </Text>
                   </div>
                 )}
@@ -155,7 +155,7 @@ export function ROIValueProofSection({
                   🔍 Commission Transparency
                 </Text>
                 <Badge tone="success" size="large">
-                  {(commissionRate * 100).toFixed(1)}% Commission Rate
+                  {`${(commissionRate * 100).toFixed(1)}% Commission Rate`}
                 </Badge>
               </InlineStack>
 
@@ -235,11 +235,13 @@ export function ROIValueProofSection({
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
                       (
-                      {(
-                        (savingsVsCompetitor / competitorAnnualRate) *
-                        100
-                      ).toFixed(0)}
-                      % less)
+                      {competitorAnnualRate > 0
+                        ? `${(
+                            (savingsVsCompetitor / competitorAnnualRate) *
+                            100
+                          ).toFixed(1)}% less`
+                        : "0% less"}
+                      )
                     </Text>
                   </div>
                 </div>

@@ -24,17 +24,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ error: "Shop not found" });
     }
 
-    // Get shop subscription
+    // Get shop subscription (allow TRIAL, TRIAL_COMPLETED, ACTIVE, etc.)
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shop.id,
         is_active: true,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        status: true,
+        subscription_type: true,
+      },
     });
 
     if (!shopSubscription) {
-      return json({ error: "No active subscription found" });
+      return json({
+        error: "No subscription found",
+        cycles: [],
+        subscriptionStatus: null,
+      });
     }
 
     // Get billing cycles with pagination
@@ -90,6 +98,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       shopCurrency: shop.currency_code || "USD",
       shopId: shop.id,
+      subscriptionStatus: shopSubscription.status,
+      subscriptionType: shopSubscription.subscription_type,
     };
 
     return json(cyclesData);
@@ -102,7 +112,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function BillingCyclesPage() {
   const loaderData = useLoaderData<typeof loader>();
 
-  if ("error" in loaderData) {
+  // Handle error case gracefully - show cycles component with empty data
+  if ("error" in loaderData && loaderData.error !== "No subscription found") {
     return (
       <div style={{ padding: "24px", textAlign: "center" }}>
         <p>Error: {loaderData.error}</p>
@@ -110,11 +121,20 @@ export default function BillingCyclesPage() {
     );
   }
 
+  // If no subscription found, show empty state (component handles this)
+  const cyclesData =
+    "error" in loaderData && loaderData.error === "No subscription found"
+      ? { cycles: [], pagination: null, shopCurrency: "USD", shopId: "" }
+      : loaderData;
+
+  const shopId = "error" in loaderData ? "" : loaderData.shopId;
+  const shopCurrency = "error" in loaderData ? "USD" : loaderData.shopCurrency;
+
   return (
     <BillingCycles
-      shopId={loaderData.shopId}
-      shopCurrency={loaderData.shopCurrency}
-      data={loaderData}
+      shopId={shopId}
+      shopCurrency={shopCurrency}
+      data={cyclesData}
     />
   );
 }

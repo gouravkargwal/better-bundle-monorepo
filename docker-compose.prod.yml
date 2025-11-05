@@ -389,6 +389,56 @@ services:
       logging: "promtail"
       service: "python-worker"
 
+  # ==================== DJANGO ADMIN (BACKOFFICE) ====================
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: betterbundle-admin
+    ports:
+      - "127.0.0.1:8003:8000"
+    env_file:
+      - .env.prod
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,container"
+    labels:
+      logging: "promtail"
+      service: "admin"
+
   # ==================== LOGGING STACK ====================
   loki:
     image: grafana/loki:3.4.1
@@ -398,9 +448,11 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/loki-config.yaml
+    user: "10001:10001" # Run as loki user to match volume ownership
     volumes:
       - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - loki_data:/loki
+      - ./loki_data:/loki
+      - ./loki/rules:/loki/rules
     networks:
       - backend
       - frontend
@@ -429,7 +481,6 @@ services:
           memory: 256M
     security_opt:
       - no-new-privileges:true
-    user: "10001"
     logging:
       driver: "json-file"
       options:

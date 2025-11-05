@@ -8,6 +8,8 @@ interface ValueCommunicationBannerProps {
   totalRevenueGenerated: number;
   currency: string;
   commissionRate: number;
+  commissionCharged?: number; // Actual commission charged (PAID phase only)
+  isTrialPhase?: boolean;
 }
 
 export function ValueCommunicationBanner({
@@ -15,8 +17,14 @@ export function ValueCommunicationBanner({
   totalRevenueGenerated,
   currency,
   commissionRate,
+  commissionCharged,
+  isTrialPhase = false,
 }: ValueCommunicationBannerProps) {
-  const commissionPaid = totalRevenueGenerated * commissionRate;
+  // ✅ FIX: Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
+  const commissionPaid = isTrialPhase
+    ? totalRevenueGenerated * commissionRate // Trial: calculate expected commission
+    : (commissionCharged ?? totalRevenueGenerated * commissionRate); // Paid: use actual charged amount
+
   const netProfit = totalRevenueGenerated - commissionPaid;
   const navigation = useNavigate();
   const getBannerContent = () => {

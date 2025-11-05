@@ -19,30 +19,31 @@ SECURE_HSTS_PRELOAD = True
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
 
-# Database
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": config("DB_NAME"),
-        "USER": config("DB_USER"),
-        "PASSWORD": config("DB_PASSWORD"),
-        "HOST": config("DB_HOST"),
-        "PORT": config("DB_PORT"),
-        "OPTIONS": {"options": "-c default_transaction_isolation=read_committed"},
-    }
-}
+# Database: use base defaults (POSTGRES_*), allow optional DB_* overrides if provided
+DATABASES["default"]["NAME"] = config("DB_NAME", default=DATABASES["default"]["NAME"])
+DATABASES["default"]["USER"] = config("DB_USER", default=DATABASES["default"]["USER"])
+DATABASES["default"]["PASSWORD"] = config(
+    "DB_PASSWORD", default=DATABASES["default"]["PASSWORD"]
+)
+DATABASES["default"]["HOST"] = config("DB_HOST", default=DATABASES["default"]["HOST"])
+DATABASES["default"]["PORT"] = config("DB_PORT", default=DATABASES["default"]["PORT"])
+# PostgreSQL default transaction isolation is already "read committed"
+# No need to set it explicitly
 
 # Server Settings
 PORT = config("PORT", default=8000, cast=int)
 HOST = config("HOST", default="0.0.0.0")
 
-# Email settings
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = config("EMAIL_HOST")
+# Email settings (optional). Defaults to console backend if SMTP envs are absent.
+EMAIL_BACKEND = config(
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = config("EMAIL_HOST", default="")
 EMAIL_PORT = config("EMAIL_PORT", default=587, cast=int)
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=True, cast=bool)
-EMAIL_HOST_USER = config("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 
 # Logging
 LOGGING = {
