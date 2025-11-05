@@ -7,6 +7,11 @@ from .base import *
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
+# Ensure production domain is in ALLOWED_HOSTS
+# ALLOWED_HOSTS is already set in base.py from config, but we need to ensure production domain is included
+if "admin.betterbundle.site" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("admin.betterbundle.site")
+
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -18,6 +23,10 @@ SECURE_HSTS_PRELOAD = True
 # CSRF settings
 CSRF_COOKIE_SECURE = True
 SESSION_COOKIE_SECURE = True
+# CSRF trusted origins for production
+CSRF_TRUSTED_ORIGINS = config(
+    "CSRF_TRUSTED_ORIGINS", default="https://admin.betterbundle.site"
+).split(",")
 
 # Database: use base defaults (POSTGRES_*), allow optional DB_* overrides if provided
 DATABASES["default"]["NAME"] = config("DB_NAME", default=DATABASES["default"]["NAME"])
