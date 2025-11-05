@@ -26,6 +26,7 @@ wheels/
 *.egg
 .secrets
 MANIFEST
+loki_data
 
 # Node.js
 node_modules/
