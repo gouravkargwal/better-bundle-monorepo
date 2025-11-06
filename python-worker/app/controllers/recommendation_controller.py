@@ -96,7 +96,7 @@ class RecommendationController:
         http_request: Request,
         request: SessionAndRecommendationsRequest,
         shop_info: Dict[str, Any],
-    ) -> RecommendationResponse:
+    ) -> SessionAndRecommendationsResponse:
         """Handle combined session creation + recommendations (Apollo use case)"""
 
         # Use shop_id from JWT token (already validated)
@@ -174,12 +174,16 @@ class RecommendationController:
         except Exception as e:
             logger.warning(f"Failed to track interaction: {e}")
 
-        return RecommendationResponse(
+        recommendations = result_data.get("recommendations", [])
+        recommendation_count = (
+            len(recommendations) if recommendations else result_data.get("count", 0)
+        )
+
+        return SessionAndRecommendationsResponse(
             success=True,
             message=f"{extension_type_str} session and recommendations retrieved successfully",
-            recommendations=result_data.get("recommendations", []),
-            count=result_data.get("count", 0),
-            source=result_data.get("source", "unknown"),
+            recommendations=recommendations,
+            recommendation_count=recommendation_count,
             session_data={
                 "session_id": session.id,
                 "customer_id": session.customer_id,
