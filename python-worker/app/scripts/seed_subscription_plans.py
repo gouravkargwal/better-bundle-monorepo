@@ -11,19 +11,37 @@ from decimal import Decimal
 from datetime import datetime, UTC
 import sys
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv("../../.env.local")
-
+# Add the python-worker directory to Python path
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
 
+# Load environment variables from multiple possible locations
+# Try loading from root directory first, then python-worker directory
+python_worker_path = Path(python_worker_dir)
+root_dir = python_worker_path.parent
+env_files = [
+    root_dir / ".env.local",
+    root_dir / ".env",
+    python_worker_path / ".env.local",
+    python_worker_path / ".env",
+]
+
+for env_file in env_files:
+    if env_file.exists():
+        load_dotenv(env_file)
+        break
+
+# Import after path setup and env loading
 from app.core.database import get_session_context
 from app.core.database.models import (
     SubscriptionPlan,
     PricingTier,
     SubscriptionPlanType,
 )
+from app.core.config.settings import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -328,6 +346,25 @@ async def seed_subscription_plans(session: AsyncSession) -> None:
 
 async def main():
     """Main function to run the seeding script"""
+
+    # Log database URL (without password) for debugging
+    db_url = settings.database.DATABASE_URL
+    if db_url:
+        # Mask password in URL for logging
+        try:
+            from urllib.parse import urlparse, urlunparse
+
+            parsed = urlparse(db_url)
+            if parsed.password:
+                masked_netloc = parsed.netloc.replace(parsed.password, "***")
+                safe_url = urlunparse(parsed._replace(netloc=masked_netloc))
+                logger.info(f"🔌 Connecting to database: {safe_url}")
+            else:
+                logger.info(f"🔌 Connecting to database: {db_url}")
+        except Exception:
+            logger.info(f"🔌 Connecting to database: [URL configured]")
+    else:
+        logger.warning("⚠️  DATABASE_URL not set, using default connection")
 
     # Use the project's database connection method
     async with get_session_context() as session:
