@@ -73,6 +73,18 @@ uri = "/webhooks/billing/approaching_cap"
 topics = ["products/update"]
 uri = "/webhooks/products/update"
 
+[[webhooks.subscriptions]]
+topics = ["customers/data_request"]
+uri = "/webhooks/gdpr/customers_data_request"
+
+[[webhooks.subscriptions]]
+topics = ["customers/redact"]
+uri = "/webhooks/gdpr/customers_redact"
+
+[[webhooks.subscriptions]]
+topics = ["shop/redact"]
+uri = "/webhooks/gdpr/shop_redact"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_custom_pixels,read_customer_data_erasure,read_customer_events,read_customers,read_draft_orders,read_inventory,read_metaobject_definitions,read_metaobjects,read_order_edits,read_orders,read_pixels,read_products,read_returns,read_themes,write_custom_pixels,write_metaobject_definitions,write_metaobjects,write_pixelswrite_themes"
