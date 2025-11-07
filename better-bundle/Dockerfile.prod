@@ -1,7 +1,7 @@
 FROM node:22-alpine
 
-# Install openssl for Node.js crypto operations
-RUN apk add --no-cache openssl
+# Install openssl for Node.js crypto operations and curl for health checks
+RUN apk add --no-cache openssl curl
 
 # Set working directory
 WORKDIR /app
