@@ -62,7 +62,7 @@ services:
     env_file:
       - .env.prod
     ports:
-      - "127.0.0.1:5433:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -100,8 +100,8 @@ services:
     env_file:
       - .env.prod
     ports:
-      - "127.0.0.1:6379:6379"
-      - "127.0.0.1:8002:8001"
+      - "6379:6379"
+      - "8002:8001"
     volumes:
       - redis_data:/data
     networks:
