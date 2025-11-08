@@ -96,3 +96,6 @@ redirect_urls = ["https://betterbundle.site/auth/callback"]
 
 [pos]
 embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
