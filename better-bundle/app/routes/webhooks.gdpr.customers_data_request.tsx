@@ -16,11 +16,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     // Return 200 to acknowledge receipt
     return new Response();
   } catch (error) {
+    // According to Shopify docs: "If a mandatory compliance webhook sends a request
+    // with an invalid Shopify HMAC header, then the app must return a 401 Unauthorized HTTP status."
     logger.error(
       { error: error instanceof Error ? error.message : String(error) },
-      "Error processing GDPR customer data request",
+      "HMAC verification failed for GDPR customer data request",
     );
-    // Still return 200 to prevent retries
-    return new Response();
+    // Return 401 for invalid HMAC (required by Shopify for compliance webhooks)
+    return new Response(null, { status: 401 });
   }
 };
