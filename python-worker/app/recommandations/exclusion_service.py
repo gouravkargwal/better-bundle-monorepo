@@ -103,18 +103,13 @@ class ProductExclusionService:
                 )
 
             elif context == "post_purchase":
-                # For post-purchase, exclude very recent purchases (last 7 days)
-                # This allows for cross-sell/upsell without showing just-purchased items
-                exclude_ids = (
-                    await PurchaseHistoryService.get_recently_purchased_product_ids(
-                        session=session,
-                        shop_id=shop_id,
-                        customer_id=user_id,
-                        days=7,
-                    )
-                )
+                # For post-purchase, we should NOT exclude historical purchases
+                # Only exclude products from the CURRENT order (handled via request.product_ids)
+                # This allows cross-sell/upsell recommendations to show through
+                # Return empty list - current order products are excluded separately
+                exclude_ids = []
                 logger.debug(
-                    f"📦 Excluding {len(exclude_ids)} recent purchases (7 days) for post-purchase context"
+                    "📦 Post-purchase context: Only excluding current order products (not historical purchases)"
                 )
 
             else:
@@ -147,11 +142,21 @@ class ProductExclusionService:
 
         - Durable goods: Always exclude if purchased
         - Consumables: Only exclude recent purchases (last 60 days)
+        - For post_purchase context: Only exclude very recent purchases (7 days)
         """
         if not user_id:
             return []
 
         try:
+            # For post_purchase context, use context-aware exclusions (only recent purchases)
+            if context == "post_purchase":
+                logger.debug(
+                    "🎯 Using context-aware exclusions for post_purchase (7 days only)"
+                )
+                return await self.get_purchase_exclusions(
+                    session, shop_id, user_id, context
+                )
+
             # Get all purchased products
             all_purchases = await PurchaseHistoryService.get_purchased_product_ids(
                 session=session,

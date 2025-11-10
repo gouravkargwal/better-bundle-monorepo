@@ -196,6 +196,9 @@ async def fetch_recommendations_logic(
 
     # 4. Resolve User ID and Determine Exclusions
     exclude_items = list(set(request.product_ids)) if request.product_ids else []
+    logger.info(
+        f"📦 Initial exclusion list from request.product_ids: {exclude_items} | context={request.context}"
+    )
     effective_user_id = request.user_id
 
     # Resolve user_id from metadata or session if not present
@@ -236,6 +239,13 @@ async def fetch_recommendations_logic(
                 )
                 exclude_items.extend(purchase_exclusions)
                 exclude_items.extend(cart_exclusions)
+                logger.info(
+                    f"🚫 Purchase exclusions: {len(purchase_exclusions)} items | cart exclusions: {len(cart_exclusions)} items | context={request.context}"
+                )
+                if purchase_exclusions:
+                    logger.debug(f"   Purchase exclusions: {purchase_exclusions[:5]}")
+                if cart_exclusions:
+                    logger.debug(f"   Cart exclusions: {cart_exclusions[:5]}")
         except Exception as e:
             logger.warning(
                 f"⚠️ Failed to get exclusions for user {effective_user_id}: {e}"
@@ -250,6 +260,10 @@ async def fetch_recommendations_logic(
         logger.info(f"🚫 Excluding current cart items: {current_cart_items}")
 
     final_exclude_items = list(set(exclude_items)) if exclude_items else None
+    if final_exclude_items:
+        logger.info(
+            f"🚫 Final exclusion list: {len(final_exclude_items)} unique items | context={request.context} | excluded_ids={final_exclude_items}"
+        )
 
     # 5. Cache Check
     cache_key = services.cache.generate_cache_key(
@@ -406,6 +420,9 @@ async def fetch_recommendations_logic(
             )
 
     if not result["success"] or not result["items"]:
+        logger.warning(
+            f"⚠️ No recommendations from executor | context={request.context} | success={result.get('success')} | items_count={len(result.get('items', []))} | source={result.get('source')}"
+        )
         return {
             "recommendations": [],
             "count": 0,
@@ -414,18 +431,41 @@ async def fetch_recommendations_logic(
             "timestamp": now_utc(),
         }
 
+    logger.info(
+        f"📦 Executor returned {len(result['items'])} items | context={request.context} | source={result.get('source')} | item_ids={result['items'][:5]}"
+    )
+
     # 7. Enrich, Filter, and Finalize
     enriched_items = await services.enrichment.enrich_items(
         shop.id, result["items"], request.context, result["source"]
     )
 
+    logger.info(
+        f"✨ Enrichment returned {len(enriched_items)} items | context={request.context} | source={result.get('source')}"
+    )
+
     available_items = [item for item in enriched_items if item.get("available", True)]
 
-    final_items = [
-        item
-        for item in available_items
-        if not final_exclude_items or item.get("id") not in final_exclude_items
-    ]
+    logger.info(
+        f"✅ {len(available_items)} items available after filtering | context={request.context}"
+    )
+
+    final_items = []
+    excluded_by_id = []
+    for item in available_items:
+        item_id = item.get("id")
+        if final_exclude_items and item_id in final_exclude_items:
+            excluded_by_id.append(item_id)
+        else:
+            final_items.append(item)
+
+    if excluded_by_id:
+        logger.warning(
+            f"🚫 Excluded {len(excluded_by_id)} items by ID | context={request.context} | excluded_ids={excluded_by_id}"
+        )
+    logger.info(
+        f"🎯 Final {len(final_items)} recommendations after exclusions | context={request.context} | excluded={len(available_items) - len(final_items)}"
+    )
 
     shop_currency = shop.currency_code if shop and shop.currency_code else "USD"
     final_items = services.enrichment.enhance_recommendations_with_currency(

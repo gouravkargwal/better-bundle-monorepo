@@ -146,251 +146,261 @@ class ProductEnrichment:
                     else (shop.shop_domain if shop else None)
                 )
 
-            # Strip prefixes from Gorse item IDs to match database format
-            # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-            # Database uses: 7903465537675
-            # Only include items from the current shop for multi-tenancy
-            clean_item_ids = []
-            for item_id in item_ids:
-                # Handle both string item IDs and dictionary items
-                if isinstance(item_id, dict):
-                    # Extract the actual item ID from the dictionary
-                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
-                else:
-                    actual_item_id = item_id
-
-                # Skip empty or invalid item IDs
-                if not actual_item_id or actual_item_id.strip() == "":
-                    logger.debug(f"🚫 Skipping empty item ID: {item_id}")
-                    continue
-
-                # Skip non-product IDs (like "collection", "category", etc.)
-                if actual_item_id.lower() in [
-                    "collection",
-                    "category",
-                    "tag",
-                    "vendor",
-                    "type",
-                ]:
-                    logger.debug(f"🚫 Skipping non-product ID: {actual_item_id}")
-                    continue
-
-                if actual_item_id.startswith("shop_"):
-                    # Extract shop ID and product ID
-                    parts = actual_item_id.split("_")
-                    if len(parts) >= 3:
-                        gorse_shop_id = parts[
-                            1
-                        ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-                        product_id = parts[2]  # 7903465537675
-
-                        # Only include if it's from the current shop and product_id is not empty and numeric
-                        if (
-                            gorse_shop_id == shop_id
-                            and product_id
-                            and product_id.strip()
-                            and product_id.isdigit()  # Ensure it's a numeric product ID
-                        ):
-                            clean_item_ids.append(product_id)
-                        else:
-                            logger.debug(
-                                f"🚫 Skipping product from different shop or invalid product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
-                            )
+                # Strip prefixes from Gorse item IDs to match database format
+                # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+                # Database uses: 7903465537675
+                # Only include items from the current shop for multi-tenancy
+                clean_item_ids = []
+                for item_id in item_ids:
+                    # Handle both string item IDs and dictionary items
+                    if isinstance(item_id, dict):
+                        # Extract the actual item ID from the dictionary
+                        actual_item_id = item_id.get(
+                            "Id", item_id.get("id", str(item_id))
+                        )
                     else:
-                        logger.warning(
-                            f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
-                        )
-                else:
-                    # Assume it's already a clean product ID, but check it's not empty and numeric
-                    if actual_item_id.strip() and actual_item_id.isdigit():
-                        clean_item_ids.append(actual_item_id)
-                    else:
-                        logger.debug(
-                            f"🚫 Skipping non-numeric product ID: {actual_item_id}"
-                        )
+                        actual_item_id = item_id
 
-            # Fetch products from database using cleaned IDs
-            products_result = await session.execute(
-                select(ProductData).where(
-                    and_(
-                        ProductData.shop_id == shop_id,
-                        ProductData.product_id.in_(clean_item_ids),
-                    )
-                )
-            )
-            products = products_result.scalars().all()
-
-            logger.debug(
-                f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
-            )
-
-            # Create a mapping for quick lookup using cleaned IDs
-            product_map = {p.product_id: p for p in products}
-
-            # Enrich items in the same order as requested
-            enriched_items = []
-            missing_items = []
-            for item_id in item_ids:
-                # Handle both string item IDs and dictionary items
-                if isinstance(item_id, dict):
-                    # Extract the actual item ID from the dictionary
-                    actual_item_id = item_id.get("Id", item_id.get("id", str(item_id)))
-                else:
-                    actual_item_id = item_id
-
-                # Find the corresponding clean_id for this item_id
-                clean_id = None
-                if actual_item_id.startswith("shop_"):
-                    parts = actual_item_id.split("_")
-                    if len(parts) >= 3:
-                        gorse_shop_id = parts[1]
-                        product_id = parts[2]
-                        if gorse_shop_id == shop_id:
-                            clean_id = product_id
-                else:
-                    clean_id = actual_item_id
-
-                if clean_id and clean_id in product_map:
-                    product = product_map[clean_id]
-                    # Extract variant information for cart permalinks
-                    variants = product.variants if product.variants else []
-                    default_variant = None
-                    variant_id = None
-                    selected_variant_id = None
-
-                    logger.debug(
-                        f"🔍 Product {product.product_id} variants: {variants}"
-                    )
-                    logger.debug(
-                        f"🔍 Product {product.product_id} options: {product.options}"
-                    )
-                    logger.debug(
-                        f"🔍 Product {product.product_id} inventory: {product.total_inventory}"
-                    )
-
-                    # Determine availability based on per-variant inventory
-                    # Check if ANY variant has positive inventory or unlimited stock (None)
-                    # None inventory means unlimited stock (tracking disabled)
-                    any_variant_instock = False
-                    in_stock_variant = None
-                    if isinstance(variants, list) and len(variants) > 0:
-                        for v in variants:
-                            try:
-                                inv = (
-                                    v.get("inventory") if isinstance(v, dict) else None
-                                )
-                                # None = unlimited stock, > 0 = in stock, <= 0 = out of stock
-                                if inv is None or (isinstance(inv, int) and inv > 0):
-                                    any_variant_instock = True
-                                    # Store first in-stock variant for default selection
-                                    if in_stock_variant is None:
-                                        in_stock_variant = v
-                                    # Prefer the first/default variant if it's in stock
-                                    if variants.index(v) == 0:
-                                        in_stock_variant = v
-                                        break
-                            except Exception:
-                                pass
-
-                    # Select default variant - prefer in-stock variant
-                    if variants and len(variants) > 0:
-                        # First try the first variant if it's in stock
-                        default_variant = (
-                            variants[0] if isinstance(variants, list) else None
-                        )
-
-                        # Check if first variant is in stock (None = unlimited, > 0 = in stock)
-                        first_variant_instock = False
-                        if default_variant and isinstance(default_variant, dict):
-                            try:
-                                inv = default_variant.get("inventory")
-                                first_variant_instock = inv is None or (
-                                    isinstance(inv, int) and inv > 0
-                                )
-                            except Exception:
-                                pass
-
-                        # If first variant is out of stock, use the in_stock_variant found above
-                        if not first_variant_instock and in_stock_variant:
-                            default_variant = in_stock_variant
-
-                        if default_variant and isinstance(default_variant, dict):
-                            # Extract variant ID - handle both GraphQL format and numeric format
-                            # Try different possible keys for variant ID
-                            raw_variant_id = (
-                                default_variant.get("variant_id")
-                                or default_variant.get("id")
-                                or default_variant.get("variantId", "")
-                            )
-                            if raw_variant_id:
-                                # If it's a GraphQL ID, extract the numeric part
-                                if "/" in str(raw_variant_id):
-                                    variant_id = str(raw_variant_id).split("/")[-1]
-                                else:
-                                    variant_id = str(raw_variant_id)
-                                selected_variant_id = variant_id
-                                logger.debug(
-                                    f"✅ Extracted variant_id: {variant_id} from {raw_variant_id} "
-                                    f"(in_stock: {first_variant_instock or in_stock_variant == default_variant})"
-                                )
-                            else:
-                                logger.warning(
-                                    f"⚠️ No variant ID found in variant: {default_variant}"
-                                )
-
-                    # Product is available only if:
-                    # 1. Status is ACTIVE
-                    # 2. At least one variant has positive inventory or unlimited stock
-                    is_available = (product.status == "ACTIVE") and any_variant_instock
-
-                    # Skip products that are unavailable (sold out or inactive)
-                    if not is_available:
-                        logger.debug(
-                            f"🚫 Skipping unavailable product: {product.title} "
-                            f"(status: {product.status}, any_variant_instock: {any_variant_instock})"
-                        )
+                    # Skip empty or invalid item IDs
+                    if not actual_item_id or actual_item_id.strip() == "":
+                        logger.debug(f"🚫 Skipping empty item ID: {item_id}")
                         continue
 
-                    # Format for frontend ProductRecommendation interface
-                    enriched_items.append(
-                        {
-                            "id": product.product_id,
-                            "title": product.title,
-                            "handle": product.handle,
-                            "url": f"https://{product_domain}/products/{product.handle}",
-                            "price": {
-                                "amount": str(product.price),
-                            },
-                            "image": self._extract_image_from_media(
-                                product.media, product.title
-                            ),
-                            "images": self._extract_images_from_media(
-                                product.media, product.title
-                            ),
-                            "vendor": product.vendor or "",
-                            "product_type": product.product_type or "",
-                            "available": is_available,
-                            "score": 0.8,  # Default recommendation score
-                            "variant_id": variant_id,
-                            "selectedVariantId": selected_variant_id,
-                            "variants": variants,  # Include all variants for flexibility
-                            "options": product.options
-                            or [],  # Product options for variant selection
-                            "inventory": product.total_inventory
-                            or 0,  # Total inventory count
-                        }
-                    )
-                else:
-                    # Item not found in database, skip it
-                    if clean_id:
-                        missing_items.append(clean_id)
+                    # Skip non-product IDs (like "collection", "category", etc.)
+                    if actual_item_id.lower() in [
+                        "collection",
+                        "category",
+                        "tag",
+                        "vendor",
+                        "type",
+                    ]:
+                        logger.debug(f"🚫 Skipping non-product ID: {actual_item_id}")
+                        continue
 
-            if missing_items:
-                logger.warning(
-                    f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
+                    if actual_item_id.startswith("shop_"):
+                        # Extract shop ID and product ID
+                        parts = actual_item_id.split("_")
+                        if len(parts) >= 3:
+                            gorse_shop_id = parts[
+                                1
+                            ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
+                            product_id = parts[2]  # 7903465537675
+
+                            # Only include if it's from the current shop and product_id is not empty and numeric
+                            if (
+                                gorse_shop_id == shop_id
+                                and product_id
+                                and product_id.strip()
+                                and product_id.isdigit()  # Ensure it's a numeric product ID
+                            ):
+                                clean_item_ids.append(product_id)
+                            else:
+                                logger.debug(
+                                    f"🚫 Skipping product from different shop or invalid product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
+                                )
+                        else:
+                            logger.warning(
+                                f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
+                            )
+                    else:
+                        # Assume it's already a clean product ID, but check it's not empty and numeric
+                        if actual_item_id.strip() and actual_item_id.isdigit():
+                            clean_item_ids.append(actual_item_id)
+                        else:
+                            logger.debug(
+                                f"🚫 Skipping non-numeric product ID: {actual_item_id}"
+                            )
+
+                # Fetch products from database using cleaned IDs
+                products_result = await session.execute(
+                    select(ProductData).where(
+                        and_(
+                            ProductData.shop_id == shop_id,
+                            ProductData.product_id.in_(clean_item_ids),
+                        )
+                    )
+                )
+                products = products_result.scalars().all()
+
+                logger.debug(
+                    f"📊 Database query complete | found_products={len(products)} | requested={len(clean_item_ids)}"
                 )
 
-            return enriched_items
+                # Create a mapping for quick lookup using cleaned IDs
+                product_map = {p.product_id: p for p in products}
+
+                # Enrich items in the same order as requested
+                enriched_items = []
+                missing_items = []
+                for item_id in item_ids:
+                    # Handle both string item IDs and dictionary items
+                    if isinstance(item_id, dict):
+                        # Extract the actual item ID from the dictionary
+                        actual_item_id = item_id.get(
+                            "Id", item_id.get("id", str(item_id))
+                        )
+                    else:
+                        actual_item_id = item_id
+
+                    # Find the corresponding clean_id for this item_id
+                    clean_id = None
+                    if actual_item_id.startswith("shop_"):
+                        parts = actual_item_id.split("_")
+                        if len(parts) >= 3:
+                            gorse_shop_id = parts[1]
+                            product_id = parts[2]
+                            if gorse_shop_id == shop_id:
+                                clean_id = product_id
+                    else:
+                        clean_id = actual_item_id
+
+                    if clean_id and clean_id in product_map:
+                        product = product_map[clean_id]
+                        # Extract variant information for cart permalinks
+                        variants = product.variants if product.variants else []
+                        default_variant = None
+                        variant_id = None
+                        selected_variant_id = None
+
+                        logger.debug(
+                            f"🔍 Product {product.product_id} variants: {variants}"
+                        )
+                        logger.debug(
+                            f"🔍 Product {product.product_id} options: {product.options}"
+                        )
+                        logger.debug(
+                            f"🔍 Product {product.product_id} inventory: {product.total_inventory}"
+                        )
+
+                        # Determine availability based on per-variant inventory
+                        # Check if ANY variant has positive inventory or unlimited stock (None)
+                        # None inventory means unlimited stock (tracking disabled)
+                        any_variant_instock = False
+                        in_stock_variant = None
+                        if isinstance(variants, list) and len(variants) > 0:
+                            for v in variants:
+                                try:
+                                    inv = (
+                                        v.get("inventory")
+                                        if isinstance(v, dict)
+                                        else None
+                                    )
+                                    # None = unlimited stock, > 0 = in stock, <= 0 = out of stock
+                                    if inv is None or (
+                                        isinstance(inv, int) and inv > 0
+                                    ):
+                                        any_variant_instock = True
+                                        # Store first in-stock variant for default selection
+                                        if in_stock_variant is None:
+                                            in_stock_variant = v
+                                        # Prefer the first/default variant if it's in stock
+                                        if variants.index(v) == 0:
+                                            in_stock_variant = v
+                                            break
+                                except Exception:
+                                    pass
+
+                        # Select default variant - prefer in-stock variant
+                        if variants and len(variants) > 0:
+                            # First try the first variant if it's in stock
+                            default_variant = (
+                                variants[0] if isinstance(variants, list) else None
+                            )
+
+                            # Check if first variant is in stock (None = unlimited, > 0 = in stock)
+                            first_variant_instock = False
+                            if default_variant and isinstance(default_variant, dict):
+                                try:
+                                    inv = default_variant.get("inventory")
+                                    first_variant_instock = inv is None or (
+                                        isinstance(inv, int) and inv > 0
+                                    )
+                                except Exception:
+                                    pass
+
+                            # If first variant is out of stock, use the in_stock_variant found above
+                            if not first_variant_instock and in_stock_variant:
+                                default_variant = in_stock_variant
+
+                            if default_variant and isinstance(default_variant, dict):
+                                # Extract variant ID - handle both GraphQL format and numeric format
+                                # Try different possible keys for variant ID
+                                raw_variant_id = (
+                                    default_variant.get("variant_id")
+                                    or default_variant.get("id")
+                                    or default_variant.get("variantId", "")
+                                )
+                                if raw_variant_id:
+                                    # If it's a GraphQL ID, extract the numeric part
+                                    if "/" in str(raw_variant_id):
+                                        variant_id = str(raw_variant_id).split("/")[-1]
+                                    else:
+                                        variant_id = str(raw_variant_id)
+                                    selected_variant_id = variant_id
+                                    logger.debug(
+                                        f"✅ Extracted variant_id: {variant_id} from {raw_variant_id} "
+                                        f"(in_stock: {first_variant_instock or in_stock_variant == default_variant})"
+                                    )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ No variant ID found in variant: {default_variant}"
+                                    )
+
+                        # Product is available only if:
+                        # 1. Status is ACTIVE
+                        # 2. At least one variant has positive inventory or unlimited stock
+                        is_available = (
+                            product.status == "ACTIVE"
+                        ) and any_variant_instock
+
+                        # Skip products that are unavailable (sold out or inactive)
+                        if not is_available:
+                            logger.debug(
+                                f"🚫 Skipping unavailable product: {product.title} "
+                                f"(status: {product.status}, any_variant_instock: {any_variant_instock})"
+                            )
+                            continue
+
+                        # Format for frontend ProductRecommendation interface
+                        enriched_items.append(
+                            {
+                                "id": product.product_id,
+                                "title": product.title,
+                                "handle": product.handle,
+                                "url": f"https://{product_domain}/products/{product.handle}",
+                                "price": {
+                                    "amount": str(product.price),
+                                },
+                                "image": self._extract_image_from_media(
+                                    product.media, product.title
+                                ),
+                                "images": self._extract_images_from_media(
+                                    product.media, product.title
+                                ),
+                                "vendor": product.vendor or "",
+                                "product_type": product.product_type or "",
+                                "available": is_available,
+                                "score": 0.8,  # Default recommendation score
+                                "variant_id": variant_id,
+                                "selectedVariantId": selected_variant_id,
+                                "variants": variants,  # Include all variants for flexibility
+                                "options": product.options
+                                or [],  # Product options for variant selection
+                                "inventory": product.total_inventory
+                                or 0,  # Total inventory count
+                            }
+                        )
+                    else:
+                        # Item not found in database, skip it
+                        if clean_id:
+                            missing_items.append(clean_id)
+
+                if missing_items:
+                    logger.warning(
+                        f"⚠️ Missing products in database | shop_id={shop_id} | missing_count={len(missing_items)} | missing_ids={missing_items[:5]}{'...' if len(missing_items) > 5 else ''}"
+                    )
+
+                return enriched_items
 
         except Exception as e:
             logger.error(f"💥 Failed to enrich items: {str(e)}")
