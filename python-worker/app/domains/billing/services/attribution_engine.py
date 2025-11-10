@@ -1749,6 +1749,17 @@ class AttributionEngine:
                 }
 
                 # Create synthetic interactions for products that don't have Phoenix tracking
+                # ✅ FIX: Use product_id from metafields to identify which products were added via Apollo
+                metafield_product_id = None
+                for metafield in context.order_metafields or []:
+                    if (
+                        isinstance(metafield, dict)
+                        and metafield.get("namespace") == "bb_recommendation"
+                        and metafield.get("key") == "product_id"
+                    ):
+                        metafield_product_id = metafield.get("value")
+                        break
+
                 for product in context.purchase_products:
                     product_id = product.get("id")
                     # Skip if this product already has tracking from Phoenix line items
@@ -1756,6 +1767,17 @@ class AttributionEngine:
                         logger.debug(
                             f"⏭️ Skipping Apollo tracking for product {product_id} - "
                             f"already has Phoenix line item tracking"
+                        )
+                        continue
+
+                    # ✅ FIX: Only create synthetic interaction if product_id matches metafield product_id
+                    # This ensures we only attribute products that were actually added via Apollo
+                    if metafield_product_id and str(product_id) != str(
+                        metafield_product_id
+                    ):
+                        logger.debug(
+                            f"⏭️ Skipping Apollo tracking for product {product_id} - "
+                            f"does not match metafield product_id {metafield_product_id}"
                         )
                         continue
 
@@ -1768,7 +1790,7 @@ class AttributionEngine:
                         tracking_interactions.append(synthetic_interaction)
                         logger.info(
                             f"✅ Extracted Apollo tracking data for product {product_id}: "
-                            f"extension={apollo_extension}"
+                            f"extension={apollo_extension} (matched metafield product_id: {metafield_product_id})"
                         )
 
         # 3. Extract Mercury tracking from order metafields (cart metafields become order metafields)
@@ -1819,6 +1841,18 @@ class AttributionEngine:
                     or tracking_int["metadata"].get("product_id")
                     for tracking_int in tracking_interactions
                 }
+
+                # ✅ FIX: Only process products that are explicitly in Mercury's products array
+                # This ensures we only attribute products that were actually added via Mercury
+                if not mercury_products or len(mercury_products) == 0:
+                    logger.debug(
+                        "⏭️ Mercury products array is empty - no products to attribute"
+                    )
+                else:
+                    logger.info(
+                        f"📦 Mercury products array contains {len(mercury_products)} products: "
+                        f"{[p.get('product_id') for p in mercury_products if isinstance(p, dict)]}"
+                    )
 
                 # Create synthetic interactions for each product in Mercury's products array
                 for mercury_product_data in mercury_products:
@@ -1984,6 +2018,7 @@ class AttributionEngine:
         timestamp_str = None
         position = None
         context_value = None
+        metafield_product_id = None  # Product ID from metafields
 
         for metafield in metafields:
             if not isinstance(metafield, dict):
@@ -2004,11 +2039,23 @@ class AttributionEngine:
                     position = value
                 elif key == "context":
                     context_value = value
+                elif key == "product_id":
+                    metafield_product_id = value
 
         if not extension or extension != "apollo":
             return None
 
         product_id = product.get("id")
+
+        # ✅ FIX: Only create synthetic interaction if product_id matches metafield product_id
+        # This ensures we only attribute products that were actually added via Apollo
+        if metafield_product_id and str(product_id) != str(metafield_product_id):
+            logger.debug(
+                f"⏭️ Skipping Apollo tracking for product {product_id} - "
+                f"does not match metafield product_id {metafield_product_id}"
+            )
+            return None
+
         session_id = session_id or context.session_id
 
         # Parse timestamp if available

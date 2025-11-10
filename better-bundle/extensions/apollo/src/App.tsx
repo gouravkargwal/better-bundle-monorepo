@@ -461,6 +461,13 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
               value: "betterbundle",
               valueType: "string",
             },
+            {
+              type: "set_metafield",
+              namespace: "bb_recommendation",
+              key: "product_id",
+              value: product.id,
+              valueType: "string",
+            },
           ],
         };
 
