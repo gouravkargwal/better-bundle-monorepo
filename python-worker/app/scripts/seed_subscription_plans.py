@@ -23,6 +23,7 @@ sys.path.insert(0, python_worker_dir)
 python_worker_path = Path(python_worker_dir)
 root_dir = python_worker_path.parent
 env_files = [
+    root_dir / ".env.prod",
     root_dir / ".env.local",
     root_dir / ".env",
     python_worker_path / ".env.local",
