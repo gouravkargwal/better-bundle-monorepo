@@ -14,25 +14,24 @@ import { useState, useEffect } from "react";
 
 import { authenticate } from "../shopify.server";
 import { EnhancedNavMenu } from "../components/Navigation/EnhancedNavMenu";
-import { getShopOnboardingCompleted } from "../services/shop.service"; // ⬅️ IMPORT
+import { getShopOnboardingCompleted } from "../services/shop.service";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  // ⬅️ ONBOARDING STATUS CHECK KAR
   const isOnboarded = await getShopOnboardingCompleted(session.shop);
 
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     session,
-    isOnboarded, // ⬅️ PASS KAR
+    isOnboarded,
   };
 };
 
 export default function App() {
-  const { apiKey, isOnboarded } = useLoaderData<typeof loader>(); // ⬅️ DESTRUCTURE
+  const { apiKey, isOnboarded } = useLoaderData<typeof loader>();
   const location = useLocation();
   const navigation = useNavigation();
 
@@ -48,28 +47,36 @@ export default function App() {
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <Frame>
-        {/* ⬅️ PASS ONBOARDING STATUS */}
-        {mounted && showNavigation && (
+        {/* Always render navigation - use display:none to hide, not conditional rendering */}
+        <div
+          suppressHydrationWarning
+          style={{
+            display: showNavigation ? "block" : "none",
+            visibility: mounted ? "visible" : "hidden",
+          }}
+        >
           <EnhancedNavMenu isOnboarded={isOnboarded} />
-        )}
+        </div>
 
-        {mounted && isNavigating && (
-          <div
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              right: 0,
-              zIndex: 10000,
-              height: "3px",
-              background: "#008060",
-            }}
-          />
-        )}
+        {/* Always render loading indicator - same structure on server and client */}
+        <div
+          suppressHydrationWarning
+          style={{
+            display: isNavigating ? "block" : "none",
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10000,
+            height: "3px",
+            background: "#008060",
+          }}
+        />
 
         <div
+          suppressHydrationWarning
           style={{
-            opacity: mounted && isNavigating ? 0.6 : 1,
+            opacity: isNavigating ? 0.6 : 1,
             transition: "opacity 150ms ease-in-out",
             minHeight: "100vh",
           }}
