@@ -35,6 +35,14 @@ for env_file in env_files:
         load_dotenv(env_file)
         break
 
+# TODO: Update this with your actual production database URL
+DATABASE_URL = (
+    "postgresql+asyncpg://postgres:9414318317g@140.245.16.80:5432/betterbundle"
+)
+
+# Override DATABASE_URL from environment
+os.environ["DATABASE_URL"] = DATABASE_URL
+
 # Import after path setup and env loading
 from app.core.database import get_session_context
 from app.core.database.models import (

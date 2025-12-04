@@ -2,10 +2,12 @@
  * Centralized constants for Apollo Extension
  */
 
-export const BACKEND_URL =
-  "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
+// export const BACKEND_URL =
+//   "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
 
-export const SHOPIFY_APP_URL = "https://4edae356409a.ngrok-free.app" as const;
+// export const SHOPIFY_APP_URL = "https://4edae356409a.ngrok-free.app" as const;
+export const BACKEND_URL = "https://api.betterbundle.site" as const;
+export const SHOPIFY_APP_URL = "https://betterbundle.site" as const;
 
 // Storage Keys - Apollo uses in-memory cache for tokens (not persistent)
 // These are mainly for reference/compatibility
