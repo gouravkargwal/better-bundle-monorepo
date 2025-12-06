@@ -37,8 +37,13 @@ async def get_redis_client() -> Redis:
             "health_check_interval": 30,  # Health check every 30 seconds
         }
 
-        # Only add TLS if explicitly enabled and not localhost
-        if settings.REDIS_TLS and settings.REDIS_HOST != "localhost":
+        # Only add TLS if explicitly enabled and not localhost/Docker service names
+        # Docker service names (like "redis") don't use TLS in internal networking
+        if settings.REDIS_TLS and settings.REDIS_HOST not in [
+            "localhost",
+            "127.0.0.1",
+            "redis",
+        ]:
             redis_config["ssl"] = True
             redis_config["ssl_cert_reqs"] = None
 

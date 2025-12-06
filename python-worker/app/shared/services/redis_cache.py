@@ -12,9 +12,10 @@ import hashlib
 from typing import Any, Optional, Dict, List, Union, TypeVar, Generic
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+from redis.asyncio import Redis
 
 from app.core.logging import get_logger
-from app.core.redis.client import get_redis_client_instance, RedisClient
+from app.core.redis_client import get_redis_client
 from app.core.exceptions import RedisConnectionError, RedisTimeoutError
 
 logger = get_logger(__name__)
@@ -119,8 +120,8 @@ class RedisCacheService(Generic[T]):
     async def _get_redis_client(self):
         """Get Redis client with lazy initialization"""
         if self._redis_client is None:
-            self._redis_client = await get_shared_redis_client()
-        return await self._redis_client.get_client()
+            self._redis_client = await get_redis_client()
+        return self._redis_client
 
     async def get(self, key: str, *args, **kwargs) -> Optional[T]:
         """
@@ -176,9 +177,15 @@ class RedisCacheService(Generic[T]):
             return value
 
         except Exception as e:
-            error_msg = str(e) if e else "Unknown error"
+            # Safely extract error message - handle exceptions that might have dict-like access
+            try:
+                error_msg = str(e)
+            except (KeyError, AttributeError, TypeError) as format_error:
+                error_msg = f"Error formatting exception: {type(e).__name__}"
             error_type = type(e).__name__
-            logger.error(f"Cache get error for key {cache_key}: {error_type}: {error_msg}")
+            logger.error(
+                f"Cache get error for key {cache_key}: {error_type}: {error_msg}"
+            )
             self._stats["errors"] += 1
             return None
 
@@ -221,9 +228,15 @@ class RedisCacheService(Generic[T]):
             return True
 
         except Exception as e:
-            error_msg = str(e) if e else "Unknown error"
+            # Safely extract error message - handle exceptions that might have dict-like access
+            try:
+                error_msg = str(e)
+            except (KeyError, AttributeError, TypeError) as format_error:
+                error_msg = f"Error formatting exception: {type(e).__name__}"
             error_type = type(e).__name__
-            logger.error(f"Cache set error for key {cache_key}: {error_type}: {error_msg}")
+            logger.error(
+                f"Cache set error for key {cache_key}: {error_type}: {error_msg}"
+            )
             self._stats["errors"] += 1
             return False
 
@@ -450,16 +463,15 @@ class RedisCacheService(Generic[T]):
 
 
 # Global Redis client instance - SINGLE INSTANCE FOR ALL CACHE SERVICES
-_shared_redis_client: Optional[RedisClient] = None
+_shared_redis_client: Optional[Redis] = None
 
 
-async def get_shared_redis_client() -> RedisClient:
+async def get_shared_redis_client() -> Redis:
     """Get the shared Redis client instance for all cache services"""
     global _shared_redis_client
 
     if _shared_redis_client is None:
-        _shared_redis_client = get_redis_client_instance()
-        await _shared_redis_client.connect()
+        _shared_redis_client = await get_redis_client()
 
     return _shared_redis_client
 
@@ -493,5 +505,7 @@ async def close_all_cache_services() -> None:
     global _shared_redis_client
 
     if _shared_redis_client:
-        await _shared_redis_client.disconnect()
+        from app.core.redis_client import close_redis_client
+
+        await close_redis_client()
         _shared_redis_client = None

@@ -130,16 +130,14 @@ async def initialize_services():
 
         # 2. Check Redis connectivity (non-blocking - log warning but continue)
         logger.info("Checking Redis connectivity...")
-        from app.core.redis.health import check_redis_health
+        from app.core.redis_client import check_redis_health
 
         try:
-            redis_health = await check_redis_health()
-            if redis_health.is_healthy:
+            redis_healthy = await check_redis_health()
+            if redis_healthy:
                 logger.info("✅ Redis connection verified")
             else:
-                logger.warning(
-                    f"⚠️ Redis connection check failed: {redis_health.error_message}"
-                )
+                logger.warning("⚠️ Redis connection check failed")
                 logger.warning(
                     "⚠️ Application will start but Redis-dependent features may not work"
                 )
@@ -225,20 +223,17 @@ async def health_check():
 @app.get("/health/redis")
 async def redis_health_check():
     """Redis connection health check endpoint"""
-    from app.core.redis.health import check_redis_health
+    from app.core.redis_client import check_redis_health
 
-    health_status = await check_redis_health()
+    is_healthy = await check_redis_health()
 
-    if health_status.is_healthy:
+    if is_healthy:
         return JSONResponse(
             status_code=200,
             content={
                 "status": "healthy",
                 "redis": {
-                    "is_healthy": health_status.is_healthy,
-                    "connection_info": health_status.connection_info,
-                    "response_time_ms": health_status.response_time_ms,
-                    "last_check": health_status.last_check,
+                    "is_healthy": True,
                 },
             },
         )
@@ -248,10 +243,7 @@ async def redis_health_check():
             content={
                 "status": "unhealthy",
                 "redis": {
-                    "is_healthy": health_status.is_healthy,
-                    "error_message": health_status.error_message,
-                    "response_time_ms": health_status.response_time_ms,
-                    "last_check": health_status.last_check,
+                    "is_healthy": False,
                 },
             },
         )
