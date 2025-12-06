@@ -176,7 +176,9 @@ class RedisCacheService(Generic[T]):
             return value
 
         except Exception as e:
-            logger.error(f"Cache get error for key {cache_key}: {e}")
+            error_msg = str(e) if e else "Unknown error"
+            error_type = type(e).__name__
+            logger.error(f"Cache get error for key {cache_key}: {error_type}: {error_msg}")
             self._stats["errors"] += 1
             return None
 
@@ -219,7 +221,9 @@ class RedisCacheService(Generic[T]):
             return True
 
         except Exception as e:
-            logger.error(f"Cache set error for key {cache_key}: {e}")
+            error_msg = str(e) if e else "Unknown error"
+            error_type = type(e).__name__
+            logger.error(f"Cache set error for key {cache_key}: {error_type}: {error_msg}")
             self._stats["errors"] += 1
             return False
 

@@ -17,7 +17,7 @@ class RedisConnectionConfig:
     db: int = 0
     tls: bool = False
     decode_responses: bool = True
-    socket_connect_timeout: float = 2.0  # Match ping timeout for fast failure
+    socket_connect_timeout: float = 10.0  # Allow enough time for TCP connection establishment
     socket_timeout: float = 5.0  # Keep higher for actual operations
     socket_keepalive: bool = True
     retry_on_timeout: bool = True

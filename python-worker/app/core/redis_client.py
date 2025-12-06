@@ -23,14 +23,15 @@ async def get_redis_client() -> Redis:
     if _redis_instance is None:
 
         # Optimized Redis configuration for better performance and stability
+        # Use reasonable timeouts - 10s for connection, 5s for operations
         redis_config = {
             "host": settings.REDIS_HOST,
             "port": settings.REDIS_PORT,
             "password": settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
             "db": settings.REDIS_DB,
             "decode_responses": True,
-            "socket_connect_timeout": 60,  # Increased from 30 to 60 seconds
-            "socket_timeout": 60,  # Increased from 30 to 60 seconds
+            "socket_connect_timeout": 10.0,  # 10 seconds for TCP connection (matches working test)
+            "socket_timeout": 5.0,  # 5 seconds for operations
             "socket_keepalive": True,  # Enable TCP keepalive
             "retry_on_timeout": True,  # Retry on timeout
             "health_check_interval": 30,  # Health check every 30 seconds
@@ -41,13 +42,9 @@ async def get_redis_client() -> Redis:
             redis_config["ssl"] = True
             redis_config["ssl_cert_reqs"] = None
 
-        # Add health check interval for better connection stability
-        if "health_check_interval" in redis_config:
-            redis_config["health_check_interval"] = 30
-
         try:
             _redis_instance = Redis(**redis_config)
-            # Test connection with shorter timeout
+            # Test connection - socket_connect_timeout handles TCP, this is for ping response
             await asyncio.wait_for(_redis_instance.ping(), timeout=5.0)
 
         except RedisError as e:

@@ -64,7 +64,7 @@ class RedisClient:
                     "password": password,
                     "db": self.config.db,
                     "decode_responses": self.config.decode_responses,
-                    "socket_connect_timeout": 10.0,  # Use 10s for initial connection (like working test)
+                    "socket_connect_timeout": self.config.socket_connect_timeout,  # 10.0 seconds for TCP connection
                     "socket_timeout": self.config.socket_timeout,
                     "socket_keepalive": self.config.socket_keepalive,
                     "retry_on_timeout": self.config.retry_on_timeout,
@@ -93,7 +93,7 @@ class RedisClient:
 
             except asyncio.TimeoutError as e:
                 self._metrics.connection_errors += 1
-                error_msg = f"Redis connection timeout after 2 seconds"
+                error_msg = f"Redis connection timeout after 5 seconds (ping failed)"
                 logger.error(error_msg, host=self.config.host, port=self.config.port)
 
                 # Clean up failed client
