@@ -56,13 +56,15 @@ class RedisClient:
                 )
 
                 # Build Redis configuration
+                # Use longer timeout for initial connection (10s like the working test)
+                # socket_connect_timeout controls TCP connection establishment
                 redis_config = {
                     "host": self.config.host,
                     "port": self.config.port,
                     "password": password,
                     "db": self.config.db,
                     "decode_responses": self.config.decode_responses,
-                    "socket_connect_timeout": self.config.socket_connect_timeout,
+                    "socket_connect_timeout": 10.0,  # Use 10s for initial connection (like working test)
                     "socket_timeout": self.config.socket_timeout,
                     "socket_keepalive": self.config.socket_keepalive,
                     "retry_on_timeout": self.config.retry_on_timeout,
@@ -76,9 +78,13 @@ class RedisClient:
 
                 client = Redis(**redis_config)
 
-                # Test connection - socket_connect_timeout is already set to 2.0
-                # This will fail fast if connection can't be established
-                await client.ping()
+                # Test connection with explicit timeout wrapper
+                # This ensures we fail fast even if socket_connect_timeout doesn't work as expected
+                try:
+                    await asyncio.wait_for(client.ping(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    await client.aclose()
+                    raise
 
                 # Only set _client if connection succeeded
                 self._client = client

@@ -114,24 +114,40 @@ async def initialize_services():
     try:
         logger.info("Starting service initialization...")
 
-        # 1. Check Database connectivity first
+        # 1. Check Database connectivity first (critical - fail if unavailable)
         logger.info("Checking database connectivity...")
         from app.core.database.engine import get_engine
         from sqlalchemy import text
 
-        engine = await get_engine()
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        logger.info("✅ Database connection verified")
+        try:
+            engine = await get_engine()
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("✅ Database connection verified")
+        except Exception as e:
+            logger.error(f"❌ Database connection failed: {e}")
+            raise Exception(f"Database is not available: {e}")
 
-        # 2. Check Redis connectivity
+        # 2. Check Redis connectivity (non-blocking - log warning but continue)
         logger.info("Checking Redis connectivity...")
-        from app.core.redis.health import wait_for_redis_ready
+        from app.core.redis.health import check_redis_health
 
-        redis_ready = await wait_for_redis_ready(max_attempts=5, delay_seconds=1.0)
-        if not redis_ready:
-            raise Exception("Redis is not available after 5 attempts")
-        logger.info("✅ Redis connection verified")
+        try:
+            redis_health = await check_redis_health()
+            if redis_health.is_healthy:
+                logger.info("✅ Redis connection verified")
+            else:
+                logger.warning(
+                    f"⚠️ Redis connection check failed: {redis_health.error_message}"
+                )
+                logger.warning(
+                    "⚠️ Application will start but Redis-dependent features may not work"
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Redis health check error: {e}")
+            logger.warning(
+                "⚠️ Application will start but Redis-dependent features may not work"
+            )
 
         # Initialize Shopify services
         services["shopify_api"] = ShopifyAPIClient()
