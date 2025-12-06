@@ -76,9 +76,9 @@ class RedisClient:
 
                 client = Redis(**redis_config)
 
-                # Test connection with shorter timeout to fail fast
-                # Use 2 seconds instead of 5 to detect issues quickly
-                await asyncio.wait_for(client.ping(), timeout=2.0)
+                # Test connection - socket_connect_timeout is already set to 2.0
+                # This will fail fast if connection can't be established
+                await client.ping()
 
                 # Only set _client if connection succeeded
                 self._client = client
