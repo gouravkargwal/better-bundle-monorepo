@@ -117,7 +117,9 @@ class RedisClient:
         """Test Redis connection with a simple ping"""
         try:
             start_time = time.time()
-            await self._client.ping()
+            # Use a shorter timeout (2s) to fail fast and reconnect quickly
+            # This prevents waiting for the full socket_timeout (5s) when connection is stale
+            await asyncio.wait_for(self._client.ping(), timeout=2.0)
             response_time = (time.time() - start_time) * 1000
 
             self._metrics.total_operations += 1
@@ -131,6 +133,14 @@ class RedisClient:
             if response_time > 50:  # Consider operations > 50ms as slow
                 self._metrics.slow_operations_count += 1
 
+        except asyncio.TimeoutError as e:
+            self._metrics.total_operations += 1
+            self._metrics.failed_operations += 1
+            raise RedisConnectionError(
+                message="Connection test timed out after 2 seconds",
+                connection_details=self.config.to_dict(),
+                cause=e,
+            )
         except Exception as e:
             self._metrics.total_operations += 1
             self._metrics.failed_operations += 1
@@ -143,14 +153,6 @@ class RedisClient:
     async def get_client(self) -> Redis:
         """Get Redis client, creating connection if needed"""
         if self._client is None:
-            await self.connect()
-
-        # Check if connection is still alive
-        try:
-            await self._test_connection()
-        except Exception:
-            logger.warning("Redis connection lost, reconnecting...")
-            await self.disconnect()
             await self.connect()
 
         return self._client

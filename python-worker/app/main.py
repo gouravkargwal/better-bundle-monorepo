@@ -181,6 +181,42 @@ async def health_check():
     return health_status
 
 
+# Redis health check endpoint
+@app.get("/health/redis")
+async def redis_health_check():
+    """Redis connection health check endpoint"""
+    from app.core.redis.health import check_redis_health
+
+    health_status = await check_redis_health()
+
+    if health_status.is_healthy:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "healthy",
+                "redis": {
+                    "is_healthy": health_status.is_healthy,
+                    "connection_info": health_status.connection_info,
+                    "response_time_ms": health_status.response_time_ms,
+                    "last_check": health_status.last_check,
+                },
+            },
+        )
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "redis": {
+                    "is_healthy": health_status.is_healthy,
+                    "error_message": health_status.error_message,
+                    "response_time_ms": health_status.response_time_ms,
+                    "last_check": health_status.last_check,
+                },
+            },
+        )
+
+
 # Generic Kafka Event Endpoints
 @app.post("/api/kafka/events/publish")
 async def publish_kafka_event(
