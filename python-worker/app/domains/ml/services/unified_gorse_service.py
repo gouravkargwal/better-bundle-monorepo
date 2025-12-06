@@ -55,18 +55,26 @@ class UnifiedGorseService:
 
     def __init__(
         self,
-        gorse_base_url: str = "http://localhost:8088",
-        gorse_api_key: str = "secure_random_key_123",
+        gorse_base_url: Optional[str] = None,
+        gorse_api_key: Optional[str] = None,
         batch_size: int = 500,
     ):
         """
         Initialize the unified Gorse service with ALL enhanced transformers
 
         Args:
-            gorse_base_url: Gorse master server URL
-            gorse_api_key: API key for Gorse authentication
+            gorse_base_url: Gorse master server URL (defaults to settings.ml.GORSE_BASE_URL)
+            gorse_api_key: API key for Gorse authentication (defaults to settings.ml.GORSE_API_KEY)
             batch_size: Batch size for API calls
         """
+        from app.core.config.settings import settings
+
+        # Use settings if not provided
+        if gorse_base_url is None:
+            gorse_base_url = settings.ml.GORSE_BASE_URL
+        if gorse_api_key is None:
+            gorse_api_key = settings.ml.GORSE_API_KEY
+
         self.gorse_client = GorseApiClient(gorse_base_url, gorse_api_key)
         self.batch_size = batch_size
 
