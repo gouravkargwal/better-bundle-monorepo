@@ -67,7 +67,9 @@ class GorseApiClient:
                 timeout=self.timeout,
                 limits=limits,
                 http2=False,  # Disable HTTP/2 to avoid protocol issues
+                follow_redirects=True,  # Follow redirects if any
             )
+            logger.debug(f"Created new httpx.AsyncClient for {self.base_url}")
         return self._client
 
     async def _close_client(self):
@@ -120,8 +122,13 @@ class GorseApiClient:
                         # Log actual exception details before raising
                         logger.error(
                             f"Gorse users batch failed after {self.max_retries} attempts: "
-                            f"{type(e).__name__}: {str(e)}"
+                            f"{type(e).__name__}: {str(e)} | "
+                            f"URL: {url} | "
+                            f"Base URL: {self.base_url}"
                         )
+                        # Log exception args for more details
+                        if hasattr(e, "args") and e.args:
+                            logger.error(f"Exception args: {e.args}")
                         raise
                     logger.warning(
                         f"Gorse users batch attempt {attempt} failed: "
@@ -210,8 +217,13 @@ class GorseApiClient:
                         # Log actual exception details before raising
                         logger.error(
                             f"Gorse items batch failed after {self.max_retries} attempts: "
-                            f"{type(e).__name__}: {str(e)}"
+                            f"{type(e).__name__}: {str(e)} | "
+                            f"URL: {url} | "
+                            f"Base URL: {self.base_url}"
                         )
+                        # Log exception args for more details
+                        if hasattr(e, "args") and e.args:
+                            logger.error(f"Exception args: {e.args}")
                         raise
                     logger.warning(
                         f"Gorse items batch attempt {attempt} failed: "
@@ -306,8 +318,13 @@ class GorseApiClient:
                         # Log actual exception details before raising
                         logger.error(
                             f"Gorse feedback batch failed after {self.max_retries} attempts: "
-                            f"{type(e).__name__}: {str(e)}"
+                            f"{type(e).__name__}: {str(e)} | "
+                            f"URL: {url} | "
+                            f"Base URL: {self.base_url}"
                         )
+                        # Log exception args for more details
+                        if hasattr(e, "args") and e.args:
+                            logger.error(f"Exception args: {e.args}")
                         raise
                     logger.warning(
                         f"Gorse feedback batch attempt {attempt} failed: "
