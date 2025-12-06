@@ -112,8 +112,28 @@ kafka_consumer_manager = None
 async def initialize_services():
     """Initialize only essential services at startup"""
     try:
+        logger.info("Starting service initialization...")
 
-        # Initialize Shopify services first
+        # 1. Check Database connectivity first
+        logger.info("Checking database connectivity...")
+        from app.core.database.engine import get_engine
+        from sqlalchemy import text
+
+        engine = await get_engine()
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("✅ Database connection verified")
+
+        # 2. Check Redis connectivity
+        logger.info("Checking Redis connectivity...")
+        from app.core.redis.health import wait_for_redis_ready
+
+        redis_ready = await wait_for_redis_ready(max_attempts=5, delay_seconds=1.0)
+        if not redis_ready:
+            raise Exception("Redis is not available after 5 attempts")
+        logger.info("✅ Redis connection verified")
+
+        # Initialize Shopify services
         services["shopify_api"] = ShopifyAPIClient()
         services["shopify_permissions"] = ShopifyPermissionService(
             api_client=services["shopify_api"]
@@ -123,28 +143,32 @@ async def initialize_services():
             permission_service=services["shopify_permissions"],
         )
 
-        # Initialize database and create tables
+        # Initialize database and create tables (now we know DB is accessible)
         from app.core.database.create_tables import create_all_tables
 
         await create_all_tables()
+        logger.info("✅ Database tables verified/created")
 
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager
 
         await topic_manager.initialize()
         await topic_manager.create_topics_if_not_exist()
+        logger.info("✅ Kafka topics verified/created")
 
-        # Initialize Kafka Consumer Manager and pass Shopify service
+        # Initialize Kafka Consumer Manager
         global kafka_consumer_manager
         kafka_consumer_manager = KafkaConsumerManager(
             shopify_service=services.get("shopify")
         )
         await kafka_consumer_manager.initialize()
+        logger.info("✅ Kafka consumers initialized")
 
-        # Kafka consumers are managed by kafka_consumer_manager
+        logger.info("✅ All services initialized successfully")
 
     except Exception as e:
-        logger.error(f"Failed to initialize services: {e}")
+        logger.error(f"❌ Failed to initialize services: {e}")
+        logger.error("Application startup failed - critical services are not available")
         raise
 
 

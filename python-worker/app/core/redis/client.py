@@ -40,6 +40,8 @@ class RedisClient:
             if self._client is not None:
                 return
 
+            # Initialize client to None in case of failure
+            client = None
             try:
                 # Convert empty string password to None (Redis expects None, not empty string)
                 password = self.config.password if self.config.password else None
@@ -54,7 +56,6 @@ class RedisClient:
                 )
 
                 # Build Redis configuration
-
                 redis_config = {
                     "host": self.config.host,
                     "port": self.config.port,
@@ -73,21 +74,31 @@ class RedisClient:
                     redis_config["ssl"] = True
                     redis_config["ssl_cert_reqs"] = None
 
-                self._client = Redis(**redis_config)
+                client = Redis(**redis_config)
 
-                # Test connection
-                await asyncio.wait_for(self._client.ping(), timeout=5.0)
+                # Test connection with shorter timeout to fail fast
+                # Use 2 seconds instead of 5 to detect issues quickly
+                await asyncio.wait_for(client.ping(), timeout=2.0)
 
+                # Only set _client if connection succeeded
+                self._client = client
                 self._connection_time = time.time()
                 logger.info("Redis connection established successfully")
 
             except asyncio.TimeoutError as e:
                 self._metrics.connection_errors += 1
-                error_msg = f"Redis connection timeout after 5 seconds"
+                error_msg = f"Redis connection timeout after 2 seconds"
                 logger.error(error_msg, host=self.config.host, port=self.config.port)
 
+                # Clean up failed client
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+
                 raise RedisTimeoutError(
-                    message=error_msg, operation="connect", timeout=5.0, cause=e
+                    message=error_msg, operation="connect", timeout=2.0, cause=e
                 )
 
             except Exception as e:
@@ -100,6 +111,13 @@ class RedisClient:
                     error=str(e),
                     error_type=type(e).__name__,
                 )
+
+                # Clean up failed client
+                if client is not None:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
 
                 raise RedisConnectionError(
                     message=error_msg, connection_details=self.config.to_dict(), cause=e
@@ -159,8 +177,16 @@ class RedisClient:
 
     async def get_client(self) -> Redis:
         """Get Redis client, creating connection if needed"""
+        # Check outside lock for performance, but connect() has its own lock
         if self._client is None:
             await self.connect()
+
+        # Double-check after connect() in case it failed
+        if self._client is None:
+            raise RedisConnectionError(
+                message="Failed to establish Redis connection",
+                connection_details=self.config.to_dict(),
+            )
 
         return self._client
 
