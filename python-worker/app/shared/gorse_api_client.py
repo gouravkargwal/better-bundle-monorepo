@@ -34,9 +34,12 @@ class GorseApiClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         # Configurable timeout and basic retry settings to improve resilience
-        self.timeout = httpx.Timeout(20.0)
+        # Separate connect timeout to fail faster on connection issues
+        self.timeout = httpx.Timeout(20.0, connect=10.0)
         self.max_retries = 3
         self.retry_backoff = 0.5
+        # Shared client with connection pooling to avoid connection exhaustion
+        self._client: Optional[httpx.AsyncClient] = None
 
     def _get_headers(self) -> Dict[str, str]:
         """Get HTTP headers for API requests"""
@@ -47,6 +50,31 @@ class GorseApiClient:
         if self.api_key:
             headers["X-API-Key"] = self.api_key
         return headers
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """
+        Get or create shared httpx client with connection pooling
+
+        Returns:
+            Shared httpx.AsyncClient instance
+        """
+        if self._client is None:
+            # Configure connection pooling to prevent connection exhaustion
+            limits = httpx.Limits(
+                max_keepalive_connections=10, max_connections=20, keepalive_expiry=30.0
+            )
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout,
+                limits=limits,
+                http2=False,  # Disable HTTP/2 to avoid protocol issues
+            )
+        return self._client
+
+    async def _close_client(self):
+        """Close the shared httpx client"""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def insert_users_batch(self, users: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -75,12 +103,12 @@ class GorseApiClient:
             # Retry loop
             attempt = 0
             response = None
+            client = await self._get_client()
             while attempt <= self.max_retries:
                 try:
-                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        response = await client.post(
-                            url, json=valid_users, headers=self._get_headers()
-                        )
+                    response = await client.post(
+                        url, json=valid_users, headers=self._get_headers()
+                    )
                     break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
@@ -89,9 +117,15 @@ class GorseApiClient:
                 ) as e:
                     attempt += 1
                     if attempt > self.max_retries:
+                        # Log actual exception details before raising
+                        logger.error(
+                            f"Gorse users batch failed after {self.max_retries} attempts: "
+                            f"{type(e).__name__}: {str(e)}"
+                        )
                         raise
                     logger.warning(
-                        f"Gorse users batch attempt {attempt} failed: {e}; retrying..."
+                        f"Gorse users batch attempt {attempt} failed: "
+                        f"{type(e).__name__}: {str(e)}; retrying..."
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
@@ -120,14 +154,16 @@ class GorseApiClient:
                     "count": 0,
                 }
 
-        except httpx.TimeoutException:
-            logger.error("Timeout inserting users batch")
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout inserting users batch: {type(e).__name__}: {str(e)}")
             return {"success": False, "error": "Request timeout", "count": 0}
-        except httpx.ConnectError:
-            logger.error("Connection error inserting users batch")
+        except httpx.ConnectError as e:
+            logger.error(
+                f"Connection error inserting users batch: {type(e).__name__}: {str(e)}"
+            )
             return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            logger.error(f"Failed to insert users batch: {str(e)}")
+            logger.error(f"Failed to insert users batch: {type(e).__name__}: {str(e)}")
             return {"success": False, "error": str(e), "count": 0}
 
     async def insert_items_batch(self, items: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -157,12 +193,12 @@ class GorseApiClient:
             # Retry loop
             attempt = 0
             response = None
+            client = await self._get_client()
             while attempt <= self.max_retries:
                 try:
-                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        response = await client.post(
-                            url, json=valid_items, headers=self._get_headers()
-                        )
+                    response = await client.post(
+                        url, json=valid_items, headers=self._get_headers()
+                    )
                     break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
@@ -171,9 +207,15 @@ class GorseApiClient:
                 ) as e:
                     attempt += 1
                     if attempt > self.max_retries:
+                        # Log actual exception details before raising
+                        logger.error(
+                            f"Gorse items batch failed after {self.max_retries} attempts: "
+                            f"{type(e).__name__}: {str(e)}"
+                        )
                         raise
                     logger.warning(
-                        f"Gorse items batch attempt {attempt} failed: {e}; retrying..."
+                        f"Gorse items batch attempt {attempt} failed: "
+                        f"{type(e).__name__}: {str(e)}; retrying..."
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
@@ -202,14 +244,16 @@ class GorseApiClient:
                     "count": 0,
                 }
 
-        except httpx.TimeoutException:
-            logger.error("Timeout inserting items batch")
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout inserting items batch: {type(e).__name__}: {str(e)}")
             return {"success": False, "error": "Request timeout", "count": 0}
-        except httpx.ConnectError:
-            logger.error("Connection error inserting items batch")
+        except httpx.ConnectError as e:
+            logger.error(
+                f"Connection error inserting items batch: {type(e).__name__}: {str(e)}"
+            )
             return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            logger.error(f"Failed to insert items batch: {str(e)}")
+            logger.error(f"Failed to insert items batch: {type(e).__name__}: {str(e)}")
             return {"success": False, "error": str(e), "count": 0}
 
     async def insert_feedback_batch(
@@ -245,12 +289,12 @@ class GorseApiClient:
             # Retry loop
             attempt = 0
             response = None
+            client = await self._get_client()
             while attempt <= self.max_retries:
                 try:
-                    async with httpx.AsyncClient(timeout=self.timeout) as client:
-                        response = await client.post(
-                            url, json=valid_feedback, headers=self._get_headers()
-                        )
+                    response = await client.post(
+                        url, json=valid_feedback, headers=self._get_headers()
+                    )
                     break  # Success - exit retry loop
                 except (
                     httpx.ConnectError,
@@ -259,9 +303,15 @@ class GorseApiClient:
                 ) as e:
                     attempt += 1
                     if attempt > self.max_retries:
+                        # Log actual exception details before raising
+                        logger.error(
+                            f"Gorse feedback batch failed after {self.max_retries} attempts: "
+                            f"{type(e).__name__}: {str(e)}"
+                        )
                         raise
                     logger.warning(
-                        f"Gorse feedback batch attempt {attempt} failed: {e}; retrying..."
+                        f"Gorse feedback batch attempt {attempt} failed: "
+                        f"{type(e).__name__}: {str(e)}; retrying..."
                     )
                     await asyncio.sleep(self.retry_backoff * attempt)
 
@@ -290,14 +340,20 @@ class GorseApiClient:
                     "count": 0,
                 }
 
-        except httpx.TimeoutException:
-            logger.error("Timeout inserting feedback batch")
+        except httpx.TimeoutException as e:
+            logger.error(
+                f"Timeout inserting feedback batch: {type(e).__name__}: {str(e)}"
+            )
             return {"success": False, "error": "Request timeout", "count": 0}
-        except httpx.ConnectError:
-            logger.error("Connection error inserting feedback batch")
+        except httpx.ConnectError as e:
+            logger.error(
+                f"Connection error inserting feedback batch: {type(e).__name__}: {str(e)}"
+            )
             return {"success": False, "error": "Connection error", "count": 0}
         except Exception as e:
-            logger.error(f"Failed to insert feedback batch: {str(e)}")
+            logger.error(
+                f"Failed to insert feedback batch: {type(e).__name__}: {str(e)}"
+            )
             return {"success": False, "error": str(e), "count": 0}
 
     async def get_recommendations(
@@ -329,19 +385,17 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/recommend/{user_id}"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "recommendations": result,
-                    "user_id": user_id,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "recommendations": result,
+                "user_id": user_id,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -367,15 +421,15 @@ class GorseApiClient:
             # Use the correct Gorse health check endpoint
             url = f"{self.base_url}/api/health/ready"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, headers=self._get_headers())
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, headers=self._get_headers())
+            response.raise_for_status()
 
-                return {
-                    "success": True,
-                    "status": "healthy",
-                    "response": response.json() if response.content else {},
-                }
+            return {
+                "success": True,
+                "status": "healthy",
+                "response": response.json() if response.content else {},
+            }
 
         except Exception as e:
             logger.error(f"Gorse health check failed: {str(e)}")
@@ -410,19 +464,17 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/item/{item_id}/neighbors"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "neighbors": result,
-                    "item_id": item_id,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "neighbors": result,
+                "item_id": item_id,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -457,18 +509,16 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/latest"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "items": result,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "items": result,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -503,18 +553,16 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/popular"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "items": result,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "items": result,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -544,19 +592,17 @@ class GorseApiClient:
             params = {"n": n}
             url = f"{self.base_url}/api/user/{user_id}/neighbors"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "neighbors": result,
-                    "user_id": user_id,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "neighbors": result,
+                "user_id": user_id,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -595,18 +641,18 @@ class GorseApiClient:
 
             url = f"{self.base_url}/api/session/recommend"
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    url, json=session_data, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.post(
+                url, json=session_data, params=params, headers=self._get_headers()
+            )
+            response.raise_for_status()
 
-                result = response.json()
-                return {
-                    "success": True,
-                    "recommendations": result,
-                    "count": len(result) if isinstance(result, list) else 0,
-                }
+            result = response.json()
+            return {
+                "success": True,
+                "recommendations": result,
+                "count": len(result) if isinstance(result, list) else 0,
+            }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -638,13 +684,11 @@ class GorseApiClient:
             url = f"{self.base_url}/api/user/{user_id}/neighbors"
             params = {"n": n}
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(
-                    url, params=params, headers=self._get_headers()
-                )
-                response.raise_for_status()
+            client = await self._get_client()
+            response = await client.get(url, params=params, headers=self._get_headers())
+            response.raise_for_status()
 
-                result = response.json()
+            result = response.json()
 
             # Gorse returns a list of user IDs with scores
             if isinstance(result, list):
