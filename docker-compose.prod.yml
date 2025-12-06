@@ -111,20 +111,20 @@ services:
       - backend
     restart: unless-stopped
     command:
-      - redis-server
-      - --appendonly
-      - "yes"
-      - --appendfsync
-      - "everysec"
-      - --maxmemory
-      - "512mb"
-      - --maxmemory-policy
-      - "allkeys-lru"
-      - --protected-mode
-      - "no"
-      - ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD"
+        else
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no
+        fi
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD-SHELL",
+          'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi',
+        ]
       interval: 5s
       timeout: 3s
       retries: 5
