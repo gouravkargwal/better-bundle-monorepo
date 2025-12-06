@@ -24,8 +24,10 @@ async def check_redis_health() -> RedisHealthStatus:
         redis_client = get_redis_client_instance()
         client = await redis_client.get_client()
 
-        # Test connection with a simple ping
-        await client.ping()
+        # Test connection with a simple ping (with timeout to fail fast)
+        import asyncio
+
+        await asyncio.wait_for(client.ping(), timeout=2.0)
 
         response_time = (time.time() - start_time) * 1000
 
@@ -47,15 +49,29 @@ async def check_redis_health() -> RedisHealthStatus:
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
 
+        # Get detailed error information
+        error_type = type(e).__name__
+        error_message = str(e)
+        error_details = f"{error_type}: {error_message}"
+
+        # If it's a custom exception, try to get more details
+        if hasattr(e, "message"):
+            error_details += f" | message: {e.message}"
+        if hasattr(e, "args") and e.args:
+            error_details += f" | args: {e.args}"
+
         logger.error(
-            "Redis health check failed", error=str(e), response_time_ms=response_time
+            "Redis health check failed",
+            error=error_details,
+            error_type=error_type,
+            response_time_ms=response_time,
         )
 
         return RedisHealthStatus(
             is_healthy=False,
             connection_info={},
             last_check=datetime.now().isoformat(),
-            error_message=str(e),
+            error_message=error_details,
             response_time_ms=response_time,
         )
 

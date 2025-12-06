@@ -41,17 +41,24 @@ class RedisClient:
                 return
 
             try:
+                # Convert empty string password to None (Redis expects None, not empty string)
+                password = self.config.password if self.config.password else None
+
                 logger.info(
                     "Establishing Redis connection",
                     host=self.config.host,
                     port=self.config.port,
+                    password_set=bool(
+                        password
+                    ),  # Log if password is set (not the actual password)
                 )
 
                 # Build Redis configuration
+
                 redis_config = {
                     "host": self.config.host,
                     "port": self.config.port,
-                    "password": self.config.password,
+                    "password": password,
                     "db": self.config.db,
                     "decode_responses": self.config.decode_responses,
                     "socket_connect_timeout": self.config.socket_connect_timeout,
