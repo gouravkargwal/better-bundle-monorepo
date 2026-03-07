@@ -1001,7 +1001,12 @@ class ShopifyGraphQLSeeder:
 
 
 async def main() -> bool:
-    # Get shop details from arguments or environment variables
+    shop_domain = os.environ.get("SHOP_DOMAIN") or os.environ.get("SHOPIFY_SHOP_DOMAIN")
+    access_token = os.environ.get("ACCESS_TOKEN") or os.environ.get("SHOPIFY_ACCESS_TOKEN")
+
+    if not shop_domain or not access_token:
+        print("Missing env vars: SHOP_DOMAIN and ACCESS_TOKEN")
+        return False
 
     seeder = ShopifyGraphQLSeeder(shop_domain, access_token)
     return await seeder.run()

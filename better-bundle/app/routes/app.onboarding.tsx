@@ -9,18 +9,18 @@ import { OnboardingPage } from "../features/onboarding/components/OnboardingPage
 import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const {
+    session,
+    redirect: authRedirect,
+    admin,
+  } = await authenticate.admin(request);
+  const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
+
+  if (onboardingCompleted) {
+    throw authRedirect("/app");
+  }
+
   try {
-    const {
-      session,
-      redirect: authRedirect,
-      admin,
-    } = await authenticate.admin(request);
-    const onboardingCompleted = await getShopOnboardingCompleted(session.shop);
-
-    if (onboardingCompleted) {
-      throw authRedirect("/app");
-    }
-
     const onboardingService = new OnboardingService();
     const data = await onboardingService.getOnboardingData(session.shop, admin);
 
@@ -49,7 +49,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   try {
     const onboardingService = new OnboardingService();
     await onboardingService.completeOnboarding(session, admin);
-    return authRedirect("/app");
+    return authRedirect("/app/overview");
   } catch (error) {
     logger.error(
       { error, shop: session.shop },
@@ -68,8 +68,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function OnboardingRoute() {
-  const data = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
-  return <OnboardingPage data={data} error={actionData} />;
+  // Handle loader error shape — when loader returns { error }, data won't have pricingTier
+  const hasLoaderError = "error" in loaderData;
+  const data = hasLoaderError
+    ? { pricingTier: null }
+    : (loaderData as { pricingTier: any });
+  const error = actionData ?? (hasLoaderError ? loaderData : undefined);
+
+  return <OnboardingPage data={data} error={error} />;
 }

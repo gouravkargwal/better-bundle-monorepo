@@ -95,7 +95,7 @@ class MLSettings(BaseSettings):
 
     # Gorse Integration
     ENABLE_GORSE_SYNC: bool = Field(default=False, env="ENABLE_GORSE_SYNC")
-    GORSE_BASE_URL: str = Field(default="http://localhost:8088", env="GORSE_BASE_URL")
+    GORSE_BASE_URL: str = Field(..., env="GORSE_BASE_URL")
     GORSE_API_KEY: str = Field(default="", env="GORSE_API_KEY")
     GORSE_MASTER_KEY: str = Field(default="", env="GORSE_MASTER_KEY")
 

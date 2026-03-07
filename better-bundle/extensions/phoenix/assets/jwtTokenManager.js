@@ -20,7 +20,7 @@ class JWTTokenManager {
     this.TOKEN_EXPIRY_KEY = STORAGE_KEYS.JWT_TOKEN_EXPIRY;
     this.SHOP_DOMAIN_KEY = STORAGE_KEYS.SHOP_DOMAIN;
     // this.BACKEND_URL = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
-    this.BACKEND_URL = window.getBaseUrl ? window.getBaseUrl() : "https://api.betterbundle.site";
+    this.BACKEND_URL = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
 
     // Module-level promises for preventing concurrent refresh attempts
     this.refreshPromise = null;

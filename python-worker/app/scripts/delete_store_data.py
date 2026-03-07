@@ -361,45 +361,65 @@ class ShopifyStoreDeleter:
         return collections
 
     async def get_all_orders(self) -> List[Dict[str, Any]]:
-        """Get all orders from the store"""
-        logger.info("Fetching all orders...")
+        """Get all orders from the store using GraphQL with test order filter"""
+        logger.info("Fetching all orders (including test orders)...")
         orders = []
         cursor = None
 
-        while True:
-            query = """
-            query($first: Int!, $after: String) {
-                orders(first: $first, after: $after) {
-                    pageInfo {
-                        hasNextPage
-                        endCursor
-                    }
-                    edges {
-                        node {
-                            id
-                            name
+        # Try fetching with different query filters to catch all orders including test orders
+        for query_filter in ["", "test:true", "test:false"]:
+            cursor = None
+            filter_label = query_filter or "default"
+            while True:
+                query = """
+                query($first: Int!, $after: String, $query: String) {
+                    orders(first: $first, after: $after, query: $query) {
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                        edges {
+                            node {
+                                id
+                                name
+                                cancelledAt
+                                displayFinancialStatus
+                            }
                         }
                     }
                 }
-            }
-            """
+                """
 
-            variables = {"first": 250, "after": cursor}
+                variables = {"first": 250, "after": cursor, "query": query_filter or None}
 
-            result = await self.execute_mutation(query, variables)
-            orders_data = result.get("orders", {})
+                result = await self.execute_mutation(query, variables)
+                orders_data = result.get("orders", {})
 
-            edges = orders_data.get("edges", [])
-            for edge in edges:
-                orders.append(edge["node"])
+                edges = orders_data.get("edges", [])
+                for edge in edges:
+                    node = edge["node"]
+                    # Avoid duplicates
+                    if not any(o["id"] == node["id"] for o in orders):
+                        orders.append({
+                            "id": node["id"],
+                            "name": node.get("name", "Unknown"),
+                            "cancelled_at": node.get("cancelledAt"),
+                            "financial_status": node.get("displayFinancialStatus"),
+                        })
 
-            page_info = orders_data.get("pageInfo", {})
-            if not page_info.get("hasNextPage"):
+                page_info = orders_data.get("pageInfo", {})
+                if not page_info.get("hasNextPage"):
+                    break
+
+                cursor = page_info.get("endCursor")
+
+            if orders:
+                logger.info(f"Found {len(orders)} orders with filter '{filter_label}'")
                 break
+            else:
+                logger.info(f"No orders found with filter '{filter_label}', trying next...")
 
-            cursor = page_info.get("endCursor")
-
-        logger.info(f"Found {len(orders)} orders")
+        logger.info(f"Found {len(orders)} orders total")
         return orders
 
     async def get_all_customers(self) -> List[Dict[str, Any]]:
@@ -581,24 +601,61 @@ class ShopifyStoreDeleter:
             self.stats["errors"] += 1
             return False
 
-    async def delete_order(self, order_id: str) -> bool:
-        """Delete a single order"""
-        mutation = """
-        mutation($orderId: ID!) {
-            orderDelete(orderId: $orderId) {
-                deletedId
-                userErrors {
-                    field
-                    message
-                    code
+    async def delete_order(self, order_id: str, cancelled_at: str = None) -> bool:
+        """Cancel → Close/Archive → Delete an order via GraphQL (all 3 steps required)"""
+        try:
+            # Step 1: Cancel the order if not already cancelled
+            if not cancelled_at:
+                cancel_mutation = """
+                mutation($orderId: ID!) {
+                    orderCancel(orderId: $orderId, reason: OTHER, notifyCustomer: false, refund: false, restock: false) {
+                        orderCancelUserErrors {
+                            field
+                            message
+                            code
+                        }
+                    }
+                }
+                """
+                try:
+                    await self.execute_mutation(cancel_mutation, {"orderId": order_id})
+                except Exception:
+                    pass  # Order may already be cancelled or not cancellable
+
+            # Step 2: Close/Archive the order (required before deletion)
+            close_mutation = """
+            mutation($input: OrderCloseInput!) {
+                orderClose(input: $input) {
+                    order {
+                        id
+                        closed
+                    }
+                    userErrors {
+                        field
+                        message
+                    }
                 }
             }
-        }
-        """
+            """
+            try:
+                await self.execute_mutation(close_mutation, {"input": {"id": order_id}})
+            except Exception:
+                pass  # Order may already be closed
 
-        variables = {"orderId": order_id}
-
-        try:
+            # Step 3: Delete the order
+            mutation = """
+            mutation($orderId: ID!) {
+                orderDelete(orderId: $orderId) {
+                    deletedId
+                    userErrors {
+                        field
+                        message
+                        code
+                    }
+                }
+            }
+            """
+            variables = {"orderId": order_id}
             result = await self.execute_mutation(mutation, variables)
             order_delete = result.get("orderDelete", {})
 
@@ -822,7 +879,10 @@ class ShopifyStoreDeleter:
             for order in batch:
                 order_id = order["id"]
                 order_name = order.get("name", "Unknown")
-                task = self._delete_order_with_logging(order_id, order_name)
+                task = self._delete_order_with_logging(
+                    order_id, order_name,
+                    cancelled_at=order.get("cancelled_at"),
+                )
                 tasks.append(task)
 
             # Execute batch in parallel
@@ -839,9 +899,68 @@ class ShopifyStoreDeleter:
                 else:
                     logger.error(f"❌ Failed to delete order: {order_name}")
 
-    async def _delete_order_with_logging(self, order_id: str, order_name: str) -> bool:
+    async def _delete_order_with_logging(self, order_id: str, order_name: str, cancelled_at: str = None) -> bool:
         """Delete a single order with logging"""
-        return await self.delete_order(order_id)
+        return await self.delete_order(order_id, cancelled_at=cancelled_at)
+
+    async def _delete_customer_orders(self, customer_id: str) -> int:
+        """Find and delete orders associated with a customer via GraphQL customer node"""
+        deleted = 0
+        cursor = None
+
+        while True:
+            query = """
+            query($customerId: ID!, $first: Int!, $after: String) {
+                customer(id: $customerId) {
+                    orders(first: $first, after: $after) {
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                        edges {
+                            node {
+                                id
+                                name
+                                cancelledAt
+                            }
+                        }
+                    }
+                }
+            }
+            """
+            variables = {"customerId": customer_id, "first": 50, "after": cursor}
+
+            try:
+                result = await self.execute_mutation(query, variables)
+                customer_data = result.get("customer", {})
+                if not customer_data:
+                    break
+
+                orders_data = customer_data.get("orders", {})
+                edges = orders_data.get("edges", [])
+
+                if not edges:
+                    break
+
+                for edge in edges:
+                    order = edge["node"]
+                    success = await self.delete_order(order["id"], cancelled_at=order.get("cancelledAt"))
+                    if success:
+                        deleted += 1
+                        logger.info(f"    ✅ Deleted order {order['name']} for customer {customer_id}")
+                    else:
+                        logger.warning(f"    ⚠️ Could not delete order {order['name']} for customer {customer_id}")
+
+                page_info = orders_data.get("pageInfo", {})
+                if not page_info.get("hasNextPage"):
+                    break
+                cursor = page_info.get("endCursor")
+
+            except Exception as e:
+                logger.error(f"Error fetching orders for customer {customer_id}: {e}")
+                break
+
+        return deleted
 
     async def delete_all_customers(self) -> None:
         """Delete all customers from the store"""
@@ -895,8 +1014,15 @@ class ShopifyStoreDeleter:
     async def _delete_customer_with_logging(
         self, customer_id: str, customer_name: str
     ) -> bool:
-        """Delete a single customer with logging"""
-        return await self.delete_customer(customer_id)
+        """Delete a single customer, removing associated orders first if needed"""
+        success = await self.delete_customer(customer_id)
+        if not success:
+            # Try to delete associated orders first, then retry
+            deleted_orders = await self._delete_customer_orders(customer_id)
+            if deleted_orders > 0:
+                logger.info(f"  Deleted {deleted_orders} orders for {customer_name}, retrying customer delete...")
+                success = await self.delete_customer(customer_id)
+        return success
 
     async def delete_all_media(self) -> None:
         """Delete all media files from the store"""
@@ -976,10 +1102,10 @@ class ShopifyStoreDeleter:
         self.stats["start_time"] = datetime.now()
 
         try:
-            # Delete in order: products first, then collections, then orders, then customers, then media
+            # Delete in order: orders first (unblocks customers), then products, collections, customers, media
+            await self.delete_all_orders()
             await self.delete_all_products()
             await self.delete_all_collections()
-            await self.delete_all_orders()
             await self.delete_all_customers()
             await self.delete_all_media()
 
@@ -1013,10 +1139,12 @@ class ShopifyStoreDeleter:
 
 async def main():
     """Main function to run the deletion script"""
+    shop_domain = os.environ.get("SHOP_DOMAIN") or os.environ.get("SHOPIFY_SHOP_DOMAIN")
+    access_token = os.environ.get("ACCESS_TOKEN") or os.environ.get("SHOPIFY_ACCESS_TOKEN")
 
     if not shop_domain or not access_token:
         logger.error(
-            "Missing required environment variables: SHOPIFY_SHOP_DOMAIN and SHOPIFY_ACCESS_TOKEN"
+            "Missing required environment variables: SHOP_DOMAIN and ACCESS_TOKEN"
         )
         return
 

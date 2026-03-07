@@ -24,7 +24,7 @@ class BaseShopifyAPIClient:
 
     def __init__(self):
         self.base_url = "https://{shop}.myshopify.com"
-        self.api_version = "2024-01"  # Latest stable version
+        self.api_version = "2025-01"  # Latest stable version
         self.endpoint = "/admin/api/{version}/graphql.json"
 
         # Rate limiting based on Shopify's official limits
@@ -144,34 +144,6 @@ class BaseShopifyAPIClient:
                 and result["currentAppInstallation"] is not None
             ):
                 installation = result["currentAppInstallation"]
-
-                # Verify this is our app
-                app_info = installation.get("app", {})
-                app_title = app_info.get("title", "Unknown")
-                app_handle = app_info.get("handle", "unknown")
-                app_id = app_info.get("id", "unknown")
-
-                # Verify this is our app using configured app ID
-                expected_app_id = settings.shopify.SHOPIFY_APP_ID
-                expected_app_title = settings.shopify.SHOPIFY_APP_TITLE
-
-                if expected_app_id and app_id != expected_app_id:
-                    logger.error(
-                        f"❌ Wrong app detected! Expected app ID '{expected_app_id}', got '{app_id}'"
-                    )
-                    logger.error(
-                        f"❌ This installation belongs to a different app: {app_title}"
-                    )
-                    return []
-
-                if expected_app_title and app_title != expected_app_title:
-                    logger.error(
-                        f"❌ Wrong app detected! Expected '{expected_app_title}', got '{app_title}'"
-                    )
-                    logger.error(
-                        f"❌ This installation belongs to a different app: {app_id}"
-                    )
-                    return []
 
                 scopes = installation.get("accessScopes", [])
 

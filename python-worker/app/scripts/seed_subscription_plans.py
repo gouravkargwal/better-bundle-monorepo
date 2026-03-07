@@ -37,7 +37,7 @@ for env_file in env_files:
 
 # TODO: Update this with your actual production database URL
 DATABASE_URL = (
-    "postgresql+asyncpg://postgres:9414318317g@140.245.16.80:5432/betterbundle"
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle"
 )
 
 # Override DATABASE_URL from environment
