@@ -6,10 +6,17 @@ Uses environment variables for port and host configuration
 
 import os
 import sys
+from pathlib import Path
 import django
 from django.core.management import execute_from_command_line
 
 if __name__ == "__main__":
+    # Load .env.dev if it exists
+    env_file = Path(__file__).parent / ".env.dev"
+    if env_file.exists():
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     django.setup()
 

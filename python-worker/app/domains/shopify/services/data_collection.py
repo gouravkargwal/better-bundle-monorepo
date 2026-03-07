@@ -275,15 +275,19 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if data
         )
 
+        collected_data = collection_results.get("collected_data", {})
+
         return {
             "success": True,
             "message": f"Collected {total_items} items",
             "session_id": session_info["session_id"],
             "session_start_time": session_info["start_time"].isoformat(),
             "total_items": total_items,
-            "collected_types": list(
-                collection_results.get("collected_data", {}).keys()
-            ),
+            "orders_collected": len(collected_data.get("orders", [])),
+            "products_collected": len(collected_data.get("products", [])),
+            "customers_collected": len(collected_data.get("customers", [])),
+            "collections_collected": len(collected_data.get("collections", [])),
+            "collected_types": list(collected_data.keys()),
             "collection_payload": collection_payload,
         }
 
@@ -501,7 +505,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                         publisher, shop_id, data_type, specific_ids
                     )
             finally:
-                await publisher.close()
+                if publisher:
+                    await publisher.close()
 
         except Exception as e:
             logger.error(f"❌ Failed to trigger normalization via Kafka: {e}")

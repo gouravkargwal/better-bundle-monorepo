@@ -29,14 +29,17 @@ export class OnboardingService {
       // Get shop data from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
 
-      // Complete onboarding in transaction
-      await this.completeOnboardingTransaction(session, shopData);
+      // Complete onboarding in transaction (without marking complete)
+      const shop = await this.completeOnboardingTransaction(session, shopData);
 
       // Activate web pixel
       await this.activateWebPixel(admin, session.shop);
 
-      // Trigger analysis
-      await this.triggerAnalysis(session.shop);
+      // Trigger analysis using shop record from transaction (avoids extra DB query)
+      await this.triggerAnalysis(session.shop, shop.id, session.accessToken);
+
+      // Mark onboarding completed AFTER Kafka succeeds
+      await this.markOnboardingCompleted(session.shop);
     } catch (error) {
       logger.error({ error }, "Error completing onboarding");
       throw new Error("Failed to complete onboarding");
@@ -59,6 +62,7 @@ export class OnboardingService {
             currencyCode
             plan {
               displayName
+              shopifyPlus
             }
           }
         }
@@ -108,7 +112,7 @@ export class OnboardingService {
 
       return {
         symbol: getCurrencySymbol(currencyCode),
-        threshold_amount: pricingTier.trial_threshold_amount,
+        threshold_amount: Number(pricingTier.trial_threshold_amount),
       };
     } catch (error) {
       logger.error({ error }, "Error getting pricing tier configuration");
@@ -124,9 +128,6 @@ export class OnboardingService {
 
         // Activate trial billing plan
         await this.activateTrialBillingPlan(session.shop, shop, tx);
-
-        // Mark onboarding as completed
-        await this.markOnboardingCompleted(session.shop, tx);
 
         return shop;
       } catch (error) {
@@ -153,9 +154,7 @@ export class OnboardingService {
           email: shopData.email,
           plan_type: shopData.plan.displayName,
           is_active: true,
-          shopify_plus:
-            shopData.plan.displayName.includes("Plus") ||
-            shopData.plan.displayName.includes("plus"),
+          shopify_plus: shopData.plan.shopifyPlus || false,
           // For reinstalls, preserve onboarding status if it was completed
           ...(isReinstall && existingShop.onboarding_completed
             ? {}
@@ -169,9 +168,7 @@ export class OnboardingService {
           plan_type: shopData.plan.displayName,
           is_active: true,
           onboarding_completed: false,
-          shopify_plus:
-            shopData.plan.displayName.includes("Plus") ||
-            shopData.plan.displayName.includes("plus"),
+          shopify_plus: shopData.plan.shopifyPlus || false,
         },
       });
     } catch (error) {
@@ -244,6 +241,7 @@ export class OnboardingService {
           started_at: new Date(),
           is_active: true,
           auto_renew: true,
+          user_chosen_cap_amount: pricingTier.trial_threshold_amount,
         },
       });
 
@@ -264,9 +262,9 @@ export class OnboardingService {
     }
   }
 
-  private async markOnboardingCompleted(shopDomain: string, tx: any) {
+  private async markOnboardingCompleted(shopDomain: string) {
     try {
-      await tx.shops.update({
+      await prisma.shops.update({
         where: { shop_domain: shopDomain },
         data: { onboarding_completed: true },
       });
@@ -336,19 +334,13 @@ export class OnboardingService {
     }
   }
 
-  private async triggerAnalysis(shopDomain: string) {
+  private async triggerAnalysis(
+    shopDomain: string,
+    shopId: string,
+    accessToken: string,
+  ) {
     try {
-      // Get shop information from database to retrieve shop_id and access_token
-      const shop = await prisma.shops.findUnique({
-        where: { shop_domain: shopDomain },
-        select: { id: true, access_token: true },
-      });
-
-      if (!shop) {
-        throw new Error(`Shop not found for domain: ${shopDomain}`);
-      }
-
-      if (!shop.access_token) {
+      if (!accessToken) {
         throw new Error(`No access token found for shop: ${shopDomain}`);
       }
 
@@ -363,7 +355,7 @@ export class OnboardingService {
       const jobData = {
         event_type: "data_collection",
         job_id: jobId,
-        shop_id: shop.id,
+        shop_id: shopId,
         job_type: "data_collection",
         mode: "historical", // This ensures all historical data is processed during onboarding
         collection_payload: collectionPayload, // New: specify what data to collect

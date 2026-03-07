@@ -170,6 +170,9 @@ async def trigger_data_collection(
             errors=[],
         )
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         error_msg = f"Data collection failed for shop {request.shop_id}: {str(e)}"
         logger.error(error_msg)
@@ -215,6 +218,9 @@ async def get_collection_status(shop_id: str):
             "last_collection": "Not implemented yet",  # Would need to track this
             "status": "ready" if shop.is_active else "inactive",
         }
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         logger.error(f"Failed to get collection status for shop {shop_id}: {e}")

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime
 from typing import Dict, Any
 
@@ -297,24 +298,49 @@ class DataCollectionKafkaConsumer:
         collection_payload: Dict[str, Any] = None,
         shop_data: Dict[str, Any] = None,
     ):
-        """Process data collection job with collection payload"""
-        try:
-            # Use resolved shop data (already validated)
-            if not shop_data or not shop_data.get("access_token"):
-                logger.error("❌ Shop not found or inactive. Aborting data collection")
-                return False
+        """Process data collection job with retry and DLQ fallback"""
+        if not shop_data or not shop_data.get("access_token"):
+            logger.error("❌ Shop not found or inactive. Aborting data collection")
+            return False
 
-            # Single flow - always use collect_all_data with payload
-            result = await self.shopify_service.collect_all_data(
-                shop_domain=shop_data["domain"],
-                shop_id=shop_data["id"],
-                access_token=shop_data["access_token"],
-                collection_payload=collection_payload,
-            )
+        max_attempts = 3
+        last_error = None
 
-        except Exception as e:
-            logger.exception(f"Data collection job failed: {e}")
-            raise
+        for attempt in range(max_attempts):
+            try:
+                result = await self.shopify_service.collect_all_data(
+                    shop_domain=shop_data["domain"],
+                    shop_id=shop_data["id"],
+                    access_token=shop_data["access_token"],
+                    collection_payload=collection_payload,
+                )
+                return result
+            except Exception as e:
+                last_error = e
+                if attempt < max_attempts - 1:
+                    delay = 5 * (3 ** attempt)  # 5s, 15s
+                    logger.warning(
+                        f"⚠️ Data collection attempt {attempt + 1}/{max_attempts} failed for {shop_id}, "
+                        f"retrying in {delay}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+
+        # All retries exhausted — send to DLQ
+        logger.error(
+            f"❌ Data collection failed after {max_attempts} attempts for {shop_id}: {last_error}"
+        )
+        await self.dlq_service.send_to_dlq(
+            original_message={
+                "event_type": "data_collection",
+                "job_id": job_id,
+                "shop_id": shop_id,
+                "collection_payload": collection_payload,
+            },
+            reason="data_collection_failed",
+            original_topic="data-collection-jobs",
+            error_details=str(last_error),
+            retry_count=max_attempts,
+        )
 
     async def _handle_deletion_event(
         self, event_type: str, shopify_id: str, shop_id: str

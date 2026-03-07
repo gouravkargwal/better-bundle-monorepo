@@ -23,15 +23,9 @@
     <div class="swiper-slide">
       <div class="product-card" data-product-id="{{ product_id }}">
         <div class="product-card__image-container">
-          <img
-            class="product-card__image"
-            src="https://via.placeholder.com/600x400/{{ dummy_colors[product_index] }}/666666?text={{ product | replace: ' ', '+' }}"
-            alt="{{ product }}"
-            width="600"
-            height="400"
-            loading="lazy"
-            onclick="console.log('Design mode: Product clicked - {{ product }}')"
-          >
+          <svg class="product-card__image" viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg" width="600" height="400" style="background:#{{ dummy_colors[product_index] | default: 'e0e0e0' }};border-radius:4px">
+            <text x="300" y="200" text-anchor="middle" dominant-baseline="middle" font-family="Arial,sans-serif" font-size="24" font-weight="600" fill="#fff">{{ product }}</text>
+          </svg>
         </div>
         <div class="product-card__body">
           <h4 class="product-card__title">{{ product }}</h4>
