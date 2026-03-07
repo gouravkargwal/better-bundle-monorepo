@@ -115,9 +115,9 @@ services:
       - -c
       - |
         if [ -n "$$REDIS_PASSWORD" ]; then
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD"
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD" --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         else
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         fi
     healthcheck:
       test:
@@ -308,7 +308,7 @@ services:
       - --log-path
       - /var/log/gorse/master.log
       - --cache-path
-      - /var/lib/gorse/master_cache.data
+      - /var/lib/gorse/master
     volumes:
       - ./config.toml:/etc/gorse/config.toml:ro
       - gorse_logs:/var/log/gorse
@@ -329,8 +329,6 @@ services:
         reservations:
           cpus: "1.0"
           memory: 1G
-    security_opt:
-      - no-new-privileges:true
     logging:
       driver: "json-file"
       options:
