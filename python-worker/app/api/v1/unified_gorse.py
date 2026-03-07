@@ -16,21 +16,18 @@ router = APIRouter(prefix="/api/v1/gorse", tags=["unified-gorse"])
 
 class SyncRequest(BaseModel):
     shop_id: str
-    sync_type: str = "all"  # "all", "incremental", "users", "items", "feedback"
-    since_hours: int = 24
-    trigger_source: str = "api"
 
 
 class SyncResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
     job_id: str
     shop_id: str
-    sync_type: str
-    users_synced: int
-    items_synced: int
-    feedback_synced: int
-    training_triggered: bool
-    duration_seconds: float
-    errors: list
+    sync_results: Dict[str, Any] = {}
+    total_items_synced: int = 0
+    training_triggered: bool = False
+    duration_seconds: float = 0.0
+    errors: list = []
 
 
 @router.post("/sync", response_model=SyncResponse)
@@ -44,9 +41,6 @@ async def sync_and_train(request: SyncRequest, background_tasks: BackgroundTasks
         # Run sync in background
         result = await service.sync_and_train(
             shop_id=request.shop_id,
-            sync_type=request.sync_type,
-            since_hours=request.since_hours,
-            trigger_source=request.trigger_source,
         )
 
         return SyncResponse(**result)
