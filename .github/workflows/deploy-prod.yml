@@ -26,14 +26,13 @@ jobs:
           host: ${{ secrets.PROD_HOST }}
           username: ubuntu
           key: ${{ secrets.PROD_SSH_KEY }}
-          script_stop: true
           command_timeout: 10m
           script: |
             set -e
             cd /home/ubuntu/better-bundle-monorepo
 
             echo "=== Pulling latest code ==="
-            git pull origin main
+            git pull origin master
 
             SERVICE="${{ github.event.inputs.services }}"
 
