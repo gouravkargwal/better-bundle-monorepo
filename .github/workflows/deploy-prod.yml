@@ -1,0 +1,63 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Services to deploy"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - python-worker
+          - remix-app
+          - admin
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ubuntu
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script_stop: true
+          command_timeout: 10m
+          script: |
+            set -e
+            cd /home/ubuntu/better-bundle-monorepo
+
+            echo "=== Pulling latest code ==="
+            git pull origin main
+
+            SERVICE="${{ github.event.inputs.services }}"
+
+            if [ "$SERVICE" = "all" ]; then
+              echo "=== Building all custom services ==="
+              docker compose -f docker-compose.prod.yml build remix-app python-worker admin
+
+              echo "=== Restarting all services ==="
+              docker compose -f docker-compose.prod.yml up -d
+            else
+              echo "=== Building $SERVICE ==="
+              docker compose -f docker-compose.prod.yml build "$SERVICE"
+
+              echo "=== Restarting $SERVICE ==="
+              docker compose -f docker-compose.prod.yml up -d "$SERVICE"
+            fi
+
+            echo "=== Cleaning up old images ==="
+            docker image prune -f
+
+            echo "=== Waiting for services to stabilize ==="
+            sleep 15
+
+            echo "=== Container status ==="
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "=== Deployment complete ==="

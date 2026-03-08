@@ -1,6 +1,4 @@
-// export const BACKEND_URL =
-//   "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
-export const BACKEND_URL = "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
+export const BACKEND_URL = "https://api.betterbundle.site" as const;
 
 // Storage Keys - Centralized storage key constants
 export const STORAGE_KEYS = {

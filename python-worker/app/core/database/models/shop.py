@@ -28,6 +28,7 @@ class Shop(BaseModel):
     # Status flags
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     onboarding_completed = Column(Boolean, default=False, nullable=False)
+    setup_guide_visited = Column(Boolean, default=False, nullable=False)
     shopify_plus = Column(Boolean, default=False, nullable=False, index=True)
 
     # ✅ PATTERN 1: Service Suspension Fields

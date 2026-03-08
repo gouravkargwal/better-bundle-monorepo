@@ -40,11 +40,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 1G
-        reservations:
-          cpus: "0.5"
+          cpus: "0.75"
           memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -115,9 +115,9 @@ services:
       - -c
       - |
         if [ -n "$$REDIS_PASSWORD" ]; then
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD"
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD" --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         else
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 512mb --maxmemory-policy allkeys-lru --protected-mode no
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode no --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         fi
     healthcheck:
       test:
@@ -133,7 +133,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
         reservations:
           cpus: "0.25"
           memory: 128M
@@ -179,6 +179,7 @@ services:
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_LOG4J_LOGGERS: "kafka.controller=WARN,kafka.producer.async.DefaultEventHandler=WARN,state.change.logger=WARN"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx1g"
     networks:
       - backend
     restart: unless-stopped
@@ -198,10 +199,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 1G
+          memory: 1536M
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 768M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -229,6 +230,7 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       DYNAMIC_CONFIG_ENABLED: "true"
       AUTH_TYPE: "DISABLED"
+      JAVA_OPTS: "-Xms128m -Xmx256m"
     networks:
       - backend
     restart: unless-stopped
@@ -236,10 +238,10 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 512M
         reservations:
           cpus: "0.25"
-          memory: 128M
+          memory: 256M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -266,6 +268,7 @@ services:
       KAFKA_REST_HOST_NAME: rest-proxy
       KAFKA_REST_BOOTSTRAP_SERVERS: "kafka:29092"
       KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
+      KAFKAREST_HEAP_OPTS: "-Xms128m -Xmx256m"
     networks:
       - backend
     restart: unless-stopped
@@ -278,7 +281,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 384M
         reservations:
           cpus: "0.25"
           memory: 128M
@@ -308,7 +311,7 @@ services:
       - --log-path
       - /var/log/gorse/master.log
       - --cache-path
-      - /var/lib/gorse/master_cache.data
+      - /var/lib/gorse/master
     volumes:
       - ./config.toml:/etc/gorse/config.toml:ro
       - gorse_logs:/var/log/gorse
@@ -324,13 +327,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 2G
-        reservations:
           cpus: "1.0"
-          memory: 1G
-    security_opt:
-      - no-new-privileges:true
+          memory: 768M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -372,11 +373,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 2G
-        reservations:
           cpus: "1.0"
           memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -414,7 +415,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/\")' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -422,11 +423,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 1G
-        reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 384M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -448,11 +449,9 @@ services:
     ports:
       - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/loki-config.yaml
-    user: "10001:10001" # Run as loki user to match volume ownership
     volumes:
       - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - ./loki_data:/loki
-      - ./loki/rules:/loki/rules
+      - loki_data:/loki
     networks:
       - backend
       - frontend
@@ -596,7 +595,7 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
+          memory: 384M
         reservations:
           cpus: "0.25"
           memory: 128M

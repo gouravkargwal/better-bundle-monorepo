@@ -1,4 +1,5 @@
 import prisma from "../../../db.server";
+import logger from "../../../utils/logger";
 
 export class OverviewService {
   async getOverviewData(shopDomain: string) {
@@ -20,11 +21,18 @@ export class OverviewService {
       shop.currency_code || "USD",
     );
 
+    // Check Gorse readiness (is the recommendation engine ready?)
+    const gorseReadiness = await this.checkGorseReadiness(shop.id);
+
+    // Check setup progress
+    const setupStatus = await this.getSetupStatus(shop.id, gorseReadiness, shop.setup_guide_visited);
+
     return {
       shop,
       billingPlan,
       overviewData,
       performanceData,
+      setupStatus,
     };
   }
 
@@ -37,6 +45,7 @@ export class OverviewService {
         currency_code: true,
         plan_type: true,
         created_at: true,
+        setup_guide_visited: true,
       },
     });
 
@@ -470,6 +479,88 @@ export class OverviewService {
           weeklyGrowth: 0,
           monthlyGrowth: 0,
         },
+      };
+    }
+  }
+
+  private async checkGorseReadiness(
+    shopId: string,
+  ): Promise<{ ready: boolean; productssynced: number; usersTracked: number; qualityScore: number }> {
+    try {
+      const backendUrl = process.env.BACKEND_URL;
+      if (!backendUrl) {
+        logger.warn("BACKEND_URL not set, skipping Gorse readiness check");
+        return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
+      }
+
+      const response = await fetch(`${backendUrl}/api/v1/gorse/status/${shopId}`, {
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!response.ok) {
+        logger.warn({ status: response.status }, "Gorse status check failed");
+        return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
+      }
+
+      const data = await response.json();
+      const featureCounts = data?.feature_utilization?.feature_counts || {};
+      const productssynced = featureCounts.product_features || 0;
+      const usersTracked = featureCounts.user_features || 0;
+      const qualityScore = data?.quality_indicators?.overall_quality || 0;
+      const gorseHealthy = data?.gorse_health?.success === true;
+
+      const ready = gorseHealthy && productssynced > 0;
+      logger.info(
+        { gorseHealthy, productssynced, usersTracked, qualityScore, ready },
+        "Gorse readiness check result",
+      );
+
+      return { ready, productssynced, usersTracked, qualityScore } as any;
+    } catch (error: any) {
+      logger.warn({ message: error?.message }, "Could not reach Gorse for readiness check");
+      return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
+    }
+  }
+
+  private async getSetupStatus(
+    shopId: string,
+    gorseReadiness: { ready: boolean; productssynced: number; usersTracked: number; qualityScore: number },
+    setupGuideVisited: boolean,
+  ) {
+    try {
+      const [productsCount, recommendationView] = await Promise.all([
+        prisma.product_features.count({ where: { shop_id: shopId } }),
+        prisma.user_interactions.findFirst({
+          where: {
+            shop_id: shopId,
+            interaction_type: "recommendation_viewed",
+          },
+        }),
+      ]);
+
+      return {
+        storeConnected: true,
+        productsAnalyzed: productsCount > 0,
+        productsCount,
+        widgetAdded: false,
+        recommendationsLive: !!recommendationView,
+        recommendationsReady: gorseReadiness.ready,
+        qualityScore: gorseReadiness.qualityScore,
+        setupGuideVisited: setupGuideVisited,
+        isSetupComplete: setupGuideVisited,
+      };
+    } catch (error) {
+      console.error("Error checking setup status:", error);
+      return {
+        storeConnected: true,
+        productsAnalyzed: false,
+        productsCount: 0,
+        widgetAdded: false,
+        recommendationsLive: false,
+        recommendationsReady: false,
+        qualityScore: 0,
+        setupGuideVisited: false,
+        isSetupComplete: false,
       };
     }
   }

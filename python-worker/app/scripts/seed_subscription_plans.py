@@ -18,29 +18,44 @@ from dotenv import load_dotenv
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
 
-# Load environment variables from multiple possible locations
-# Try loading from root directory first, then python-worker directory
+# Determine environment from --env flag (default: dev)
+import argparse
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument("--env", default="dev", choices=["dev", "prod"])
+args, _ = parser.parse_known_args()
+
+# Load the correct .env file based on --env flag
 python_worker_path = Path(python_worker_dir)
 root_dir = python_worker_path.parent
-env_files = [
-    root_dir / ".env.prod",
-    root_dir / ".env.local",
-    root_dir / ".env",
-    python_worker_path / ".env.local",
-    python_worker_path / ".env",
-]
+
+if args.env == "prod":
+    env_files = [
+        root_dir / ".env.prod",
+        python_worker_path / ".env.prod",
+    ]
+else:
+    env_files = [
+        root_dir / ".env.dev",
+        root_dir / ".env.local",
+        root_dir / ".env",
+        python_worker_path / ".env.local",
+        python_worker_path / ".env",
+    ]
 
 for env_file in env_files:
     if env_file.exists():
-        load_dotenv(env_file)
+        load_dotenv(env_file, override=True)
+        print(f"📄 Loaded env from: {env_file}")
         break
 
-# TODO: Update this with your actual production database URL
-DATABASE_URL = (
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle"
-)
+# Build DATABASE_URL from env vars or use DATABASE_URL directly
+env_db_url = os.environ.get("DATABASE_URL", "")
+if env_db_url:
+    # Ensure asyncpg driver is used
+    DATABASE_URL = env_db_url.replace("postgresql://", "postgresql+asyncpg://")
+else:
+    DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle"
 
-# Override DATABASE_URL from environment
 os.environ["DATABASE_URL"] = DATABASE_URL
 
 # Import after path setup and env loading
