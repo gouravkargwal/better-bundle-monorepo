@@ -62,11 +62,24 @@ export interface PerformanceData {
   };
 }
 
+export interface SetupStatus {
+  storeConnected: boolean;
+  productsAnalyzed: boolean;
+  productsCount: number;
+  widgetAdded: boolean;
+  recommendationsLive: boolean;
+  recommendationsReady: boolean;
+  qualityScore: number;
+  setupGuideVisited: boolean;
+  isSetupComplete: boolean;
+}
+
 export interface OverviewData {
   shop: ShopInfo;
   billingPlan: BillingPlan | null;
   overviewData: OverviewMetrics;
   performanceData: PerformanceData;
+  setupStatus: SetupStatus;
 }
 
 export interface OverviewError {

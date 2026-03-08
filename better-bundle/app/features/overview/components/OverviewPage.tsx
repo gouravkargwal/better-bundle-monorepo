@@ -7,6 +7,7 @@ import { ValueCommunicationBanner } from "./ValueCommunicationBanner";
 import { ROIValueProofSection } from "./ROIValueProofSection";
 import { BillingStatus } from "./BillingStatus";
 import { HelpSection } from "./HelpSection";
+import { SetupProgressCard } from "./SetupProgressCard";
 import type { OverviewData, OverviewError } from "../services/overview.types";
 
 interface OverviewPageProps {
@@ -45,7 +46,12 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                 currency={data.overviewData.currency}
               />
 
-              {/* Value Communication Banner */}
+              {/* Setup Progress — shows until user visits extension guide */}
+              {!data.setupStatus.isSetupComplete && (
+                <SetupProgressCard setupStatus={data.setupStatus} />
+              )}
+
+              {/* Trial / Value Banner */}
               <ValueCommunicationBanner
                 subscriptionStatus={
                   data.overviewData.activePlan?.status || "ACTIVE"
