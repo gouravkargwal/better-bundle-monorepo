@@ -487,9 +487,9 @@ export class OverviewService {
     shopId: string,
   ): Promise<{ ready: boolean; productssynced: number; usersTracked: number; qualityScore: number }> {
     try {
-      const backendUrl = process.env.BACKEND_URL;
+      const backendUrl = process.env.PYTHON_WORKER_API_URL;
       if (!backendUrl) {
-        logger.warn("BACKEND_URL not set, skipping Gorse readiness check");
+        logger.warn("PYTHON_WORKER_API_URL not set, skipping Gorse readiness check");
         return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
       }
 

@@ -7,7 +7,7 @@ embedded = true
 handle = "better-bundle-1"
 
 [build]
-automatically_update_urls_on_dev = true
+automatically_update_urls_on_dev = false
 
 [webhooks]
 api_version = "2024-07"
