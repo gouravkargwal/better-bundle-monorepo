@@ -31,6 +31,9 @@ jobs:
             set -e
             cd /home/ubuntu/better-bundle-monorepo
 
+            echo "=== Stashing local changes ==="
+            git stash
+
             echo "=== Pulling latest code ==="
             git pull origin master
 
