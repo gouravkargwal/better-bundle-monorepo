@@ -154,7 +154,7 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">3.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pay only 3% of attributed revenue - only when you make sales
+                  Pay only {(trialData.commissionRate * 100).toFixed(1)}% of attributed revenue - only when you make sales
                 </Text>
               </div>
             </BlockStack>

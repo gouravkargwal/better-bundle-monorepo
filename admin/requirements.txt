@@ -9,3 +9,10 @@ django-filter==24.3
 django-import-export==4.1.1
 requests==2.32.3
 whitenoise==6.8.2
+
+# OpenTelemetry — Traces and Logs
+opentelemetry-api==1.30.0
+opentelemetry-sdk==1.30.0
+opentelemetry-exporter-otlp-proto-http==1.30.0
+opentelemetry-instrumentation-django==0.51b0
+opentelemetry-instrumentation-logging==0.51b0

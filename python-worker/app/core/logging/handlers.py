@@ -135,71 +135,31 @@ class ConsoleHandler:
         return handler
 
 
-class PrometheusHandler:
-    """Prometheus metrics handler (placeholder for future implementation)"""
+class OpenObserveHandler:
+    """OpenObserve logging handler (Loki-compatible API, replaces Grafana/Loki)"""
 
     @staticmethod
-    def create_handler(port: int = 9090, metrics_path: str = "/metrics"):
-        """Create Prometheus handler"""
-        # This is a placeholder for future Prometheus integration
-        # For now, we'll return None to indicate it's not implemented
-        return None
-
-
-class GrafanaHandler:
-    """Grafana Loki logging handler for sending logs to Loki"""
-
-    @staticmethod
-    def create_handler(url: str, username: str, password: str):
-        """Create Grafana Loki handler"""
+    def create_handler(url: str, email: str = "", password: str = "", org_id: str = "default"):
+        """Create OpenObserve Loki-compatible handler"""
         try:
             import requests
             from .loki_handler import LokiHandler
 
-            # Parse the URL to get Loki endpoint
             if not url:
                 return None
 
-            # Ensure URL ends with /loki/api/v1/push
-            if not url.endswith("/loki/api/v1/push"):
-                if url.endswith("/"):
-                    url = url.rstrip("/")
-                url = f"{url}/loki/api/v1/push"
+            # Build full Loki-compatible push URL
+            # OpenObserve accepts Loki format at: /api/<org>/loki/api/v1/push
+            if url.endswith("/"):
+                url = url.rstrip("/")
 
-            return LokiHandler(url=url, username=username, password=password)
+            if not url.endswith("/loki/api/v1/push"):
+                url = f"{url}/api/{org_id}/loki/api/v1/push"
+
+            return LokiHandler(url=url, username=email, password=password)
         except ImportError:
-            print("Warning: requests library not available for Grafana Loki handler")
+            print("Warning: requests library not available for OpenObserve handler")
             return None
         except Exception as e:
-            print(f"Warning: Failed to create Grafana Loki handler: {e}")
+            print(f"Warning: Failed to create OpenObserve handler: {e}")
             return None
-
-
-class TelemetryHandler:
-    """Telemetry logging handler (placeholder for future implementation)"""
-
-    @staticmethod
-    def create_handler(endpoint: str, service_name: str):
-        """Create telemetry handler"""
-        # This is a placeholder for future telemetry integration
-        return None
-
-
-class GCPHandler:
-    """Google Cloud Platform logging handler (placeholder for future implementation)"""
-
-    @staticmethod
-    def create_handler(project_id: str, log_name: str):
-        """Create GCP handler"""
-        # This is a placeholder for future GCP integration
-        return None
-
-
-class AWSHandler:
-    """AWS CloudWatch logging handler (placeholder for future implementation)"""
-
-    @staticmethod
-    def create_handler(region: str, log_group: str, log_stream: str):
-        """Create AWS handler"""
-        # This is a placeholder for future AWS integration
-        return None

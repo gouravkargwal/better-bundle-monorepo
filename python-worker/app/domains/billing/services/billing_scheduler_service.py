@@ -8,12 +8,10 @@ parallel processing, and robust error handling for GitHub Actions cron jobs.
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 
 from app.shared.helpers import now_utc
-from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import select, and_, func
-from sqlalchemy.orm import selectinload
 
 from app.core.database.session import get_transaction_context
 from app.core.database.models import Shop, ShopSubscription, BillingCycle
@@ -189,93 +187,40 @@ class BillingSchedulerService:
         period: Optional[BillingPeriod] = None,
         dry_run: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Process billing for a specific shop.
-
-        Args:
-            shop_id: Shop ID to process
-            period: Billing period (defaults to previous month)
-            dry_run: If True, calculate but don't create invoices
-
-        Returns:
-            Shop billing result
-        """
+        """Process billing status for a specific shop."""
         try:
-            logger.info(f"Processing billing for shop {shop_id} - dry_run={dry_run}")
-
-            # Initialize if not already done
-            if not self.billing_service:
-                await self.initialize()
-
-            # Use previous month if no period specified
             if not period:
                 period = self._get_previous_month_period()
+            logger.info(
+                f"Processing billing for shop {shop_id} - "
+                f"period={period.start_date.date()}→{period.end_date.date()}, dry_run={dry_run}"
+            )
 
             async with get_transaction_context() as session:
-                # Get shop details
-                shop_query = select(Shop).where(Shop.id == shop_id)
-                shop_result = await session.execute(shop_query)
+                billing_repository = BillingRepositoryV2(session)
+
+                shop_result = await session.execute(select(Shop).where(Shop.id == shop_id))
                 shop = shop_result.scalar_one_or_none()
-
                 if not shop:
-                    return {
-                        "success": False,
-                        "shop_id": shop_id,
-                        "error": "Shop not found",
-                    }
-
-                # Check if shop is active
+                    return {"success": False, "shop_id": shop_id, "error": "Shop not found"}
                 if not shop.is_active:
-                    return {
-                        "success": False,
-                        "shop_id": shop_id,
-                        "error": "Shop is not active",
-                    }
+                    return {"success": False, "shop_id": shop_id, "error": "Shop is not active"}
 
-                # Get billing plan
-                billing_plan_query = select(BillingPlan).where(
-                    and_(BillingPlan.shop_id == shop_id, BillingPlan.status == "ACTIVE")
+                shop_subscription = await billing_repository.get_shop_subscription(shop_id)
+                if not shop_subscription:
+                    return {"success": False, "shop_id": shop_id, "error": "No active subscription found"}
+
+                current_cycle = await billing_repository.get_current_billing_cycle(
+                    shop_subscription.id
                 )
-                billing_plan_result = await session.execute(billing_plan_query)
-                billing_plan = billing_plan_result.scalar_one_or_none()
-
-                if not billing_plan:
-                    return {
-                        "success": False,
-                        "shop_id": shop_id,
-                        "error": "No active billing plan found",
-                    }
-
-                # Calculate billing
-                billing_service = BillingServiceV2(session)
-                billing_result = await billing_service.calculate_monthly_billing(
-                    shop_id, period
-                )
-
-                if not billing_result.get("success", False):
-                    return {
-                        "success": False,
-                        "shop_id": shop_id,
-                        "error": billing_result.get(
-                            "error", "Billing calculation failed"
-                        ),
-                    }
-
-                # Create invoice if not dry run
-                if not dry_run and billing_result.get("final_fee", 0) > 0:
-                    invoice = await self._create_billing_invoice(
-                        session, shop, billing_plan, billing_result, period
-                    )
-                    billing_result["invoice_id"] = invoice.id
 
                 return {
                     "success": True,
                     "shop_id": shop_id,
                     "shop_domain": shop.shop_domain,
-                    "attributed_revenue": billing_result.get("attributed_revenue", 0.0),
-                    "calculated_fee": billing_result.get("final_fee", 0.0),
-                    "currency": billing_result.get("currency", "USD"),
-                    "invoice_id": billing_result.get("invoice_id"),
+                    "subscription_status": shop_subscription.status.value,
+                    "usage_amount": float(current_cycle.usage_amount) if current_cycle else 0.0,
+                    "cap_amount": float(current_cycle.current_cap_amount) if current_cycle else 0.0,
                     "dry_run": dry_run,
                 }
 
@@ -286,19 +231,28 @@ class BillingSchedulerService:
     async def _get_shops_to_process(
         self, shop_ids: Optional[List[str]] = None
     ) -> List[Shop]:
-        """Get list of shops to process for billing"""
+        """Get shops with an active paid subscription."""
         async with get_transaction_context() as session:
             if shop_ids:
-                # Process specific shops
                 query = select(Shop).where(
                     and_(Shop.id.in_(shop_ids), Shop.is_active == True)
                 )
             else:
-                # Process all active shops with billing plans
+                # Only shops with an ACTIVE (paid) subscription
+                active_shop_ids_subq = (
+                    select(ShopSubscription.shop_id)
+                    .where(
+                        and_(
+                            ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                            ShopSubscription.is_active == True,
+                        )
+                    )
+                    .scalar_subquery()
+                )
                 query = select(Shop).where(
                     and_(
                         Shop.is_active == True,
-                        Shop.billing_plans.any(BillingPlan.status == "ACTIVE"),
+                        Shop.id.in_(active_shop_ids_subq),
                     )
                 )
 
@@ -462,38 +416,42 @@ class BillingSchedulerService:
         )
 
     async def get_billing_status(self) -> Dict[str, Any]:
-        """Get current billing status and statistics"""
+        """Get current billing status and statistics."""
         try:
             async with get_transaction_context() as session:
-                # Get active shops count
-                active_shops_query = select(func.count(Shop.id)).where(
-                    Shop.is_active == True
-                )
-                active_shops_result = await session.execute(active_shops_query)
-                active_shops_count = active_shops_result.scalar()
-
-                # Get shops with billing plans
-                shops_with_plans_query = select(func.count(Shop.id)).where(
-                    and_(
-                        Shop.is_active == True,
-                        Shop.billing_plans.any(BillingPlan.status == "ACTIVE"),
+                active_shops_count = (
+                    await session.execute(
+                        select(func.count(Shop.id)).where(Shop.is_active == True)
                     )
-                )
-                shops_with_plans_result = await session.execute(shops_with_plans_query)
-                shops_with_plans_count = shops_with_plans_result.scalar()
+                ).scalar()
 
-                # Get pending invoices
-                pending_invoices_query = select(func.count(BillingInvoice.id)).where(
-                    BillingInvoice.status == "PENDING"
-                )
-                pending_invoices_result = await session.execute(pending_invoices_query)
-                pending_invoices_count = pending_invoices_result.scalar()
+                shops_on_paid = (
+                    await session.execute(
+                        select(func.count(ShopSubscription.id)).where(
+                            and_(
+                                ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                                ShopSubscription.is_active == True,
+                            )
+                        )
+                    )
+                ).scalar()
+
+                shops_on_trial = (
+                    await session.execute(
+                        select(func.count(ShopSubscription.id)).where(
+                            and_(
+                                ShopSubscription.status == SubscriptionStatus.TRIAL,
+                                ShopSubscription.is_active == True,
+                            )
+                        )
+                    )
+                ).scalar()
 
                 return {
                     "status": "healthy",
                     "active_shops": active_shops_count,
-                    "shops_with_billing_plans": shops_with_plans_count,
-                    "pending_invoices": pending_invoices_count,
+                    "shops_on_paid_subscription": shops_on_paid,
+                    "shops_on_trial": shops_on_trial,
                     "last_updated": now_utc().isoformat(),
                 }
 
@@ -537,48 +495,22 @@ class BillingSchedulerService:
         billing_service: BillingServiceV2,
         billing_repository: BillingRepositoryV2,
     ) -> Dict[str, Any]:
-        """Handle billing for active subscription shops - TRANSACTION SAFE"""
+        """Report current billing cycle usage for an active subscription shop."""
         try:
-            # Process active subscription billing
-            logger.info(f"Processing active billing for shop {shop.id}")
-
-            # Get billing cycle for the period
             billing_cycle = await billing_repository.get_current_billing_cycle(
                 shop_subscription.id
             )
             if not billing_cycle:
-                return {
-                    "success": False,
-                    "shop_id": shop.id,
-                    "error": "No billing cycle found",
-                }
+                return {"success": False, "shop_id": shop.id, "error": "No active billing cycle found"}
 
-            # Calculate billing amount (simplified for now)
-            billing_amount = Decimal("0.00")  # This would be calculated based on usage
-
-            if not dry_run and billing_amount > 0:
-                # Create invoice and charge
-                invoice = await self._create_billing_invoice(
-                    billing_service.session,
-                    shop,
-                    shop_subscription,
-                    {"total_amount": billing_amount},
-                    period,
-                )
-
-                return {
-                    "success": True,
-                    "shop_id": shop.id,
-                    "billing_amount": float(billing_amount),
-                    "invoice_id": invoice.id if invoice else None,
-                }
-            else:
-                return {
-                    "success": True,
-                    "shop_id": shop.id,
-                    "billing_amount": 0.0,
-                    "message": "Dry run or no charges",
-                }
+            return {
+                "success": True,
+                "shop_id": shop.id,
+                "usage_amount": float(billing_cycle.usage_amount),
+                "cap_amount": float(billing_cycle.current_cap_amount),
+                "usage_percentage": billing_cycle.usage_percentage,
+                "dry_run": dry_run,
+            }
 
         except Exception as e:
             logger.error(f"Error handling active billing for shop {shop.id}: {e}")

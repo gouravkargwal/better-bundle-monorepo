@@ -1,6 +1,6 @@
 """
-Grafana Loki logging handler for BetterBundle Python Worker
-Sends structured logs directly to Loki
+OpenObserve-compatible logging handler (uses Loki-compatible API format)
+Sends structured logs directly to OpenObserve
 """
 
 import json

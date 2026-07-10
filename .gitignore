@@ -133,7 +133,23 @@ temp/
 ehthumbs.db
 Thumbs.db
 
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+static/admin/
+celerybeat-schedule
+celerybeat.pid
+.pytest_cache/
+
 # Local development
 .local/
 local/
 generated_data/
+# Added by code-review-graph
+.code-review-graph/
+# CocoIndex Code (ccc)
+/.cocoindex_code/

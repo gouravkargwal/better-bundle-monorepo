@@ -108,20 +108,7 @@ class CommissionRecord(Base, TimestampMixin):
         comment="Amount that couldn't be charged due to cap",
     )
 
-    # Billing cycle tracking
-    billing_cycle_start = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="Start of the 30-day billing cycle",
-    )
-
-    billing_cycle_end = Column(
-        DateTime(timezone=True),
-        nullable=True,
-        index=True,
-        comment="End of the 30-day billing cycle",
-    )
+    # billing_cycle_start / billing_cycle_end removed — derive from billing_cycle_id FK join.
 
     cycle_usage_before = Column(
         Numeric(10, 2),
@@ -143,13 +130,7 @@ class CommissionRecord(Base, TimestampMixin):
         comment="Maximum amount that can be charged in this cycle",
     )
 
-    # Trial-specific tracking
-    trial_accumulated = Column(
-        Numeric(10, 2),
-        nullable=False,
-        default=Decimal("0"),
-        comment="Accumulated trial revenue at time of this commission",
-    )
+    # trial_accumulated removed — use shop_subscriptions.trial_revenue instead.
 
     # Billing phase
     billing_phase = Column(
@@ -239,18 +220,15 @@ class CommissionRecord(Base, TimestampMixin):
 
     # Indexes for common queries
     __table_args__ = (
-        # Composite indexes
-        Index(
-            "idx_commission_shop_cycle",
-            "shop_id",
-            "billing_cycle_start",
-            "billing_cycle_end",
-        ),
         Index("idx_commission_shop_phase_status", "shop_id", "billing_phase", "status"),
         Index("idx_commission_status_created", "status", "created_at"),
         Index("idx_commission_shopify_record", "shopify_usage_record_id"),
-        # Index("idx_commission_invoice", "invoice_id", "status"),  # REMOVED
-        # Unique constraint - one commission per purchase attribution
+        Index("idx_commission_shop_cycle_id", "shop_id", "billing_cycle_id"),
+        # Unique constraint - one active commission per purchase attribution.
+        # Partial (excludes soft-deleted rows) — must be created via raw SQL:
+        #   CREATE UNIQUE INDEX uq_commission_purchase_attribution_active
+        #       ON commission_records(purchase_attribution_id) WHERE deleted_at IS NULL;
+        # SQLAlchemy fallback (full unique, works without raw SQL for dev):
         UniqueConstraint(
             "purchase_attribution_id", name="uq_commission_purchase_attribution"
         ),
@@ -313,18 +291,9 @@ class CommissionRecord(Base, TimestampMixin):
             "commission_earned": float(self.commission_earned),
             "commission_charged": float(self.commission_charged),
             "commission_overflow": float(self.commission_overflow),
-            "billing_cycle_start": (
-                self.billing_cycle_start.isoformat()
-                if self.billing_cycle_start
-                else None
-            ),
-            "billing_cycle_end": (
-                self.billing_cycle_end.isoformat() if self.billing_cycle_end else None
-            ),
             "cycle_usage_before": float(self.cycle_usage_before),
             "cycle_usage_after": float(self.cycle_usage_after),
             "capped_amount": float(self.capped_amount),
-            "trial_accumulated": float(self.trial_accumulated),
             "billing_phase": self.billing_phase.value,
             "status": self.status.value,
             "charge_type": self.charge_type.value,
@@ -334,8 +303,6 @@ class CommissionRecord(Base, TimestampMixin):
                 if self.shopify_recorded_at
                 else None
             ),
-            # "invoice_id": str(self.invoice_id) if self.invoice_id else None,  # REMOVED
-            # "invoiced_at": self.invoiced_at.isoformat() if self.invoiced_at else None,  # REMOVED
             "currency": self.currency,
             "notes": self.notes,
             "commission_metadata": self.commission_metadata,

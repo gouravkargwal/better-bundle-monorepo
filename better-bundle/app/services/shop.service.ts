@@ -79,7 +79,7 @@ const deactivateShopBilling = async (
     const updatedSubscriptions = await prisma.shop_subscriptions.updateMany({
       where: {
         shop_id: updatedShops.id,
-        status: { in: ["ACTIVE", "TRIAL", "PENDING_APPROVAL", "SUSPENDED"] as any },
+        status: { in: ["ACTIVE", "TRIAL", "SUSPENDED"] as any },
       },
       data: {
         status: "CANCELLED",

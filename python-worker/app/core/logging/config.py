@@ -38,13 +38,14 @@ class PrometheusHandlerConfig:
 
 
 @dataclass
-class GrafanaConfig:
-    """Grafana Loki configuration"""
+class OpenObserveConfig:
+    """OpenObserve configuration (replaces Grafana/Loki)"""
 
     enabled: bool = False
-    url: str = "http://loki:3100"  # Default Loki URL
-    username: str = ""
+    url: str = "http://openobserve:5080"
+    email: str = ""
     password: str = ""
+    org_id: str = "default"
 
 
 @dataclass
@@ -87,7 +88,7 @@ class LoggingConfig(BaseModel):
     prometheus: PrometheusHandlerConfig = PrometheusHandlerConfig()
 
     # External logging services
-    grafana: GrafanaConfig = GrafanaConfig()
+    openobserve: OpenObserveConfig = OpenObserveConfig()
     telemetry: TelemetryConfig = TelemetryConfig()
     gcp: GCPConfig = GCPConfig()
     aws: AWSConfig = AWSConfig()
@@ -118,11 +119,12 @@ class LoggingConfig(BaseModel):
                 "port": self.prometheus.port,
                 "metrics_path": self.prometheus.metrics_path,
             },
-            "grafana": {
-                "enabled": self.grafana.enabled,
-                "url": self.grafana.url,
-                "username": self.grafana.username,
-                "password": self.grafana.password,
+            "openobserve": {
+                "enabled": self.openobserve.enabled,
+                "url": self.openobserve.url,
+                "email": self.openobserve.email,
+                "password": self.openobserve.password,
+                "org_id": self.openobserve.org_id,
             },
             "telemetry": {
                 "enabled": self.telemetry.enabled,

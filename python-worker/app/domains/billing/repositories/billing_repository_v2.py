@@ -1,8 +1,14 @@
 """
-Billing Repository V2 for database operations
+Billing Repository V2
 
-Updated repository to work with the unified subscription model.
-Simplified to work with single table approach while keeping essential configuration.
+Single source of billing state. subscription_type has been removed —
+SubscriptionStatus alone drives all business logic:
+
+  TRIAL → ACTIVE → SUSPENDED / CANCELLED / EXPIRED
+
+PENDING_APPROVAL has been removed. Merchants stay in TRIAL until the
+APP_SUBSCRIPTIONS_UPDATE webhook confirms ACTIVE. The UI checks the
+confirmation_url field to determine if billing setup has been initiated.
 """
 
 import logging
@@ -11,7 +17,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
-from sqlalchemy import select, and_, or_, func, update
+from sqlalchemy import select, and_, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -25,7 +31,6 @@ from app.core.database.models import (
     CommissionRecord,
     SubscriptionStatus,
     BillingCycleStatus,
-    SubscriptionType,
 )
 from app.core.database.models.enums import BillingPhase
 
@@ -34,40 +39,34 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BillingPeriod:
-    """Billing period data"""
-
     start_date: datetime
     end_date: datetime
-    cycle: str  # 'monthly', 'quarterly', 'annually'
+    cycle: str  # 'monthly'
 
 
 class BillingRepositoryV2:
-    """
-    Repository for billing-related database operations.
-    Updated for the unified subscription model.
-    """
+    """Repository for billing-related database operations."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    # ============= SHOP OPERATIONS =============
+    # ============= SHOP =============
 
     async def get_shop(self, shop_id: str) -> Optional[Shop]:
-        """Get shop by ID"""
         try:
-            query = select(Shop).where(Shop.id == shop_id)
-            result = await self.session.execute(query)
+            result = await self.session.execute(
+                select(Shop).where(Shop.id == shop_id)
+            )
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting shop {shop_id}: {e}")
             return None
 
-    # ============= SUBSCRIPTION PLAN OPERATIONS =============
+    # ============= SUBSCRIPTION PLAN =============
 
     async def get_default_subscription_plan(self) -> Optional[SubscriptionPlan]:
-        """Get the default subscription plan"""
         try:
-            query = (
+            result = await self.session.execute(
                 select(SubscriptionPlan)
                 .where(
                     and_(
@@ -77,32 +76,38 @@ class BillingRepositoryV2:
                 )
                 .order_by(SubscriptionPlan.created_at.desc())
             )
-            result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting default subscription plan: {e}")
             return None
 
-    async def get_subscription_plan_by_id(
-        self, plan_id: str
-    ) -> Optional[SubscriptionPlan]:
-        """Get subscription plan by ID"""
+    async def get_subscription_plan_by_id(self, plan_id: str) -> Optional[SubscriptionPlan]:
         try:
-            query = select(SubscriptionPlan).where(SubscriptionPlan.id == plan_id)
-            result = await self.session.execute(query)
+            result = await self.session.execute(
+                select(SubscriptionPlan).where(SubscriptionPlan.id == plan_id)
+            )
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting subscription plan {plan_id}: {e}")
             return None
 
-    # ============= PRICING TIER OPERATIONS =============
+    # ============= PRICING TIER =============
+
+    async def get_pricing_tier(self, pricing_tier_id: str) -> Optional[PricingTier]:
+        try:
+            result = await self.session.execute(
+                select(PricingTier).where(PricingTier.id == pricing_tier_id)
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting pricing tier {pricing_tier_id}: {e}")
+            return None
 
     async def get_pricing_tier_for_plan_and_currency(
         self, plan_id: str, currency: str
     ) -> Optional[PricingTier]:
-        """Get pricing tier for a plan and currency"""
         try:
-            query = (
+            result = await self.session.execute(
                 select(PricingTier)
                 .where(
                     and_(
@@ -113,67 +118,63 @@ class BillingRepositoryV2:
                 )
                 .order_by(PricingTier.is_default.desc(), PricingTier.created_at.desc())
             )
-            result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
-            logger.error(
-                f"Error getting pricing tier for plan {plan_id} and currency {currency}: {e}"
-            )
+            logger.error(f"Error getting pricing tier for plan {plan_id}, currency {currency}: {e}")
             return None
 
     async def get_pricing_tier_for_country(
         self, country_code: str, plan_id: str
     ) -> Optional[PricingTier]:
-        """Get appropriate pricing tier based on country code"""
-        # Map country codes to currencies
         currency_map = {
-            "US": "USD",
-            "CA": "CAD",
-            "GB": "GBP",
-            "DE": "EUR",
-            "FR": "EUR",
-            "IN": "INR",
-            "JP": "JPY",
-            "AU": "AUD",
-            "BR": "BRL",
-            "MX": "MXN",
-            "KR": "KRW",
-            "CN": "CNY",
-            "CH": "CHF",
-            "SE": "SEK",
-            "NO": "NOK",
-            "DK": "DKK",
-            "PL": "PLN",
-            "CZ": "CZK",
-            "HU": "HUF",
-            "ZA": "ZAR",
-            "TR": "TRY",
-            "VN": "VND",
-            "ID": "IDR",
-            "PH": "PHP",
-            "TH": "THB",
-            "MY": "MYR",
-            "SG": "SGD",
-            "BD": "BDT",
-            "PK": "PKR",
-            "LK": "LKR",
+            "US": "USD", "CA": "CAD", "GB": "GBP", "DE": "EUR", "FR": "EUR",
+            "IN": "INR", "JP": "JPY", "AU": "AUD", "BR": "BRL", "MX": "MXN",
+            "KR": "KRW", "CN": "CNY", "CH": "CHF", "SE": "SEK", "NO": "NOK",
+            "DK": "DKK", "PL": "PLN", "CZ": "CZK", "HU": "HUF", "ZA": "ZAR",
+            "TR": "TRY", "VN": "VND", "ID": "IDR", "PH": "PHP", "TH": "THB",
+            "MY": "MYR", "SG": "SGD", "BD": "BDT", "PK": "PKR", "LK": "LKR",
             "NP": "NPR",
         }
-
-        currency = currency_map.get(country_code, "USD")  # Default to USD
+        currency = currency_map.get(country_code, "USD")
         return await self.get_pricing_tier_for_plan_and_currency(plan_id, currency)
 
-    async def get_pricing_tier(self, pricing_tier_id: str) -> Optional[PricingTier]:
-        """Get pricing tier by ID"""
+    # ============= SHOP SUBSCRIPTION =============
+
+    async def get_shop_subscription(self, shop_id: str) -> Optional[ShopSubscription]:
+        """Get the active subscription for a shop (any non-CANCELLED status)."""
         try:
-            query = select(PricingTier).where(PricingTier.id == pricing_tier_id)
-            result = await self.session.execute(query)
+            result = await self.session.execute(
+                select(ShopSubscription)
+                .options(
+                    selectinload(ShopSubscription.pricing_tier),
+                    joinedload(ShopSubscription.shop),
+                )
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.is_active == True,
+                    )
+                )
+            )
             return result.scalar_one_or_none()
         except Exception as e:
-            logger.error(f"Error getting pricing tier {pricing_tier_id}: {e}")
+            logger.error(f"Error getting shop subscription for shop {shop_id}: {e}")
             return None
 
-    # ============= UNIFIED SHOP SUBSCRIPTION OPERATIONS =============
+    async def get_shop_subscription_by_id(self, subscription_id: str) -> Optional[ShopSubscription]:
+        try:
+            result = await self.session.execute(
+                select(ShopSubscription)
+                .where(ShopSubscription.id == subscription_id)
+                .options(
+                    selectinload(ShopSubscription.subscription_plan),
+                    selectinload(ShopSubscription.pricing_tier),
+                )
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting subscription {subscription_id}: {e}")
+            return None
 
     async def create_trial_subscription(
         self,
@@ -182,260 +183,162 @@ class BillingRepositoryV2:
         pricing_tier_id: str,
         trial_threshold_override: Optional[Decimal] = None,
     ) -> Optional[ShopSubscription]:
-        """Create a new trial subscription"""
+        """Create a new trial subscription. status=TRIAL is all that's needed."""
         try:
             subscription = ShopSubscription(
                 shop_id=shop_id,
-                subscription_type=SubscriptionType.TRIAL,
-                status=SubscriptionStatus.ACTIVE,
+                status=SubscriptionStatus.TRIAL,
                 subscription_plan_id=subscription_plan_id,
                 pricing_tier_id=pricing_tier_id,
                 trial_threshold_override=trial_threshold_override,
+                trial_revenue=Decimal("0.00"),
                 started_at=now_utc(),
                 is_active=True,
             )
-
             self.session.add(subscription)
             await self.session.flush()
-
-            logger.info(
-                f"Created trial subscription {subscription.id} for shop {shop_id}"
-            )
+            logger.info(f"Created trial subscription {subscription.id} for shop {shop_id}")
             return subscription
-
         except Exception as e:
             logger.error(f"Error creating trial subscription: {e}")
-            await self.session.rollback()
-            return None
-
-    async def create_paid_subscription(
-        self,
-        shop_id: str,
-        subscription_plan_id: str,
-        pricing_tier_id: str,
-        user_chosen_cap_amount: Decimal,
-        shopify_subscription_id: str,
-        shopify_line_item_id: Optional[str] = None,
-        confirmation_url: Optional[str] = None,
-    ) -> Optional[ShopSubscription]:
-        """Create a new paid subscription and complete trial atomically"""
-        try:
-            # 1. Complete the trial subscription
-            await self.session.execute(
-                update(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.is_active == True,
-                    )
-                )
-                .values(
-                    status=SubscriptionStatus.COMPLETED,
-                    completed_at=now_utc(),
-                    is_active=False,  # Deactivate trial
-                    updated_at=now_utc(),
-                )
-            )
-
-            # 2. Create paid subscription
-            paid_subscription = ShopSubscription(
-                shop_id=shop_id,
-                subscription_type=SubscriptionType.PAID,
-                status=SubscriptionStatus.ACTIVE,
-                subscription_plan_id=subscription_plan_id,
-                pricing_tier_id=pricing_tier_id,
-                user_chosen_cap_amount=user_chosen_cap_amount,
-                shopify_subscription_id=shopify_subscription_id,
-                shopify_line_item_id=shopify_line_item_id,
-                confirmation_url=confirmation_url,
-                started_at=now_utc(),
-                is_active=True,
-            )
-
-            self.session.add(paid_subscription)
-            await self.session.flush()
-
-            logger.info(
-                f"Created paid subscription {paid_subscription.id} for shop {shop_id}"
-            )
-            return paid_subscription
-
-        except Exception as e:
-            logger.error(f"Error creating paid subscription: {e}")
-            await self.session.rollback()
-            return None
-
-    async def get_shop_subscription(self, shop_id: str) -> ShopSubscription:
-        """Get shop subscription with all required relationships loaded."""
-        try:
-            query = (
-                select(ShopSubscription)
-                .options(
-                    # Load whatever relationships effective_commission_rate needs
-                    selectinload(ShopSubscription.pricing_tier),
-                    joinedload(ShopSubscription.shop),  # if needed
-                )
-                .where(ShopSubscription.shop_id == shop_id)
-                .where(ShopSubscription.is_active == True)
-            )
-            result = await self.session.execute(query)
-            return result.scalar_one()
-        except Exception as e:
-            logger.error(f"Error getting shop subscription for shop {shop_id}: {e}")
-            return None
-
-    async def get_shop_subscription_by_id(
-        self, subscription_id: str
-    ) -> Optional[ShopSubscription]:
-        """Get shop subscription by ID"""
-        query = (
-            select(ShopSubscription)
-            .where(ShopSubscription.id == subscription_id)
-            .options(
-                selectinload(ShopSubscription.subscription_plan),
-                selectinload(ShopSubscription.pricing_tier),
-            )
-        )
-        result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+            raise  # Let the caller's transaction handle rollback
 
     async def update_shop_subscription_status(
         self, subscription_id: str, status: SubscriptionStatus
     ) -> bool:
-        """Update shop subscription status"""
-        query = (
+        result = await self.session.execute(
             update(ShopSubscription)
             .where(ShopSubscription.id == subscription_id)
             .values(status=status, updated_at=now_utc())
         )
-        result = await self.session.execute(query)
         return result.rowcount > 0
 
     async def complete_trial_subscription(
-        self, shop_id: str, actual_revenue: Decimal
+        self, shop_id: str, additional_revenue: Decimal
     ) -> bool:
-        """Complete trial subscription atomically"""
-        try:
-            # Get current trial subscription
-            trial_subscription = await self.session.execute(
-                select(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.status
-                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Check for TRIAL status, not ACTIVE
-                        ShopSubscription.is_active == True,
-                    )
-                )
-                .options(selectinload(ShopSubscription.pricing_tier))
-            )
-            subscription = trial_subscription.scalar_one_or_none()
+        """
+        Atomically add revenue to trial_revenue. When threshold is reached,
+        the merchant stays in TRIAL status — the UI checks trial_revenue vs
+        threshold to prompt billing setup.
 
-            if not subscription:
-                logger.debug(f"No active trial found for shop {shop_id}")
-                return False
-
-            # Check if threshold reached
-            threshold = subscription.effective_trial_threshold
-            if actual_revenue < threshold:
-                logger.debug(
-                    f"Trial threshold not reached: {actual_revenue} < {threshold}"
-                )
-                return False
-
-            # ✅ ATOMIC: Update trial subscription
-            update_result = await self.session.execute(
-                update(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.id == subscription.id,
-                        ShopSubscription.status
-                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Only update if still in TRIAL status
-                    )
-                )
-                .values(
-                    status=SubscriptionStatus.TRIAL_COMPLETED,  # ✅ FIX: Set to TRIAL_COMPLETED, not COMPLETED
-                    completed_at=now_utc(),
-                    updated_at=now_utc(),
-                )
-            )
-
-            # Check if update happened (race condition protection)
-            if update_result.rowcount == 0:
-                logger.debug(
-                    f"Trial {subscription.id} was already completed by another process"
-                )
-                return True
-
-            # ✅ Do NOT deactivate or suspend the shop on trial completion
-            logger.info(
-                f"✅ Trial completed for shop {shop_id}. "
-                f"Revenue: {actual_revenue} >= {threshold} {subscription.currency}. "
-                f"Awaiting user billing setup."
-            )
-
-            await self.session.flush()
-            return True
-
-        except Exception as e:
-            logger.error(f"Error completing trial subscription: {e}")
-            return False
-
-    # ============= TRIAL OPERATIONS (SIMPLIFIED) =============
-
-    async def check_trial_completion(
-        self, shop_id: str, actual_revenue: Decimal
-    ) -> bool:
-        """Check if trial should be completed based on actual revenue - IDEMPOTENT"""
+        Returns True if the trial threshold was crossed, False otherwise.
+        """
         try:
             subscription = await self.get_shop_subscription(shop_id)
             if not subscription:
                 return False
 
-            # ✅ GUARD: Only check for trial subscriptions
-            if not subscription.subscription_type == SubscriptionType.TRIAL:
-                logger.debug(
-                    f"Subscription {subscription.id} is not a trial, skipping completion check"
+            if subscription.status != SubscriptionStatus.TRIAL:
+                logger.debug(f"Subscription {subscription.id} is not in TRIAL status, skipping")
+                return False
+
+            # Atomically increment trial_revenue
+            new_revenue = subscription.trial_revenue + additional_revenue
+            threshold = subscription.effective_trial_threshold
+
+            if new_revenue < threshold:
+                # Update revenue but don't complete trial yet
+                await self.session.execute(
+                    update(ShopSubscription)
+                    .where(ShopSubscription.id == subscription.id)
+                    .values(
+                        trial_revenue=new_revenue,
+                        updated_at=now_utc(),
+                    )
                 )
+                await self.session.flush()
+                return False
+
+            # Threshold reached — update revenue and completed_at, stay in TRIAL.
+            # PENDING_APPROVAL no longer exists. The merchant stays in TRIAL
+            # until they set up billing and Shopify confirms with ACTIVE.
+            result = await self.session.execute(
+                update(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.id == subscription.id,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,
+                    )
+                )
+                .values(
+                    trial_revenue=new_revenue,
+                    completed_at=now_utc(),
+                    updated_at=now_utc(),
+                )
+            )
+
+            if result.rowcount == 0:
+                logger.debug(f"Trial {subscription.id} was already completed by another process")
                 return True
 
-            # ✅ GUARD: Check if already completed
-            if (
-                subscription.status != SubscriptionStatus.TRIAL
-            ):  # ✅ FIX: Check for TRIAL status, not ACTIVE
-                logger.debug(
-                    f"Trial {subscription.id} already completed (status: {subscription.status})"
-                )
-                return True
+            logger.info(
+                f"✅ Trial threshold reached for shop {shop_id}. "
+                f"Revenue: {new_revenue} >= {threshold}. Awaiting billing setup."
+            )
+            await self.session.flush()
+            return True
 
-            # Check and complete if threshold reached
-            return await self.complete_trial_subscription(shop_id, actual_revenue)
+        except Exception as e:
+            logger.error(f"Error completing trial subscription: {e}")
+            raise
 
+    async def check_trial_completion(self, shop_id: str, additional_revenue: Decimal) -> bool:
+        """Check and complete trial if threshold is reached. Idempotent."""
+        try:
+            subscription = await self.get_shop_subscription(shop_id)
+            if not subscription or subscription.status != SubscriptionStatus.TRIAL:
+                return False
+            return await self.complete_trial_subscription(shop_id, additional_revenue)
         except Exception as e:
             logger.error(f"Error checking trial completion: {e}")
             return False
 
-    # ============= BILLING CYCLE OPERATIONS =============
-    # (Keep existing billing cycle methods unchanged)
-
-    async def get_billing_cycle_by_id(self, cycle_id: str) -> Optional[BillingCycle]:
-        """Get billing cycle by ID"""
+    async def create_paid_subscription(
+        self,
+        shop_id: str,
+        shopify_subscription_id: str,
+        shopify_line_item_id: Optional[str] = None,
+        confirmation_url: Optional[str] = None,
+    ) -> Optional[ShopSubscription]:
+        """
+        Activate a subscription from TRIAL to ACTIVE.
+        The subscription must be in TRIAL status with a confirmation_url set
+        (meaning billing setup was initiated).
+        """
         try:
-            query = select(BillingCycle).where(BillingCycle.id == cycle_id)
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
+            result = await self.session.execute(
+                update(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,
+                        ShopSubscription.is_active == True,
+                    )
+                )
+                .values(
+                    status=SubscriptionStatus.ACTIVE,
+                    shopify_subscription_id=shopify_subscription_id,
+                    shopify_line_item_id=shopify_line_item_id,
+                    confirmation_url=confirmation_url,
+                    updated_at=now_utc(),
+                )
+                .returning(ShopSubscription)
+            )
+            subscription = result.scalar_one_or_none()
+            if subscription:
+                await self.session.flush()
+                logger.info(f"Activated subscription for shop {shop_id}")
+            return subscription
         except Exception as e:
-            logger.error(f"Error getting billing cycle by ID {cycle_id}: {e}")
-            return None
+            logger.error(f"Error activating subscription: {e}")
+            raise
 
-    async def get_current_billing_cycle(
-        self, shop_subscription_id: str
-    ) -> Optional[BillingCycle]:
-        """Get current active billing cycle for a subscription"""
+    # ============= BILLING CYCLE =============
+
+    async def get_current_billing_cycle(self, shop_subscription_id: str) -> Optional[BillingCycle]:
+        """Get the single active billing cycle for a subscription."""
         try:
-            query = (
+            result = await self.session.execute(
                 select(BillingCycle)
                 .where(
                     and_(
@@ -443,12 +346,20 @@ class BillingRepositoryV2:
                         BillingCycle.status == BillingCycleStatus.ACTIVE,
                     )
                 )
-                .order_by(BillingCycle.cycle_number.desc())
             )
-            result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error getting current billing cycle: {e}")
+            return None
+
+    async def get_billing_cycle_by_id(self, cycle_id: str) -> Optional[BillingCycle]:
+        try:
+            result = await self.session.execute(
+                select(BillingCycle).where(BillingCycle.id == cycle_id)
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting billing cycle {cycle_id}: {e}")
             return None
 
     async def update_billing_cycle_usage(
@@ -457,10 +368,9 @@ class BillingRepositoryV2:
         additional_usage: Decimal,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Update billing cycle usage amount - ATOMIC"""
+        """Atomically increment billing cycle usage (no race conditions)."""
         try:
-            # ✅ ATOMIC: Use database-level increment to prevent race conditions
-            cycle_update = (
+            result = await self.session.execute(
                 update(BillingCycle)
                 .where(BillingCycle.id == cycle_id)
                 .values(
@@ -469,122 +379,129 @@ class BillingRepositoryV2:
                     updated_at=now_utc(),
                 )
             )
-
-            result = await self.session.execute(cycle_update)
-
             if result.rowcount == 0:
                 logger.error(f"Billing cycle {cycle_id} not found for usage update")
                 return False
-
             await self.session.flush()
             return True
         except Exception as e:
             logger.error(f"Error updating billing cycle usage: {e}")
             return False
 
-    # ============= COMMISSION OPERATIONS =============
-    # (Keep existing commission methods unchanged)
+    # ============= COMMISSION =============
 
     async def get_commissions_for_cycle(
         self, billing_cycle_id: str, limit: int = 100
     ) -> List[CommissionRecord]:
-        """Get commission records for a billing cycle"""
         try:
-            query = (
+            result = await self.session.execute(
                 select(CommissionRecord)
                 .where(CommissionRecord.billing_cycle_id == billing_cycle_id)
                 .order_by(CommissionRecord.created_at.desc())
                 .limit(limit)
             )
-            result = await self.session.execute(query)
             return list(result.scalars().all())
         except Exception as e:
             logger.error(f"Error getting commissions for cycle: {e}")
             return []
 
     async def calculate_trial_revenue(self, shop_id: str) -> Decimal:
-        """Calculate total trial revenue from commission records"""
+        """
+        Get trial revenue from shop_subscriptions.trial_revenue (single source of truth).
+        Falls back to summing commission_records if needed.
+        """
         try:
-            # ✅ IMPORTANT: Only count revenue from TRIAL phase commissions
-            # This prevents double-counting during recalculation
-            query = select(
-                func.coalesce(func.sum(CommissionRecord.attributed_revenue), 0)
-            ).where(
-                and_(
-                    CommissionRecord.shop_id == shop_id,
-                    CommissionRecord.billing_phase == BillingPhase.TRIAL,
+            subscription = await self.get_shop_subscription(shop_id)
+            if subscription and subscription.trial_revenue is not None:
+                return subscription.trial_revenue
+
+            # Fallback: sum from commission_records
+            result = await self.session.execute(
+                select(func.coalesce(func.sum(CommissionRecord.attributed_revenue), 0))
+                .where(
+                    and_(
+                        CommissionRecord.shop_id == shop_id,
+                        CommissionRecord.billing_phase == BillingPhase.TRIAL,
+                        CommissionRecord.deleted_at == None,
+                    )
                 )
             )
-
-            result = await self.session.execute(query)
             return Decimal(str(result.scalar_one()))
-
         except Exception as e:
             logger.error(f"Error calculating trial revenue: {e}")
             return Decimal("0")
 
-    # ============= BILLING PERIODS & OVERFLOW (Keep unchanged) =============
-
     async def get_shops_for_billing(self) -> List[str]:
-        """Get list of shop IDs that need billing processing"""
+        """Get shop IDs with an active paid subscription."""
         try:
-            query = select(ShopSubscription.shop_id).where(
-                and_(
-                    ShopSubscription.is_active == True,
-                    ShopSubscription.status.in_(
-                        [
-                            SubscriptionStatus.ACTIVE,
-                        ]
-                    ),
+            result = await self.session.execute(
+                select(ShopSubscription.shop_id).where(
+                    and_(
+                        ShopSubscription.is_active == True,
+                        ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                    )
                 )
             )
-            result = await self.session.execute(query)
             shop_ids = [row[0] for row in result.fetchall()]
-
             logger.info(f"Found {len(shop_ids)} shops for billing processing")
             return shop_ids
-
         except Exception as e:
             logger.error(f"Error getting shops for billing: {e}")
             return []
 
     async def get_subscription_trial(self, shop_id: str) -> Optional[ShopSubscription]:
-        """
-        Return the currently active TRIAL subscription for a shop.
-        """
+        """Return the active TRIAL subscription for a shop."""
         try:
-            query = (
+            result = await self.session.execute(
                 select(ShopSubscription)
                 .where(
                     and_(
                         ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.is_active.is_(True),
-                        ShopSubscription.status == SubscriptionStatus.ACTIVE,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,
+                        ShopSubscription.is_active == True,
                     )
                 )
                 .limit(1)
             )
-            result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Error fetching active trial for shop {shop_id}: {e}")
             return None
 
-    async def get_subscription_trial_by_id(
-        self, subscription_id: str
-    ) -> Optional[ShopSubscription]:
-        """
-        Return the TRIAL subscription by its subscription primary ID.
-        """
+    async def get_subscription_trial_by_id(self, subscription_id: str) -> Optional[ShopSubscription]:
+        """Return a subscription by its primary ID."""
         try:
-            query = (
+            result = await self.session.execute(
                 select(ShopSubscription)
                 .where(ShopSubscription.id == subscription_id)
                 .limit(1)
             )
-            result = await self.session.execute(query)
             return result.scalar_one_or_none()
         except Exception as e:
-            logger.error(f"Error fetching trial by id {subscription_id}: {e}")
+            logger.error(f"Error fetching subscription {subscription_id}: {e}")
             return None
+
+    async def create_shopify_subscription(
+        self,
+        shop_subscription_id: str,
+        shopify_subscription_id: str,
+        shopify_line_item_id: Optional[str] = None,
+        confirmation_url: Optional[str] = None,
+    ) -> bool:
+        """Store Shopify subscription info on an existing subscription record."""
+        try:
+            result = await self.session.execute(
+                update(ShopSubscription)
+                .where(ShopSubscription.id == shop_subscription_id)
+                .values(
+                    shopify_subscription_id=shopify_subscription_id,
+                    shopify_line_item_id=shopify_line_item_id,
+                    confirmation_url=confirmation_url,
+                    updated_at=now_utc(),
+                )
+            )
+            await self.session.flush()
+            return result.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error storing Shopify subscription: {e}")
+            return False

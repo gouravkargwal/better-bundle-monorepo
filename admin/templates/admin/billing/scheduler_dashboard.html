@@ -1,0 +1,229 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .scheduler-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-bottom: 32px; }
+  .scheduler-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .scheduler-card h3 { margin: 0 0 8px 0; font-size: 16px; color: #1a1a1a; }
+  .scheduler-card .meta { font-size: 12px; color: #666; margin-bottom: 12px; }
+  .scheduler-card .description { font-size: 13px; color: #444; line-height: 1.5; margin-bottom: 16px; }
+  .status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .status-success { background: #e8f5e9; color: #2e7d32; }
+  .status-failed { background: #ffebee; color: #c62828; }
+  .status-running { background: #e3f2fd; color: #1565c0; }
+  .status-skipped { background: #f5f5f5; color: #616161; }
+  .status-never { background: #fafafa; color: #9e9e9e; }
+  .stats-row { display: flex; gap: 16px; margin-bottom: 16px; }
+  .stat-item { text-align: center; flex: 1; padding: 8px; background: #f8f9fa; border-radius: 6px; }
+  .stat-item .value { font-size: 20px; font-weight: 700; color: #1a1a1a; }
+  .stat-item .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .btn-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; transition: all 0.15s ease; }
+  .btn-trigger:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+  .btn-primary { background: #1976d2; color: #fff; }
+  .btn-primary:hover { background: #1565c0; }
+  .activity-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .activity-table th { text-align: left; padding: 10px 12px; background: #f5f5f5; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #444; }
+  .activity-table td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }
+  .activity-table tr:hover td { background: #fafafa; }
+  .section-title { font-size: 18px; font-weight: 600; color: #1a1a1a; margin: 28px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #1976d2; display: inline-block; }
+  .connection-status { display: inline-block; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 600; margin-bottom: 20px; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='billing' %}">Billing</a>
+  &rsaquo; Scheduler Dashboard
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <h1>&#9200; Scheduler Dashboard</h1>
+
+  {% if not job_stats %}
+    <div class="connection-status" style="background:#ffebee;color:#c62828;">
+      &#9888; Cannot reach Python worker API at localhost:8001. Is it running?
+    </div>
+    <p style="color:#666;font-size:13px;">
+      The scheduler dashboard reads job execution history from the Python worker API.
+      Make sure the worker is running and the <code>PYTHON_WORKER_URL</code> setting is correct.
+    </p>
+  {% else %}
+    <div class="connection-status" style="background:#e8f5e9;color:#2e7d32;">
+      &#9679; Connected to Python worker &mdash; {{ recent_executions|length }} recent executions loaded
+    </div>
+  {% endif %}
+
+  <!-- SCHEDULED JOBS -->
+  <h2 class="section-title">&#9881; Scheduled Jobs</h2>
+  <div class="scheduler-grid">
+    {% for job_name, stats in job_stats.items %}
+    <div class="scheduler-card">
+      <h3>{{ stats.definition.label }}</h3>
+      <div class="meta">
+        <strong>Group:</strong> {{ stats.definition.group|title }}
+        &middot;
+        <strong>Interval:</strong> {{ stats.definition.interval_display }}
+      </div>
+      <div class="description">{{ stats.definition.description }}</div>
+
+      <div class="stats-row">
+        <div class="stat-item">
+          <div class="value">{{ stats.total_runs }}</div>
+          <div class="label">Total Runs</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" style="color:{% if stats.recent_success %}#2e7d32{% else %}#c62828{% endif %}">
+            {% if stats.last_run %}{{ stats.last_run.status }}{% else %}&mdash;{% endif %}
+          </div>
+          <div class="label">Last Status</div>
+        </div>
+        <div class="stat-item">
+          <div class="value">{{ stats.success_count }}</div>
+          <div class="label">Succeeded</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" style="color:{% if stats.failure_count > 0 %}#c62828{% else %}#2e7d32{% endif %}">
+            {{ stats.failure_count }}
+          </div>
+          <div class="label">Failed</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;font-size:12px;color:#666;">
+        <strong>Last run:</strong>
+        {% if stats.last_run %}
+          {{ stats.last_run_display }}
+          {% if stats.last_run.items_processed %}
+            &middot; {{ stats.last_run.items_processed }} items processed
+          {% endif %}
+          {% if stats.last_run.result_summary %}
+            <br><span style="color:#444;">{{ stats.last_run.result_summary }}</span>
+          {% endif %}
+        {% else %}
+          <span style="color:#9e9e9e;">Never run</span>
+        {% endif %}
+      </div>
+
+      {% if stats.last_run and stats.last_run.error_message %}
+      <div style="margin-bottom:12px;padding:8px 12px;background:#ffebee;border-radius:4px;font-size:12px;color:#c62828;">
+        <strong>Last error:</strong> {{ stats.last_run.error_message }}
+      </div>
+      {% endif %}
+
+      <div>
+        <a href="{% url 'admin:billing_scheduler_trigger' job_name=job_name %}"
+           class="btn-trigger btn-primary"
+           onclick="return confirm('Trigger &quot;{{ stats.definition.label }}&quot; now?');">
+          &#9654; Run Now
+        </a>
+        {% if stats.definition.params_required %}
+        <span style="font-size:11px;color:#888;margin-left:8px;">
+          (requires shop_id via URL: ?shop_id=...)
+        </span>
+        {% endif %}
+        {% if stats.definition.auto_runs %}
+        <span class="status-badge status-success" style="margin-left:8px;">auto</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- RECENT ACTIVITY -->
+  <h2 class="section-title">&#128197; Recent Activity</h2>
+  <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+    <table class="activity-table">
+      <thead>
+        <tr>
+          <th>Job</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Duration</th>
+          <th>Trigger</th>
+          <th>Items</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for exec in recent_executions %}
+        <tr>
+          <td><strong>{{ exec.job_name }}</strong></td>
+          <td>
+            <span class="status-badge
+              {% if exec.status == 'SUCCESS' %}status-success{% elif exec.status == 'FAILED' %}status-failed{% elif exec.status == 'RUNNING' %}status-running{% elif exec.status == 'SKIPPED' %}status-skipped{% else %}status-never{% endif %}">
+              {{ exec.status }}
+            </span>
+          </td>
+          <td>{{ exec.started_at|slice:":19" }}</td>
+          <td>
+            {% if exec.duration_ms %}
+              {% if exec.duration_ms < 60000 %}
+                {{ exec.duration_ms }}ms
+              {% else %}
+                {{ exec.duration_ms|stringformat:".0f" }}ms
+              {% endif %}
+            {% else %}&mdash;{% endif %}
+          </td>
+          <td><span style="font-size:11px;color:#888;">{% firstof exec.triggered_by "&mdash;" %}</span></td>
+          <td>{% firstof exec.items_processed "&mdash;" %}</td>
+          <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#555;">
+            {% firstof exec.result_summary exec.error_message "&mdash;" %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7" style="text-align:center;padding:32px;color:#888;">
+            No job executions yet. Jobs will appear here after they run for the first time.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- EXPLANATION -->
+  <h2 class="section-title">&#8505; Architecture</h2>
+  <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:20px;font-size:13px;line-height:1.6;color:#444;">
+    <table style="width:100%;">
+      <tr>
+        <td style="width:33%;vertical-align:top;padding:8px;">
+          <strong style="color:#1a1a1a;">&#9654; Background Jobs (auto)</strong><br>
+          <span style="font-size:12px;">
+            Run continuously inside the Python worker process. The <strong>Reconcile Stuck Commissions</strong>
+            job runs every 5 minutes via an asyncio background task with a Redis distributed lock.
+            No external cron needed.
+          </span>
+        </td>
+        <td style="width:33%;vertical-align:top;padding:8px;">
+          <strong style="color:#1a1a1a;">&#9654; Cron-Triggered Jobs</strong><br>
+          <span style="font-size:12px;">
+            <strong>Process Monthly Billing</strong> is designed to be triggered by an external cron
+            (GitHub Actions, cron container, AWS EventBridge). It hits the
+            <code>/api/billing/process</code> endpoint with the <code>X-Cron-Secret</code> header.
+          </span>
+        </td>
+        <td style="width:33%;vertical-align:top;padding:8px;">
+          <strong style="color:#1a1a1a;">&#9654; Manual Triggers</strong><br>
+          <span style="font-size:12px;">
+            Click "Run Now" on any job above. The Django admin calls the Python worker API
+            which executes the job immediately and logs the result to the
+            <code>scheduler_job_executions</code> table. View full history in the
+            <a href="{% url 'admin:billing_schedulerjobexecution_changelist' %}">Job Executions</a> list.
+          </span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <br>
+  <div style="text-align:right;font-size:11px;color:#888;">
+    Data fetched from Python worker API &middot;
+    <a href="{% url 'admin:billing_schedulerjobexecution_changelist' %}">View All Executions &rarr;</a>
+  </div>
+</div>
+{% endblock %}

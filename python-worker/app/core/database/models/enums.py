@@ -100,6 +100,7 @@ class CommissionStatus(str, Enum):
 
     # Paid phase statuses
     PENDING = "pending"  # Ready to be sent to Shopify
+    RECORDING = "recording"  # In-flight to Shopify (two-phase commit protection)
     RECORDED = "recorded"  # Successfully sent to Shopify
     INVOICED = "invoiced"  # Included in monthly invoice
 
@@ -131,24 +132,21 @@ class SubscriptionPlanType(str, Enum):
     HYBRID = "hybrid"
 
 
-class SubscriptionType(Enum):
-    """Type of subscription"""
+class SubscriptionStatus(str, Enum):
+    """Status of subscription — single axis, no subscription_type needed.
 
-    TRIAL = "TRIAL"
-    PAID = "PAID"
+    Flow: TRIAL → ACTIVE → SUSPENDED / CANCELLED / EXPIRED
 
+    PENDING_APPROVAL has been removed — the merchant stays in TRIAL until the
+    APP_SUBSCRIPTIONS_UPDATE webhook confirms ACTIVE. The UI checks the
+    confirmation_url field to determine if billing setup has been initiated.
+    """
 
-class SubscriptionStatus(Enum):
-    """Status of subscription"""
-
-    ACTIVE = "ACTIVE"  # Currently active
-    COMPLETED = "COMPLETED"  # Successfully completed
-    CANCELLED = "CANCELLED"  # Cancelled by user/system
-    SUSPENDED = "SUSPENDED"  # Temporarily suspended
-    EXPIRED = "EXPIRED"  # Naturally expired
-    TRIAL = "TRIAL"  # Trial in progress
-    TRIAL_COMPLETED = "TRIAL_COMPLETED"  # Trial completed, awaiting billing setup
-    PENDING_APPROVAL = "PENDING_APPROVAL"  # Awaiting approval
+    TRIAL = "TRIAL"                        # Trial in progress (may have confirmation_url for pending approval)
+    ACTIVE = "ACTIVE"                      # Paid subscription active
+    SUSPENDED = "SUSPENDED"               # Cap reached or payment issue
+    CANCELLED = "CANCELLED"               # Cancelled by user/system
+    EXPIRED = "EXPIRED"                   # Naturally expired
 
 
 class BillingCycleStatus(str, Enum):
@@ -161,12 +159,12 @@ class BillingCycleStatus(str, Enum):
 
 
 class TrialStatus(str, Enum):
-    """Trial status"""
+    """Trial status — kept for legacy compatibility, prefer SubscriptionStatus.TRIAL"""
 
-    ACTIVE = "active"  # Trial in progress
-    COMPLETED = "completed"  # Trial completed (threshold reached)
-    EXPIRED = "expired"  # Trial expired (time limit reached)
-    CANCELLED = "cancelled"  # Trial cancelled
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
 
 
 class ShopifySubscriptionStatus(str, Enum):

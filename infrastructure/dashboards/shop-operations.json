@@ -1,0 +1,659 @@
+{
+  "version": 5,
+  "dashboardId": "shop_operations",
+  "title": "Shop Operations",
+  "description": "Per-shop activity monitoring: top shops, error hotspots, recent activity",
+  "role": "",
+  "owner": "",
+  "created": "2026-07-10T07:52:43.461Z",
+  "tabs": [
+    {
+      "name": "Shops",
+      "tabId": "shops",
+      "panels": [
+        {
+          "id": "panel_top_shops_volume",
+          "type": "h-bar",
+          "title": "Top Shops by Log Volume (Last 24h)",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT shop_id, count(*) as \"log_count\" FROM \"default\" WHERE shop_id IS NOT NULL AND _timestamp > now() - INTERVAL '24' HOUR GROUP BY shop_id ORDER BY log_count DESC LIMIT 20",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Shop ID",
+                    "alias": "shop_id",
+                    "column": "shop_id",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Log Count",
+                    "alias": "log_count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 8,
+            "i": 1,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_top_shops_errors",
+          "type": "h-bar",
+          "title": "Shops with Most Errors (Last 24h)",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT shop_id, count(*) as \"error_count\" FROM \"default\" WHERE shop_id IS NOT NULL AND LOWER(level) IN ('error', 'critical', 'fatal') AND _timestamp > now() - INTERVAL '24' HOUR GROUP BY shop_id ORDER BY error_count DESC LIMIT 20",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Shop ID",
+                    "alias": "shop_id",
+                    "column": "shop_id",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Errors",
+                    "alias": "error_count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 8,
+            "i": 2,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_shop_activity_timeline",
+          "type": "area",
+          "title": "Shop Activity Timeline",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" FROM \"default\" WHERE shop_id IS NOT NULL AND _timestamp > now() - INTERVAL '6' HOUR GROUP BY time ORDER BY time",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "histogram"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Events",
+                    "alias": "count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 8,
+            "w": 16,
+            "h": 8,
+            "i": 3,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_shop_errors_timeline",
+          "type": "area",
+          "title": "Shop Error Timeline",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" FROM \"default\" WHERE shop_id IS NOT NULL AND LOWER(level) IN ('error', 'warning') AND _timestamp > now() - INTERVAL '6' HOUR GROUP BY time ORDER BY time",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "histogram"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Issues",
+                    "alias": "count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 16,
+            "y": 8,
+            "w": 8,
+            "h": 8,
+            "i": 4,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_shop_recent_errors",
+          "type": "table",
+          "title": "Recent Errors by Shop",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT _timestamp as \"time\", shop_id, service, level, message FROM \"default\" WHERE shop_id IS NOT NULL AND LOWER(level) IN ('error', 'critical') ORDER BY _timestamp DESC LIMIT 50",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Shop ID",
+                    "alias": "shop_id",
+                    "column": "shop_id",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Service",
+                    "alias": "service",
+                    "column": "service",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Level",
+                    "alias": "level",
+                    "column": "level",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Message",
+                    "alias": "message",
+                    "column": "message",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 16,
+            "w": 24,
+            "h": 8,
+            "i": 5,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "list": [],
+    "showDynamicFilters": true
+  },
+  "defaultDatetimeDuration": {
+    "type": "relative",
+    "relativeTimePeriod": "24h"
+  }
+}

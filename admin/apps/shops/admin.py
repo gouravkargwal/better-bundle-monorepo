@@ -1,11 +1,16 @@
 from django.contrib import admin
 from django.http import HttpResponseRedirect
 from django.contrib import messages
-from django.urls import reverse
+from django.urls import path, reverse
+from django.shortcuts import render
 from django.db import models
+from django.db.models import Sum, Count, Q
+from django.utils import timezone
 import requests
 from django.conf import settings
 from .models import Shop, OrderData
+from apps.billing.models import ShopSubscription, BillingCycle, BillingInvoice
+from apps.revenue.models import CommissionRecord
 
 
 @admin.register(Shop)
@@ -441,17 +446,28 @@ class ShopAdmin(admin.ModelAdmin):
                 should_suspend = False
                 suspension_reason = None
 
-                if subscription.status == "TRIAL_COMPLETED" and shop.is_active:
-                    should_suspend = True
-                    suspension_reason = "trial_completed_subscription_required"
-                elif subscription.status == "PENDING_APPROVAL" and shop.is_active:
-                    should_suspend = True
-                    suspension_reason = "subscription_pending_approval"
-                elif (
-                    subscription.status in ["SUSPENDED", "CANCELLED"] and shop.is_active
-                ):
+                # Current status lifecycle: TRIAL → ACTIVE → SUSPENDED / CANCELLED / EXPIRED
+                # A shop should be suspended if:
+                # - Its subscription is SUSPENDED or CANCELLED but shop is still active
+                # - Its subscription is in TRIAL with confirmation_url set (awaiting approval)
+                if subscription.status in ["SUSPENDED", "CANCELLED", "EXPIRED"] and shop.is_active:
                     should_suspend = True
                     suspension_reason = f"subscription_{subscription.status.lower()}"
+                elif subscription.status == "TRIAL":
+                    # Check if Shopify subscription exists with a confirmation_url (awaiting approval)
+                    try:
+                        shopify_sub = subscription.shopify_subscriptions
+                        has_pending_approval = bool(shopify_sub and shopify_sub.confirmation_url)
+                    except Exception:
+                        has_pending_approval = False
+                    
+                    if has_pending_approval:
+                        # TRIAL with pending billing setup — should suspend until approved
+                        should_suspend = True
+                        suspension_reason = "trial_with_pending_billing_approval"
+                elif subscription.status == "TRIAL" and shop.is_active:
+                    # Normal trial — no action needed
+                    should_suspend = False
 
                 if should_suspend:
                     # Suspend the shop
@@ -506,6 +522,142 @@ class ShopAdmin(admin.ModelAdmin):
     check_and_suspend_trial_completed_shops.short_description = (
         "🛑 Check & Suspend Trial Completed Shops"
     )
+
+    # ── Shop Overview Page ──────────────────────────────────────────────
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "overview/",
+                self.admin_site.admin_view(self.shop_overview_view),
+                name="shops_shop_overview",
+            ),
+        ]
+        return custom_urls + urls
+
+    def shop_overview_view(self, request):
+        """
+        Consolidated shop overview page — shows everything about a shop
+        (info, subscription, billing cycle, commissions, invoices) in one place.
+        """
+        shop_id = request.GET.get("shop_id")
+        shop_domain = request.GET.get("shop")
+
+        shop = None
+        overview = None
+
+        if shop_id or shop_domain:
+            try:
+                if shop_id:
+                    shop = Shop.objects.filter(id=shop_id).first()
+                elif shop_domain:
+                    shop = Shop.objects.filter(shop_domain=shop_domain).first()
+
+                if shop:
+                    overview = self._build_shop_overview(shop)
+            except Exception as e:
+                self.message_user(request, f"Error loading shop: {e}", level=messages.ERROR)
+
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Shop Overview",
+            "shop": shop,
+            "overview": overview,
+            "opts": self.model._meta,
+            "available_apps": self.admin_site.get_app_list(request),
+            "search_query": shop_domain or shop_id or "",
+        }
+        return render(request, "admin/shops/shop_overview.html", context)
+
+    def _build_shop_overview(self, shop):
+        """Gather all data about a shop into a single dict."""
+        # Subscription
+        subscription = ShopSubscription.objects.filter(shop=shop).select_related(
+            "pricing_tier", "subscription_plan"
+        ).first()
+
+        # Billing cycles
+        active_cycle = None
+        past_cycles = []
+        if subscription:
+            cycles = BillingCycle.objects.filter(
+                shop_subscription=subscription
+            ).order_by("-cycle_number")
+            active_cycle = cycles.filter(status="ACTIVE").first()
+            past_cycles = list(cycles.filter(~Q(status="ACTIVE"))[:5])
+
+        # Commission records — recent
+        recent_commissions = CommissionRecord.objects.filter(shop=shop).select_related(
+            "billing_cycle"
+        ).order_by("-order_date")[:10]
+
+        # Commission stats
+        commission_stats = CommissionRecord.objects.filter(shop=shop).aggregate(
+            total_attributed=Sum("attributed_revenue"),
+            total_earned=Sum("commission_earned"),
+            total_charged=Sum("commission_charged"),
+            total_count=Count("id"),
+            pending_count=Count("id", filter=Q(status="PENDING")),
+            rejected_count=Count("id", filter=Q(status="REJECTED")),
+            recorded_count=Count("id", filter=Q(status="RECORDED")),
+        )
+
+        # Invoices — recent
+        if subscription:
+            recent_invoices = BillingInvoice.objects.filter(
+                shop_subscription=subscription
+            ).order_by("-invoice_date")[:10]
+        else:
+            recent_invoices = []
+
+        # Invoice stats
+        invoice_stats = None
+        if subscription:
+            invoice_stats = BillingInvoice.objects.filter(
+                shop_subscription=subscription
+            ).aggregate(
+                total_invoiced=Sum("total_amount"),
+                total_paid=Sum("amount_paid"),
+                invoice_count=Count("id"),
+                outstanding_count=Count("id", filter=Q(status__in=["PENDING", "OVERDUE"])),
+            )
+
+        # Shop stats
+        total_orders = shop.order_data.count()
+        total_products = shop.product_data.count()
+        total_customers = shop.customer_data.count()
+        attribution_count = shop.purchase_attributions.count()
+        attribution_pct = round(
+            (attribution_count / total_orders * 100) if total_orders > 0 else 0, 1
+        )
+
+        # Pre-compute values the template needs (avoiding filter quirks)
+        remaining_cap = None
+        if active_cycle:
+            remaining_cap = float(active_cycle.current_cap_amount or 0) - float(active_cycle.usage_amount or 0)
+
+        commission_rate_display = None
+        if subscription and subscription.pricing_tier:
+            rate = float(subscription.pricing_tier.commission_rate or 0)
+            commission_rate_display = f"{rate * 100:.1f}%"
+
+        return {
+            "subscription": subscription,
+            "active_cycle": active_cycle,
+            "past_cycles": past_cycles,
+            "recent_commissions": recent_commissions,
+            "commission_stats": commission_stats,
+            "recent_invoices": recent_invoices,
+            "invoice_stats": invoice_stats,
+            "total_orders": total_orders,
+            "total_products": total_products,
+            "total_customers": total_customers,
+            "attribution_count": attribution_count,
+            "attribution_pct": attribution_pct,
+            "remaining_cap": remaining_cap,
+            "commission_rate_display": commission_rate_display,
+        }
 
 
 @admin.register(OrderData)

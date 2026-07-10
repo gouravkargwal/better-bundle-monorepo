@@ -77,15 +77,8 @@ def check_and_suspend_shops_api(request):
                 should_suspend = False
                 suspension_reason = None
 
-                if subscription.status == "TRIAL_COMPLETED" and shop.is_active:
-                    should_suspend = True
-                    suspension_reason = "trial_completed_subscription_required"
-                elif subscription.status == "PENDING_APPROVAL" and shop.is_active:
-                    should_suspend = True
-                    suspension_reason = "subscription_pending_approval"
-                elif (
-                    subscription.status in ["SUSPENDED", "CANCELLED"] and shop.is_active
-                ):
+                # Current lifecycle: TRIAL -> ACTIVE -> SUSPENDED / CANCELLED / EXPIRED
+                if subscription.status in ["SUSPENDED", "CANCELLED", "EXPIRED"] and shop.is_active:
                     should_suspend = True
                     suspension_reason = f"subscription_{subscription.status.lower()}"
 
@@ -167,13 +160,7 @@ def get_shops_suspension_status(request):
             should_suspend = False
             suspension_reason = None
 
-            if subscription.status == "TRIAL_COMPLETED":
-                should_suspend = True
-                suspension_reason = "trial_completed_subscription_required"
-            elif subscription.status == "PENDING_APPROVAL":
-                should_suspend = True
-                suspension_reason = "subscription_pending_approval"
-            elif subscription.status in ["SUSPENDED", "CANCELLED"]:
+            if subscription.status in ["SUSPENDED", "CANCELLED", "EXPIRED"]:
                 should_suspend = True
                 suspension_reason = f"subscription_{subscription.status.lower()}"
 

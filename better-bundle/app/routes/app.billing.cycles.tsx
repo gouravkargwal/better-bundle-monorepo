@@ -33,7 +33,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       select: {
         id: true,
         status: true,
-        subscription_type: true,
       },
     });
 
@@ -99,7 +98,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       shopCurrency: shop.currency_code || "USD",
       shopId: shop.id,
       subscriptionStatus: shopSubscription.status,
-      subscriptionType: shopSubscription.subscription_type,
     };
 
     return json(cyclesData);

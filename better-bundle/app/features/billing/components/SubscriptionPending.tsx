@@ -169,7 +169,7 @@ export function SubscriptionPending({
                       Usage-Based Billing Plan
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
-                      3% of Attributed Revenue
+                      {(subscriptionData.commissionRate * 100).toFixed(1)}% of Attributed Revenue
                     </Text>
                   </BlockStack>
                   <Badge tone="info">Ready for Approval</Badge>
@@ -205,7 +205,7 @@ export function SubscriptionPending({
                         Rate:
                       </Text>
                       <Text as="p" variant="bodyMd" fontWeight="bold">
-                        3% of revenue
+                        {(subscriptionData.commissionRate * 100).toFixed(1)}% of revenue
                       </Text>
                     </InlineStack>
                   </BlockStack>

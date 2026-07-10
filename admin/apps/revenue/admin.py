@@ -2,9 +2,12 @@
 Revenue admin configuration
 """
 
+import requests
 from django.contrib import admin
+from django.contrib import messages
 from django.utils.html import format_html
 from django.db.models import Sum
+from django.conf import settings
 from .models import CommissionRecord, PurchaseAttribution
 
 
@@ -23,6 +26,8 @@ class CommissionRecordAdmin(admin.ModelAdmin):
     readonly_fields = ['id', 'created_at', 'updated_at']
     ordering = ['-order_date']
     
+    actions = ["retry_failed_commission"]
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('shop', 'billing_cycle')
     
@@ -41,6 +46,66 @@ class CommissionRecordAdmin(admin.ModelAdmin):
         # Add summary to context
         changelist.summary = summary
         return changelist
+
+    def retry_failed_commission(self, request, queryset):
+        """
+        Retry failed/rejected commissions by resetting them to PENDING
+        and publishing a Kafka event for reprocessing.
+
+        Use this when a Shopify usage recording failed temporarily
+        and you want to retry without manual DB manipulation.
+
+        Select commissions with status=REJECTED or status=FAILED.
+        """
+        python_worker_url = getattr(
+            settings, "PYTHON_WORKER_URL", "http://localhost:8001"
+        )
+
+        retried = 0
+        already_pending = 0
+        for commission in queryset:
+            if commission.status not in ["REJECTED", "FAILED"]:
+                already_pending += 1
+                continue
+
+            # Reset status to PENDING
+            commission.status = "PENDING"
+            commission.error_count = 0
+            commission.last_error = None
+            commission.last_error_at = None
+            commission.save()
+
+            # Publish Kafka event for the consumer to pick up
+            if commission.billing_cycle_id:
+                try:
+                    requests.post(
+                        f"{python_worker_url}/api/billing/shop/reprocess-rejected-commissions",
+                        json={
+                            "shop_id": str(commission.shop_id),
+                            "billing_cycle_id": str(commission.billing_cycle_id),
+                        },
+                        timeout=10,
+                    )
+                except Exception:
+                    pass  # Commission is already PENDING — Kafka will pick it up eventually
+
+            retried += 1
+
+        if retried:
+            self.message_user(
+                request,
+                f"✅ Reset {retried} commissions to PENDING for retry. "
+                f"If {already_pending} were already pending — no action needed.",
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                f"ℹ️ No commissions were retried — {already_pending} were not REJECTED or FAILED",
+                level=messages.INFO,
+            )
+
+    retry_failed_commission.short_description = "🔄 Retry Failed/Rejected Commission"
 
 
 @admin.register(PurchaseAttribution)

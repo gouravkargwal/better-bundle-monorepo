@@ -3,13 +3,18 @@ Development settings for BetterBundle Admin Dashboard
 """
 
 import os
-from decouple import config, Config, RepositoryEnv
+from decouple import config as decouple_config, Config, RepositoryEnv
 
-# Load environment variables from .env.dev file
+# Load environment variables from .env.dev file.
+# docker-compose passes these via env_file, so this is a fallback for local dev.
 env_file = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", ".env.dev"
 )
-config = Config(RepositoryEnv(env_file))
+if os.path.exists(env_file):
+    config = Config(RepositoryEnv(env_file))
+else:
+    # Fall back to OS environment (set by docker-compose env_file)
+    config = decouple_config
 
 from .base import *
 
@@ -23,8 +28,8 @@ DATABASES = {
         "NAME": config("POSTGRES_DB", default="betterbundle"),
         "USER": config("POSTGRES_USER", default="postgres"),
         "PASSWORD": config("POSTGRES_PASSWORD", default="postgres"),
-        "HOST": "localhost",
-        "PORT": "5432",
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="5432"),
     }
 }
 

@@ -5,7 +5,7 @@ Consolidated billing API with essential endpoints only.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Header
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 import traceback
@@ -31,7 +31,8 @@ router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
 
 # Simple auth
-CRON_SECRET = "your-secret-key-here"  # TODO: Move to env
+import os
+CRON_SECRET = os.environ.get("CRON_SECRET", "")
 
 
 def verify_cron_secret(x_cron_secret: str = Header(None)):
@@ -131,6 +132,281 @@ async def get_billing_status():
 
     except Exception as e:
         logger.error(f"Error getting billing status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============= SCHEDULER JOB EXECUTIONS =============
+
+
+class TriggerJobRequest(BaseModel):
+    """Request to trigger a scheduler job manually."""
+    shop_id: Optional[str] = None
+    params: Optional[Dict[str, Any]] = None
+
+
+class JobExecutionResponse(BaseModel):
+    """Response from triggering or querying a scheduler job."""
+    success: bool
+    job_name: str
+    execution_id: Optional[str] = None
+    message: str
+    duration_ms: Optional[int] = None
+
+
+@router.get("/jobs/last-executions", response_model=List[Dict[str, Any]])
+async def get_last_job_executions(limit: int = 50):
+    """
+    Get the most recent scheduler job executions.
+    Used by the Django admin UI to display job history.
+    """
+    try:
+        from app.core.database.models.scheduler_job_execution import SchedulerJobExecution
+
+        async with get_session_context() as session:
+            query = (
+                select(SchedulerJobExecution)
+                .order_by(SchedulerJobExecution.started_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(query)
+            executions = result.scalars().all()
+
+            return [
+                {
+                    "id": str(e.id),
+                    "job_name": e.job_name,
+                    "job_group": e.job_group,
+                    "status": e.status,
+                    "success": e.success,
+                    "started_at": e.started_at.isoformat() if e.started_at else None,
+                    "completed_at": e.completed_at.isoformat() if e.completed_at else None,
+                    "duration_ms": e.duration_ms,
+                    "triggered_by": e.triggered_by,
+                    "items_processed": e.items_processed,
+                    "result_summary": e.result_summary,
+                    "error_message": e.error_message,
+                }
+                for e in executions
+            ]
+
+    except Exception as e:
+        logger.error(f"Error fetching job executions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/jobs/last-run/{job_name}", response_model=Optional[Dict[str, Any]])
+async def get_last_job_run(job_name: str):
+    """
+    Get the most recent execution of a specific job.
+    Used by the Django admin to show "last run" status per job.
+    """
+    try:
+        from app.core.database.models.scheduler_job_execution import SchedulerJobExecution
+
+        async with get_session_context() as session:
+            query = (
+                select(SchedulerJobExecution)
+                .where(SchedulerJobExecution.job_name == job_name)
+                .order_by(SchedulerJobExecution.started_at.desc())
+                .limit(1)
+            )
+            result = await session.execute(query)
+            execution = result.scalar_one_or_none()
+
+            if not execution:
+                return None
+
+            return {
+                "id": str(execution.id),
+                "job_name": execution.job_name,
+                "status": execution.status,
+                "success": execution.success,
+                "started_at": execution.started_at.isoformat() if execution.started_at else None,
+                "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
+                "duration_ms": execution.duration_ms,
+                "triggered_by": execution.triggered_by,
+                "items_processed": execution.items_processed,
+                "result_summary": execution.result_summary,
+                "error_message": execution.error_message,
+            }
+
+    except Exception as e:
+        logger.error(f"Error fetching last job run for {job_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _run_reconcile_stuck_commissions():
+    """
+    Reconcile commissions stuck in RECORDING status.
+    Delegate to the standalone function in the consumer module.
+    """
+    from app.consumers.kafka.shopify_usage_consumer import (
+        reconcile_stuck_recording_commissions,
+    )
+    return await reconcile_stuck_recording_commissions()
+
+
+@router.post("/jobs/trigger/{job_name}", response_model=JobExecutionResponse)
+async def trigger_job(job_name: str, request: TriggerJobRequest = None):
+    """
+    Trigger a scheduler job manually from the Django admin UI.
+
+    Supported jobs:
+    - reconcile-stuck-commissions: Reconcile commissions stuck in RECORDING
+    - process-billing: Process monthly billing for all or specific shops
+    - reprocess-rejected: Reprocess rejected commissions
+    """
+    try:
+        from app.core.database.models.scheduler_job_execution import SchedulerJobExecution
+        from app.shared.helpers import now_utc
+
+        start_time = now_utc()
+        logger.info(f"👤 Manual trigger: job={job_name}")
+
+        # Safely extract params
+        shop_id = request.shop_id if request else None
+        trigger_params = request.params if request else None
+
+        # Create execution record
+        async with get_session_context() as session:
+            execution = SchedulerJobExecution(
+                job_name=job_name,
+                job_group="manual",
+                started_at=start_time,
+                status="RUNNING",
+                triggered_by="manual",
+            )
+            session.add(execution)
+            await session.flush()
+            execution_id = str(execution.id)
+
+            try:
+                if job_name == "reconcile-stuck-commissions":
+                    reconciled = await _run_reconcile_stuck_commissions()
+
+                    execution.status = "SUCCESS"
+                    execution.success = True
+                    execution.items_processed = reconciled
+                    execution.result_summary = f"Reconciled {reconciled} stuck commissions"
+                    execution.completed_at = now_utc()
+                    execution.duration_ms = int(
+                        (now_utc() - start_time).total_seconds() * 1000
+                    )
+
+                elif job_name == "process-billing":
+                    shop_ids = [request.shop_id] if request and request.shop_id else None
+                    scheduler = BillingSchedulerService()
+                    await scheduler.initialize()
+                    result = await scheduler.process_monthly_billing(
+                        shop_ids=shop_ids, dry_run=False
+                    )
+
+                    execution.status = "SUCCESS"
+                    execution.success = True
+                    execution.items_processed = result.get("processed_shops", 0)
+                    execution.result_summary = (
+                        f"Processed {result.get('processed_shops', 0)} shops, "
+                        f"{result.get('successful_shops', 0)} successful, "
+                        f"{result.get('failed_shops', 0)} failed"
+                    )
+                    execution.completed_at = now_utc()
+                    execution.duration_ms = int(
+                        (now_utc() - start_time).total_seconds() * 1000
+                    )
+
+                elif job_name == "reprocess-rejected":
+                    if not request or not request.shop_id:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="shop_id is required for reprocess-rejected",
+                        )
+
+                    from app.domains.billing.repositories.billing_repository_v2 import (
+                        BillingRepositoryV2,
+                    )
+                    billing_repo = BillingRepositoryV2(session)
+                    shop_subscription = await billing_repo.get_shop_subscription(
+                        request.shop_id
+                    )
+                    if not shop_subscription:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"No subscription for shop {request.shop_id}",
+                        )
+                    current_cycle = await billing_repo.get_current_billing_cycle(
+                        shop_subscription.id
+                    )
+                    if current_cycle:
+                        # Publish Kafka event for async processing
+                        from app.core.messaging.event_publisher import EventPublisher
+                        publisher = EventPublisher(kafka_settings.model_dump())
+                        await publisher.initialize()
+                        await publisher.publish_shopify_usage_event({
+                            "event_type": "reprocess_rejected_commissions",
+                            "shop_id": request.shop_id,
+                            "billing_cycle_id": str(current_cycle.id),
+                        })
+                        await publisher.close()
+
+                        execution.status = "SUCCESS"
+                        execution.success = True
+                        execution.result_summary = (
+                            f"Published reprocess event for shop {request.shop_id}"
+                        )
+                        execution.items_processed = 1
+                    else:
+                        execution.status = "SKIPPED"
+                        execution.success = True
+                        execution.result_summary = "No active billing cycle"
+
+                    execution.completed_at = now_utc()
+                    execution.duration_ms = int(
+                        (now_utc() - start_time).total_seconds() * 1000
+                    )
+
+                else:
+                    execution.status = "FAILED"
+                    execution.success = False
+                    execution.error_message = f"Unknown job: {job_name}"
+                    execution.completed_at = now_utc()
+                    execution.duration_ms = int(
+                        (now_utc() - start_time).total_seconds() * 1000
+                    )
+
+                await session.flush()
+
+                return JobExecutionResponse(
+                    success=execution.success or False,
+                    job_name=job_name,
+                    execution_id=execution_id,
+                    message=execution.result_summary or execution.error_message or "",
+                    duration_ms=execution.duration_ms,
+                )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                execution.status = "FAILED"
+                execution.success = False
+                execution.error_message = str(e)
+                execution.completed_at = now_utc()
+                execution.duration_ms = int(
+                    (now_utc() - start_time).total_seconds() * 1000
+                )
+                await session.flush()
+                logger.error(f"❌ Manual trigger failed for {job_name}: {e}")
+                return JobExecutionResponse(
+                    success=False,
+                    job_name=job_name,
+                    execution_id=execution_id,
+                    message=str(e),
+                    duration_ms=execution.duration_ms,
+                )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error triggering job {job_name}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, Any
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .attribution_engine import AttributionEngine, AttributionContext
@@ -23,7 +23,6 @@ from app.core.database.models import (
     CommissionRecord,
     SubscriptionStatus,
     BillingCycleStatus,
-    TrialStatus,
     PurchaseAttribution,
 )
 from app.core.database.models.enums import BillingPhase, CommissionStatus
@@ -109,22 +108,15 @@ class BillingServiceV2:
         purchase_event: PurchaseEvent,
     ) -> None:
         """Handle purchase during trial phase."""
-        try:
-            logger.info(f"🎯 Trial purchase: ${attributed_revenue} for shop {shop_id}")
+        logger.info(f"🎯 Trial purchase: ${attributed_revenue} for shop {shop_id}")
 
-            # Skip if no attribution ID
-            if not self._has_attribution_id(purchase_event):
-                return
+        if not self._has_attribution_id(purchase_event):
+            return
 
-            # Create trial commission
-            await self._create_trial_commission(
-                shop_id, shop_subscription, attributed_revenue, purchase_event
-            )
-
-            await self._log_trial_progress(shop_id, shop_subscription.id)
-
-        except Exception as e:
-            logger.error(f"❌ Error handling trial purchase: {e}")
+        await self._create_trial_commission(
+            shop_id, shop_subscription, attributed_revenue, purchase_event
+        )
+        await self._log_trial_progress(shop_id, shop_subscription.id)
 
     def _has_attribution_id(self, purchase_event: PurchaseEvent) -> bool:
         """Check if purchase event has attribution ID."""
@@ -173,23 +165,14 @@ class BillingServiceV2:
             )
 
     async def _log_trial_progress(self, shop_id: str, subscription_id: str) -> None:
-        """Log trial progress and check for completion."""
-        trial = await self.billing_repository.get_subscription_trial_by_id(
-            subscription_id
-        )
-
-        # Calculate actual revenue from commission records
-        actual_revenue = (
-            await self.purchase_attribution_repository.get_total_revenue_by_shop(
-                shop_id
+        """Log trial progress — threshold check is handled in complete_trial_subscription."""
+        trial = await self.billing_repository.get_subscription_trial_by_id(subscription_id)
+        if trial:
+            logger.info(
+                f"📊 Trial progress for shop {shop_id}: "
+                f"${trial.trial_revenue} / ${trial.effective_trial_threshold} "
+                f"({trial.trial_progress_percentage:.1f}%)"
             )
-        )
-
-        if trial.is_threshold_reached(actual_revenue):
-            shop_subscription = await self.billing_repository.get_shop_subscription(
-                shop_id
-            )
-            await self._complete_trial(shop_id, shop_subscription)
 
     async def _handle_subscription_purchase(
         self,
@@ -199,16 +182,10 @@ class BillingServiceV2:
         purchase_event: PurchaseEvent,
     ) -> None:
         """Handle purchase during paid phase with overflow tracking."""
-        try:
-            # Skip if no attribution ID
-            if not self._has_attribution_id(purchase_event):
-                return
+        if not self._has_attribution_id(purchase_event):
+            return
 
-            # Create and record commission
-            await self._create_and_record_commission(shop_id, purchase_event)
-
-        except Exception as e:
-            logger.error(f"❌ Error handling subscription purchase: {e}")
+        await self._create_and_record_commission(shop_id, purchase_event)
 
     async def _create_and_record_commission(
         self, shop_id: str, purchase_event: PurchaseEvent
@@ -228,31 +205,11 @@ class BillingServiceV2:
     async def _complete_trial(
         self, shop_id: str, shop_subscription: ShopSubscription
     ) -> None:
-        """Complete trial and wait for user to setup billing with their chosen cap - TRANSACTION SAFE"""
-        try:
-            # Calculate actual revenue from commission records
-            actual_revenue = (
-                await self.purchase_attribution_repository.get_total_revenue_by_shop(
-                    shop_id
-                )
-            )
-
-            # ✅ ATOMIC: Use the repository's atomic trial completion method
-            await self.billing_repository.check_trial_completion(
-                shop_id,  # ✅ FIX: Pass shop_id, not shop_subscription.id
-                actual_revenue,  # ✅ FIX: Pass calculated revenue, not Decimal("0")
-            )
-
-            logger.info(
-                f"✅ Trial completed for shop {shop_id}. "
-                f"Awaiting user to setup billing with cap."
-            )
-
-            # ✅ NO MANUAL COMMIT: Let the main transaction handle it
-
-        except Exception as e:
-            logger.error(f"❌ Error completing trial: {e}")
-            raise
+        """Complete trial — stays in TRIAL status. PENDING_APPROVAL no longer exists."""
+        # Revenue is already tracked on subscription.trial_revenue (updated atomically
+        # in _create_trial_commission). Pass Decimal("0") — no additional revenue here.
+        await self.billing_repository.check_trial_completion(shop_id, Decimal("0"))
+        logger.info(f"✅ Trial completion check done for shop {shop_id}.")
 
     async def _is_purchase_already_processed(
         self, purchase_event: PurchaseEvent
@@ -456,7 +413,7 @@ class BillingServiceV2:
             cutoff_time = order_created_at + timedelta(seconds=5)
 
             line_items_query = select(func.count(LineItemData.id)).where(
-                LineItemData.order_id == str(order_id),
+                LineItemData.order_id == order_record_id,  # Use DB UUID, not Shopify ID
                 LineItemData.created_at > cutoff_time,
             )
             result = await self.session.execute(line_items_query)
@@ -647,40 +604,18 @@ class BillingServiceV2:
             )
 
     async def _check_trial_completion(self, shop_id: str, shop_subscription) -> None:
-        """
-        Check if trial threshold is reached and complete trial if needed.
-
-        Args:
-            shop_id: Shop ID
-            shop_subscription: Shop subscription object
-        """
-        if not shop_subscription:
+        """Check if trial threshold is reached using trial_revenue on the subscription row."""
+        if not shop_subscription or shop_subscription.status != SubscriptionStatus.TRIAL:
             return
 
         try:
-            # Get trial
-            trial = await self.billing_repository.get_subscription_trial_by_id(
-                shop_subscription.id
-            )
-            if not trial or trial.status != TrialStatus.ACTIVE or trial.completed_at:
-                return
-
-            # Get current trial revenue
-            trial_revenue_query = select(
-                func.coalesce(func.sum(PurchaseAttribution.total_revenue), 0)
-            ).where(PurchaseAttribution.shop_id == shop_id)
-
-            result = await self.session.execute(trial_revenue_query)
-            current_revenue = Decimal(str(result.scalar_one()))
-
-            # Complete trial if threshold reached
-            if current_revenue >= trial.threshold_amount:
+            if shop_subscription.trial_threshold_reached:
                 logger.info(
-                    f"🎉 Trial threshold reached: ${current_revenue} >= ${trial.threshold_amount}"
+                    f"🎉 Trial threshold reached: ${shop_subscription.trial_revenue} "
+                    f">= ${shop_subscription.effective_trial_threshold}"
                 )
                 await self._complete_trial(shop_id, shop_subscription)
                 await self.session.refresh(shop_subscription)
-
         except Exception as e:
             logger.warning(f"Could not check trial completion for shop {shop_id}: {e}")
 
@@ -747,17 +682,18 @@ class BillingServiceV2:
 
         # Route based on subscription status
         if shop_subscription.status == SubscriptionStatus.TRIAL:
-            await self._handle_trial_purchase(
-                shop_id, shop_subscription, attributed_revenue, purchase_event
-            )
+            # TRIAL with confirmation_url means billing setup was initiated but
+            # not yet approved — skip commission creation.
+            if shop_subscription.confirmation_url:
+                logger.info(f"⏳ Shop {shop_id} awaiting subscription approval")
+            else:
+                await self._handle_trial_purchase(
+                    shop_id, shop_subscription, attributed_revenue, purchase_event
+                )
         elif shop_subscription.status == SubscriptionStatus.ACTIVE:
             await self._handle_subscription_purchase(
                 shop_id, shop_subscription, attributed_revenue, purchase_event
             )
-        elif shop_subscription.status == SubscriptionStatus.TRIAL_COMPLETED:
-            logger.info(f"⏳ Shop {shop_id} trial completed, awaiting billing setup")
-        elif shop_subscription.status == SubscriptionStatus.PENDING_APPROVAL:
-            logger.info(f"⏳ Shop {shop_id} awaiting subscription approval")
         else:
             logger.warning(
                 f"🛑 Shop {shop_id} has no active billing (status: {shop_subscription.status.value})"

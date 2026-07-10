@@ -60,7 +60,8 @@ export function TrialCompleted({
 
   const currentValue = parseFloat(spendingLimit);
   const displayValue = Number.isFinite(currentValue) ? currentValue : 1000;
-  const revenueCapacity = Math.round(displayValue / 0.03);
+  const commissionRate = trialData.commissionRate;
+  const revenueCapacity = commissionRate > 0 ? Math.round(displayValue / commissionRate) : 0;
 
   return (
     <BlockStack gap="500">
@@ -157,7 +158,7 @@ export function TrialCompleted({
                       Commission Rate:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="bold">
-                      3% of attributed revenue
+                      {(commissionRate * 100).toFixed(1)}% of attributed revenue
                     </Text>
                   </InlineStack>
 
@@ -263,8 +264,9 @@ export function TrialCompleted({
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
                     💡 With a {formatCurrency(displayValue)} monthly cap, you'll
-                    never pay more than that—even if your 3% commission exceeds
-                    it. This cap lets you handle up to{" "}
+                    never pay more than that—even if your{" "}
+                    {(commissionRate * 100).toFixed(1)}% commission exceeds it.
+                    This cap lets you handle up to{" "}
                     <strong>{formatCurrency(revenueCapacity)}</strong> in
                     monthly attributed revenue.
                   </Text>
@@ -370,7 +372,8 @@ export function TrialCompleted({
                   cancel with no penalties.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Fair Pricing:</strong> Only pay 3% when Better Bundle
+                  <strong>Fair Pricing:</strong> Only pay{" "}
+                  {(commissionRate * 100).toFixed(1)}% when Better Bundle
                   generates revenue for you.
                 </Text>
               </BlockStack>

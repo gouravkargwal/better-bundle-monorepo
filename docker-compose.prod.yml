@@ -215,86 +215,7 @@ services:
       logging: "promtail"
       service: "kafka"
 
-  kafka-ui:
-    container_name: betterbundle-kafka-ui
-    image: provectuslabs/kafka-ui:latest
-    env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: production-kafka-kraft
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-      DYNAMIC_CONFIG_ENABLED: "true"
-      AUTH_TYPE: "DISABLED"
-      JAVA_OPTS: "-Xms128m -Xmx256m"
-    networks:
-      - backend
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 512M
-        reservations:
-          cpus: "0.25"
-          memory: 256M
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    labels:
-      logging: "promtail"
-      service: "kafka-ui"
 
-  rest-proxy:
-    image: confluentinc/cp-kafka-rest:latest
-    env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:8082:8082"
-    hostname: rest-proxy
-    container_name: betterbundle-rest-proxy
-    environment:
-      KAFKA_REST_HOST_NAME: rest-proxy
-      KAFKA_REST_BOOTSTRAP_SERVERS: "kafka:29092"
-      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
-      KAFKAREST_HEAP_OPTS: "-Xms128m -Xmx256m"
-    networks:
-      - backend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 384M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    labels:
-      logging: "promtail"
-      service: "kafka-rest-proxy"
 
   # ==================== RECOMMENDATION ENGINE ====================
   gorse:
@@ -440,32 +361,27 @@ services:
       logging: "promtail"
       service: "admin"
 
-  # ==================== LOGGING STACK ====================
-  loki:
-    image: grafana/loki:3.4.1
-    container_name: betterbundle-loki
+  # ==================== LOGGING & OBSERVABILITY ====================
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:latest
+    container_name: betterbundle-openobserve
     env_file:
       - .env.prod
     ports:
-      - "127.0.0.1:3100:3100"
-    command: -config.file=/etc/loki/loki-config.yaml
+      - "127.0.0.1:5080:5080"
+    environment:
+      ZO_ROOT_USER_EMAIL: ${OPENOBSERVE_EMAIL:-admin@betterbundle.com}
+      ZO_ROOT_USER_PASSWORD: ${OPENOBSERVE_PASSWORD:-BetterBundle2024!OpenObserve}
+      ZO_DATA_DIR: /data
+      ZO_HTTP_PORT: "5080"
     volumes:
-      - ./loki-config.yaml:/etc/loki/loki-config.yaml:ro
-      - loki_data:/loki
+      - openobserve_data:/data
     networks:
       - backend
       - frontend
     restart: unless-stopped
     healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:3100/ready",
-        ]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5080/healthz"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -487,94 +403,41 @@ services:
         max-file: "3"
     labels:
       logging: "promtail"
-      service: "loki"
+      service: "openobserve"
 
-  promtail:
-    image: grafana/promtail:3.4.1
-    container_name: betterbundle-promtail
+  # ==================== DASHBOARD AUTO-IMPORTER ====================
+  dashboard-importer:
+    image: curlimages/curl:latest
+    container_name: betterbundle-dashboard-importer
     env_file:
       - .env.prod
-    command: -config.file=/etc/promtail/promtail-config.yaml
+    environment:
+      OPENOBSERVE_URL: http://openobserve:5080
+      DASHBOARDS_DIR: /dashboards
+      MAX_RETRIES: "30"
+      RETRY_INTERVAL: "5"
     volumes:
-      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infrastructure/dashboards:/dashboards:ro
+      - ./infrastructure/scripts/import-dashboards.sh:/import-dashboards.sh:ro
     networks:
       - backend
-    restart: unless-stopped
     depends_on:
-      loki:
+      openobserve:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "0.25"
-          memory: 128M
-        reservations:
-          cpus: "0.1"
-          memory: 64M
-    security_opt:
-      - no-new-privileges:true
-    user: "0" # Needs root to read Docker socket
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache bash > /dev/null 2>&1
+        bash /import-dashboards.sh
+    restart: "no"
     logging:
       driver: "json-file"
       options:
         max-size: "5m"
         max-file: "2"
     labels:
-      logging: "promtail"
-      service: "promtail"
-
-  grafana:
-    image: grafana/grafana:11.4.0
-    container_name: betterbundle-grafana
-    env_file:
-      - .env.prod
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana-provisioning:/etc/grafana/provisioning:ro
-    networks:
-      - frontend
-      - backend
-    restart: unless-stopped
-    depends_on:
-      loki:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:3000/api/health",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    security_opt:
-      - no-new-privileges:true
-    user: "472"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    labels:
-      logging: "promtail"
-      service: "grafana"
+      service: "dashboard-importer"
 
   # ==================== NGINX PROXY MANAGER ====================
   nginx-proxy-manager:
@@ -616,7 +479,6 @@ volumes:
   kafka_data:
   gorse_logs:
   gorse_cache:
-  loki_data:
-  grafana_data:
+  openobserve_data:
   npm_data:
   npm_letsencrypt:

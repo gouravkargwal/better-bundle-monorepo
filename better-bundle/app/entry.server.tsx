@@ -1,3 +1,6 @@
+// Load OpenTelemetry instrumentation BEFORE any app code
+import "./instrumentation";
+
 import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { RemixServer } from "@remix-run/react";

@@ -100,12 +100,10 @@ SHOPIFY_API_SECRET=xyz789uvw456rst123def456ghi789jkl012mno345pqr678
 # ===========================================
 # MONITORING & LOGGING
 # ===========================================
-LOKI_URL=http://localhost:3100
-GF_SECURITY_ADMIN_USER=admin
-GF_SECURITY_ADMIN_PASSWORD=admin
-GF_USERS_ALLOW_SIGN_UP=false
-GF_SERVER_ROOT_URL=http://localhost:3001
-GF_INSTALL_PLUGINS=redis-datasource
+# OpenObserve (replaces Loki + Grafana)
+OPENOBSERVE_URL=http://localhost:5080
+OPENOBSERVE_EMAIL=admin@betterbundle.com
+OPENOBSERVE_PASSWORD=admin123
 
 # ===========================================
 # SECURITY & ENCRYPTION (Development)
@@ -132,7 +130,7 @@ os.environ.setdefault("REDIS_PORT", "6379")
 os.environ.setdefault("REDIS_PASSWORD", "")
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 os.environ.setdefault("GORSE_BASE_URL", "http://localhost:8088")
-os.environ.setdefault("LOKI_URL", "http://localhost:3100")
+os.environ.setdefault("OPENOBSERVE_URL", "http://localhost:5080")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("LOG_LEVEL", "debug")
 os.environ.setdefault("PORT", "8001")
@@ -161,7 +159,7 @@ def main():
         file=settings.logging.LOGGING["file"],
         console=settings.logging.LOGGING["console"],
         prometheus=settings.logging.LOGGING["prometheus"],
-        grafana=settings.logging.LOGGING["grafana"],
+        openobserve=settings.logging.LOGGING["openobserve"],
         telemetry=settings.logging.LOGGING["telemetry"],
         gcp=settings.logging.LOGGING["gcp"],
         aws=settings.logging.LOGGING["aws"],

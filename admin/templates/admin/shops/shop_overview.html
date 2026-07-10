@@ -1,0 +1,283 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .ov-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .ov-card h3 { margin: 0 0 12px 0; font-size: 15px; color: #1a1a1a; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0; }
+  .ov-card table { width: 100%; font-size: 13px; }
+  .ov-card td { padding: 6px 4px; }
+  .ov-card td.label { color: #666; width: 40%; white-space: nowrap; }
+  .ov-card td.value { color: #1a1a1a; font-weight: 500; }
+  .status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .status-active { background: #e8f5e9; color: #2e7d32; }
+  .status-trial { background: #e3f2fd; color: #1565c0; }
+  .status-suspended { background: #fff3e0; color: #e65100; }
+  .status-cancelled { background: #ffebee; color: #c62828; }
+  .status-pending { background: #fff8e1; color: #f57f17; }
+  .status-other { background: #f5f5f5; color: #616161; }
+  .stat-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .stat-item { text-align: center; flex: 1; padding: 8px; background: #f8f9fa; border-radius: 6px; }
+  .stat-item .val { font-size: 18px; font-weight: 700; color: #1a1a1a; }
+  .stat-item .lbl { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+  .search-box { max-width: 500px; display: flex; gap: 8px; margin-bottom: 24px; }
+  .search-box input { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  .search-box button { padding: 10px 20px; background: #1976d2; color: #fff; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .search-box button:hover { background: #1565c0; }
+  .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .quick-actions a { padding: 6px 14px; border-radius: 6px; font-size: 12px; text-decoration: none; font-weight: 500; }
+  .quick-actions .act-primary { background: #1976d2; color: #fff; }
+  .quick-actions .act-primary:hover { background: #1565c0; }
+  .quick-actions .act-danger { background: #d32f2f; color: #fff; }
+  .quick-actions .act-danger:hover { background: #c62828; }
+  .quick-actions .act-secondary { background: #f5f5f5; color: #333; border: 1px solid #ddd; }
+  .quick-actions .act-secondary:hover { background: #eee; }
+  .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th { text-align: left; padding: 8px 10px; background: #f5f5f5; border-bottom: 2px solid #e0e0e0; font-weight: 600; color: #444; }
+  .data-table td { padding: 8px 10px; border-bottom: 1px solid #f0f0f0; }
+  .data-table tr:hover td { background: #fafafa; }
+  .full-width { grid-column: 1 / -1; }
+  .alert { padding: 10px 14px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; }
+  .alert-warn { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+  .alert-info { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+  .alert-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+  .section-title { font-size: 18px; font-weight: 600; color: #1a1a1a; margin: 24px 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #1976d2; display: inline-block; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='shops' %}">Shops</a>
+  &rsaquo; Shop Overview
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <h1>&#128202; Shop Overview</h1>
+
+  <!-- Search -->
+  <form method="GET" class="search-box">
+    <input type="text" name="shop" placeholder="Search by shop domain (e.g., mystore.myshopify.com)" value="{{ search_query }}">
+    <button type="submit">Search</button>
+  </form>
+
+  {% if not shop %}
+    <div class="alert alert-info">
+      Enter a shop domain above to see a complete overview of their subscription,
+      billing, commissions, and invoices — all in one page.
+    </div>
+  {% endif %}
+
+  {% if shop %}
+    {% with o=overview %}
+
+    <!-- ════ Shop Info + Alerts ════ -->
+    <div class="ov-grid">
+      <div class="ov-card">
+        <h3>&#127968; {{ shop.shop_domain }}</h3>
+        <table>
+          <tr><td class="label">Plan</td><td class="value">{{ shop.plan_type|default:"—" }}</td></tr>
+          <tr><td class="label">Status</td>
+            <td class="value">
+              {% if shop.is_active %}
+                <span class="status-badge status-active">Active</span>
+              {% else %}
+                <span class="status-badge status-suspended">Inactive</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><td class="label">Email</td><td class="value">{{ shop.email|default:"—" }}</td></tr>
+          <tr><td class="label">Currency</td><td class="value">{{ shop.currency_code|default:"—" }}</td></tr>
+          <tr><td class="label">Shopify Plus</td><td class="value">{{ shop.shopify_plus|yesno:"Yes,No" }}</td></tr>
+          {% if shop.suspended_at %}
+          <tr><td class="label">Suspended</td><td class="value">{{ shop.suspended_at|date:"M d, Y" }} — {{ shop.suspension_reason|default:"—" }}</td></tr>
+          {% endif %}
+          <tr><td class="label">Created</td><td class="value">{{ shop.created_at|date:"M d, Y" }}</td></tr>
+          {% if shop.onboarding_completed %}
+          <tr><td class="label">Onboarding</td><td class="value">&#9989; Completed</td></tr>
+          {% endif %}
+        </table>
+        <div class="quick-actions">
+          <a href="{% url 'admin:shops_shop_change' shop.id %}" class="act-primary">&#9998; Edit Shop</a>
+          <a href="{% url 'admin:shops_orderdata_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128230; Orders</a>
+          <a href="{% url 'admin:revenue_commissionrecord_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128176; Commissions</a>
+        </div>
+      </div>
+
+      <div class="ov-card">
+        <h3>&#128200; Statistics</h3>
+        <div class="stat-row">
+          <div class="stat-item"><div class="val">{{ o.total_orders }}</div><div class="lbl">Orders</div></div>
+          <div class="stat-item"><div class="val">{{ o.total_products }}</div><div class="lbl">Products</div></div>
+          <div class="stat-item"><div class="val">{{ o.total_customers }}</div><div class="lbl">Customers</div></div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-item"><div class="val" style="color:{% if o.attribution_pct >= 90 %}#2e7d32{% elif o.attribution_pct >= 70 %}#e65100{% else %}#c62828{% endif %}">{{ o.attribution_pct }}%</div><div class="lbl">Attribution</div></div>
+          <div class="stat-item"><div class="val">{{ o.commission_stats.total_count|default:0 }}</div><div class="lbl">Commissions</div></div>
+          <div class="stat-item"><div class="val">{{ o.attribution_count }}</div><div class="lbl">Attributions</div></div>
+        </div>
+      </div>
+
+      <!-- Subscription Card -->
+      <div class="ov-card">
+        <h3>&#128197; Subscription</h3>
+        {% if o.subscription %}
+        <table>
+          <tr><td class="label">Status</td>
+            <td class="value">
+              <span class="status-badge
+                {% if o.subscription.status == 'ACTIVE' %}status-active
+                {% elif o.subscription.status == 'TRIAL' %}status-trial
+                {% elif o.subscription.status == 'SUSPENDED' %}status-suspended
+                {% elif o.subscription.status == 'CANCELLED' or o.subscription.status == 'EXPIRED' %}status-cancelled
+                {% else %}status-other{% endif %}">
+                {{ o.subscription.get_status_display }}
+              </span>
+            </td>
+          </tr>
+          <tr><td class="label">Plan</td><td class="value">{{ o.subscription.subscription_plan.name }}</td></tr>
+          <tr><td class="label">Commission Rate</td><td class="value">{{ o.commission_rate_display|default:"—" }}</td></tr>
+          <tr><td class="label">Cap Amount</td><td class="value">${{ o.subscription.user_chosen_cap_amount|floatformat:2|default:"—" }}</td></tr>
+          <tr><td class="label">Trial Threshold</td><td class="value">${{ o.subscription.pricing_tier.trial_threshold_amount|floatformat:2 }}</td></tr>
+          <tr><td class="label">Started</td><td class="value">{{ o.subscription.start_date|date:"M d, Y" }}</td></tr>
+          {% if o.subscription.activated_at %}
+          <tr><td class="label">Activated</td><td class="value">{{ o.subscription.activated_at|date:"M d, Y" }}</td></tr>
+          {% endif %}
+        </table>
+        <div class="quick-actions">
+          <a href="{% url 'admin:billing_shopsubscription_change' o.subscription.id %}" class="act-primary">&#9998; Edit</a>
+          <a href="{% url 'admin:billing_billingcycle_changelist' %}?shop_subscription__id__exact={{ o.subscription.id }}" class="act-secondary">&#128197; Cycles</a>
+          <a href="{% url 'admin:billing_billinginvoice_changelist' %}?shop_subscription__shop__id__exact={{ shop.id }}" class="act-secondary">&#128196; Invoices</a>
+        </div>
+        {% else %}
+        <div class="alert alert-warn">No subscription found for this shop.</div>
+        {% endif %}
+      </div>
+
+      <!-- Active Billing Cycle -->
+      <div class="ov-card">
+        <h3>&#128176; Active Billing Cycle</h3>
+        {% if o.active_cycle %}
+          {% with c=o.active_cycle %}
+          <table>
+            <tr><td class="label">Cycle #</td><td class="value">{{ c.cycle_number }}</td></tr>
+            <tr><td class="label">Period</td><td class="value">{{ c.start_date|date:"M d" }} — {{ c.end_date|date:"M d, Y" }}</td></tr>
+            <tr><td class="label">Cap</td><td class="value">${{ c.current_cap_amount|floatformat:2 }}</td></tr>
+            <tr><td class="label">Usage</td><td class="value">${{ c.usage_amount|floatformat:2 }}</td></tr>
+            <tr><td class="label">Remaining</td><td class="value">${{ o.remaining_cap|floatformat:2 }}</td></tr>
+            <tr><td class="label">Commissions</td><td class="value">{{ c.commission_count }}</td></tr>
+          </table>
+          <div style="margin-top:12px;background:#f0f0f0;border-radius:4px;height:8px;overflow:hidden;">
+            <div style="height:100%;width:{{ c.usage_percentage|floatformat:1 }}%;background:{% if c.usage_percentage > 90 %}#c62828{% elif c.usage_percentage > 75 %}#e65100{% else %}#4caf50{% endif %};border-radius:4px;"></div>
+          </div>
+          <div style="text-align:right;font-size:11px;color:#888;margin-top:4px;">{{ c.usage_percentage|floatformat:1 }}% used</div>
+          {% endwith %}
+        {% elif o.subscription %}
+          <div class="alert alert-warn">No active billing cycle. <a href="{% url 'admin:billing_shopsubscription_changelist' %}">Check subscription</a></div>
+        {% else %}
+          <div class="alert alert-info">No billing cycle available.</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ════ Commission Summary ════ -->
+    <h2 class="section-title">&#128176; Commission Summary</h2>
+    <div class="ov-grid">
+      <div class="ov-card">
+        <h3>Aggregate</h3>
+        <div class="stat-row">
+          <div class="stat-item"><div class="val">${{ o.commission_stats.total_attributed|default:"0.00"|floatformat:2 }}</div><div class="lbl">Attributed</div></div>
+          <div class="stat-item"><div class="val">${{ o.commission_stats.total_earned|default:"0.00"|floatformat:2 }}</div><div class="lbl">Earned</div></div>
+          <div class="stat-item"><div class="val">${{ o.commission_stats.total_charged|default:"0.00"|floatformat:2 }}</div><div class="lbl">Charged</div></div>
+        </div>
+        <div class="stat-row">
+          <div class="stat-item"><div class="val" style="color:{% if o.commission_stats.pending_count > 0 %}#e65100{% else %}#2e7d32{% endif %}">{{ o.commission_stats.pending_count|default:"0" }}</div><div class="lbl">Pending</div></div>
+          <div class="stat-item"><div class="val" style="color:{% if o.commission_stats.rejected_count > 0 %}#c62828{% else %}#2e7d32{% endif %}">{{ o.commission_stats.rejected_count|default:"0" }}</div><div class="lbl">Rejected</div></div>
+          <div class="stat-item"><div class="val">{{ o.commission_stats.recorded_count|default:"0" }}</div><div class="lbl">Recorded</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Commissions -->
+    {% if o.recent_commissions %}
+    <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      <table class="data-table">
+        <thead>
+          <tr><th>Order</th><th>Date</th><th>Attributed</th><th>Earned</th><th>Charged</th><th>Status</th><th>Phase</th><th>Charge</th></tr>
+        </thead>
+        <tbody>
+          {% for c in o.recent_commissions %}
+          <tr>
+            <td><a href="{% url 'admin:revenue_commissionrecord_change' c.id %}">{{ c.order_id|slice:":12" }}...</a></td>
+            <td>{{ c.order_date|date:"M d" }}</td>
+            <td>${{ c.attributed_revenue|floatformat:2 }}</td>
+            <td>${{ c.commission_earned|floatformat:2 }}</td>
+            <td>${{ c.commission_charged|floatformat:2 }}</td>
+            <td><span class="status-badge
+              {% if c.status == 'RECORDED' %}status-active
+              {% elif c.status == 'PENDING' or c.status == 'TRIAL_PENDING' %}status-pending
+              {% elif c.status == 'REJECTED' or c.status == 'FAILED' %}status-cancelled
+              {% else %}status-other{% endif %}">{{ c.get_status_display }}</span></td>
+            <td>{{ c.get_billing_phase_display }}</td>
+            <td>{{ c.get_charge_type_display }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- ════ Invoices ════ -->
+    {% if o.recent_invoices %}
+    <h2 class="section-title">&#128196; Recent Invoices</h2>
+    <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      <table class="data-table">
+        <thead>
+          <tr><th>Invoice #</th><th>Date</th><th>Total</th><th>Paid</th><th>Outstanding</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for inv in o.recent_invoices %}
+          <tr>
+            <td>{{ inv.invoice_number|default:inv.shopify_invoice_id|slice:":12" }}</td>
+            <td>{{ inv.invoice_date|date:"M d, Y" }}</td>
+            <td>${{ inv.total_amount|floatformat:2 }}</td>
+            <td>${{ inv.amount_paid|floatformat:2 }}</td>
+            <td style="color:{% if inv.outstanding_amount > 0 %}#c62828{% else %}#2e7d32{% endif %};font-weight:600;">${{ inv.outstanding_amount|floatformat:2 }}</td>
+            <td><span class="status-badge
+              {% if inv.status == 'PAID' %}status-active
+              {% elif inv.status == 'PENDING' or inv.status == 'OVERDUE' %}status-pending
+              {% elif inv.status == 'CANCELLED' %}status-cancelled
+              {% else %}status-other{% endif %}">{{ inv.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- ════ Quick Actions ════ -->
+    <h2 class="section-title">&#9889; Quick Actions</h2>
+    <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;padding:16px;">
+      <div class="quick-actions">
+        {% if o.subscription %}
+        <a href="{% url 'admin:shops_shop_change' shop.id %}" class="act-primary">&#9998; Edit Shop</a>
+        <a href="{% url 'admin:shops_shop_changelist' %}?q={{ shop.shop_domain }}" class="act-secondary">&#128269; Find in List</a>
+        <a href="{% url 'admin:revenue_commissionrecord_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128176; View Commissions</a>
+        <a href="{% url 'admin:billing_shopsubscription_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128197; View Subscription</a>
+        {% endif %}
+        <a href="{% url 'admin:shops_shop_overview' %}?shop={{ shop.shop_domain }}" class="act-secondary">&#128260; Refresh</a>
+      </div>
+      <div style="margin-top:12px;font-size:12px;color:#888;">
+        For batch operations, use the <a href="{% url 'admin:shops_shop_changelist' %}">Shops list view</a>
+        with the action dropdown.
+      </div>
+    </div>
+
+    {% endwith %}
+  {% endif %}
+</div>
+{% endblock %}

@@ -16,7 +16,6 @@ from app.core.database.models.enums import (
     BillingPhase,
     CommissionStatus,
     ChargeType,
-    SubscriptionType,
     SubscriptionStatus,
 )
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
@@ -134,37 +133,24 @@ class CommissionServiceV2:
         commission_rate: Decimal,
         purchase_attr: PurchaseAttribution,
     ) -> Optional[CommissionRecord]:
-        """Create commission record for trial phase."""
-        try:
-            # Get current trial revenue from commission records
-            current_trial_revenue = (
-                await self.billing_repository.calculate_trial_revenue(shop_id)
-            )
+        """Create commission record for trial phase and atomically update trial_revenue."""
+        # Save commission record
+        commission = self._build_trial_commission(
+            shop_id,
+            purchase_attribution_id,
+            purchase_attr,
+            attributed_revenue,
+            commission_earned,
+            commission_rate,
+            shop_subscription,
+        )
+        await self.commission_repository.save(commission)
 
-            # Create commission record
-            commission = self._build_trial_commission(
-                shop_id,
-                purchase_attribution_id,
-                purchase_attr,
-                attributed_revenue,
-                commission_earned,
-                commission_rate,
-                current_trial_revenue,
-                shop_subscription,
-            )
+        # Atomically update trial_revenue on subscription and check completion.
+        # Pass attributed_revenue as the incremental amount to add.
+        await self.billing_repository.check_trial_completion(shop_id, attributed_revenue)
 
-            await self.commission_repository.save(commission)
-
-            # Check trial completion using repository method
-            await self.billing_repository.check_trial_completion(
-                shop_id, current_trial_revenue + attributed_revenue
-            )
-
-            return commission
-
-        except Exception as e:
-            logger.error(f"❌ Error creating trial commission: {e}")
-            return None
+        return commission
 
     def _build_trial_commission(
         self,
@@ -174,27 +160,23 @@ class CommissionServiceV2:
         attributed_revenue: Decimal,
         commission_earned: Decimal,
         commission_rate: Decimal,
-        trial_accumulated: Decimal,
         shop_subscription: ShopSubscription,
     ) -> CommissionRecord:
-        """Build trial commission record."""
+        """Build trial commission record (no Shopify charge, no cycle dates)."""
         return CommissionRecord(
             shop_id=shop_id,
             purchase_attribution_id=purchase_attribution_id,
-            billing_cycle_id=None,  # No billing cycle during trial
+            billing_cycle_id=None,
             order_id=str(purchase_attr.order_id),
             order_date=purchase_attr.purchase_at,
             attributed_revenue=attributed_revenue,
             commission_rate=commission_rate,
             commission_earned=commission_earned,
-            commission_charged=Decimal("0"),  # Not charged during trial
+            commission_charged=Decimal("0"),
             commission_overflow=Decimal("0"),
-            billing_cycle_start=None,
-            billing_cycle_end=None,
             cycle_usage_before=Decimal("0"),
             cycle_usage_after=Decimal("0"),
             capped_amount=shop_subscription.effective_trial_threshold,
-            trial_accumulated=trial_accumulated,
             billing_phase=BillingPhase.TRIAL,
             status=CommissionStatus.TRIAL_PENDING,
             charge_type=ChargeType.TRIAL,
@@ -302,12 +284,9 @@ class CommissionServiceV2:
             commission_earned=commission_earned,
             commission_charged=charge_data["actual_charge"],
             commission_overflow=charge_data["overflow"],
-            billing_cycle_start=current_cycle.start_date,
-            billing_cycle_end=current_cycle.end_date,
             cycle_usage_before=current_cycle.usage_amount,
             cycle_usage_after=current_cycle.usage_amount + charge_data["actual_charge"],
             capped_amount=current_cycle.current_cap_amount,
-            trial_accumulated=Decimal("0"),  # Not in trial
             billing_phase=BillingPhase.PAID,
             status=CommissionStatus.PENDING,
             charge_type=charge_data["charge_type"],
@@ -425,6 +404,13 @@ class CommissionServiceV2:
                 f"{commission.shop_id}-{commission.id}-{commission.order_id}"
             )
 
+            # ✅ TWO-PHASE COMMIT: Set RECORDING before calling Shopify.
+            # If the process crashes after Shopify succeeds but before we update to RECORDED,
+            # a reconciler can pick up the stuck RECORDING commission.
+            commission.status = CommissionStatus.RECORDING
+            commission.updated_at = now_utc()
+            await self.commission_repository.flush()
+
             # Record to Shopify with retry and backoff
             logger.info(f"📤 Recording ${commission.commission_charged} to Shopify...")
 
@@ -445,18 +431,7 @@ class CommissionServiceV2:
                     currency=commission.currency,
                     idempotency_key=idempotency_key,
                     commission_ids=[commission.id],
-                    billing_period={
-                        "start": (
-                            commission.billing_cycle_start.isoformat()
-                            if commission.billing_cycle_start
-                            else None
-                        ),
-                        "end": (
-                            commission.billing_cycle_end.isoformat()
-                            if commission.billing_cycle_end
-                            else None
-                        ),
-                    },
+                    billing_period={"start": None, "end": None},
                 )
 
                 # Check if Shopify returned an error (cap exceeded or other)
@@ -546,6 +521,7 @@ class CommissionServiceV2:
                 "idempotency_key": idempotency_key,
             }
 
+            # ✅ Two-phase commit complete: RECORDING → RECORDED
             commission.status = CommissionStatus.RECORDED
             commission.updated_at = now_utc()
 
@@ -684,12 +660,9 @@ class CommissionServiceV2:
         commission_data: Dict[str, Decimal],
         purchase_attr: PurchaseAttribution,
     ) -> Optional[CommissionRecord]:
-        """Create commission based on subscription type and status."""
+        """Create commission based on subscription status."""
 
-        if (
-            shop_subscription.subscription_type == SubscriptionType.TRIAL
-            and shop_subscription.status == SubscriptionStatus.TRIAL
-        ):
+        if shop_subscription.status == SubscriptionStatus.TRIAL:
             return await self._create_trial_commission(
                 shop_id,
                 purchase_attribution_id,
@@ -699,10 +672,7 @@ class CommissionServiceV2:
                 commission_data["commission_rate"],
                 purchase_attr,
             )
-        elif (
-            shop_subscription.subscription_type == SubscriptionType.PAID
-            and shop_subscription.status == SubscriptionStatus.ACTIVE
-        ):
+        elif shop_subscription.status == SubscriptionStatus.ACTIVE:
             return await self._create_paid_commission(
                 shop_id,
                 purchase_attribution_id,
@@ -714,7 +684,6 @@ class CommissionServiceV2:
             )
         else:
             logger.warning(
-                f"⚠️ Shop {shop_id} type: {shop_subscription.subscription_type.value}, "
-                f"status: {shop_subscription.status.value} - not processing commission"
+                f"⚠️ Shop {shop_id} status: {shop_subscription.status.value} - not processing commission"
             )
             return None

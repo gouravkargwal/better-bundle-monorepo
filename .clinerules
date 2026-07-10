@@ -1,0 +1,9 @@
+ly # Cline Project Configuration
+
+## Always read this FIRST
+
+Before answering any question or making any change to this codebase, you MUST read `.cline-knowledge-map.md`. It contains the complete project architecture, directory structure, core flows, database schema, and critical gotchas.
+
+## Project Context
+
+This is **BetterBundle** - a Shopify App monorepo with AI-powered product bundle recommendations and commission-based billing.

@@ -6,6 +6,7 @@ Django should NEVER create these tables - they already exist!
 
 from django.db import models
 from django.db.models import Sum
+from django.utils import timezone
 from apps.core.models import BaseModel
 
 
@@ -82,8 +83,6 @@ class ShopSubscription(BaseModel):
 
     STATUS_CHOICES = [
         ("TRIAL", "Trial"),
-        ("PENDING_APPROVAL", "Pending Approval"),
-        ("TRIAL_COMPLETED", "Trial Completed"),
         ("ACTIVE", "Active"),
         ("SUSPENDED", "Suspended"),
         ("CANCELLED", "Cancelled"),
@@ -259,3 +258,60 @@ class BillingInvoice(BaseModel):
     def outstanding_amount(self):
         """Calculate outstanding amount"""
         return self.total_amount - self.amount_paid
+
+
+class SchedulerJobExecution(models.Model):
+    """
+    Tracks every run of scheduled/background jobs.
+    Matches python-worker/app/core/database/models/scheduler_job_execution.py
+    """
+
+    JOB_STATUS_CHOICES = [
+        ("RUNNING", "Running"),
+        ("SUCCESS", "Success"),
+        ("FAILED", "Failed"),
+        ("SKIPPED", "Skipped"),
+    ]
+    TRIGGER_CHOICES = [
+        ("scheduled", "Scheduled"),
+        ("manual", "Manual"),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    job_name = models.CharField(max_length=100, db_index=True)
+    job_group = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    started_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    duration_ms = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=JOB_STATUS_CHOICES, default="RUNNING", db_index=True)
+    success = models.BooleanField(null=True)
+    result_summary = models.TextField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    error_details = models.TextField(null=True, blank=True)
+    triggered_by = models.CharField(max_length=20, choices=TRIGGER_CHOICES, default="scheduled")
+    attempt_number = models.IntegerField(default=1)
+    items_processed = models.IntegerField(null=True, blank=True)
+    metadata_json = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "scheduler_job_executions"
+        ordering = ["-started_at"]
+        verbose_name = "Job Execution"
+        verbose_name_plural = "Job Executions"
+
+    def __str__(self):
+        return f"{self.job_name} - {self.status} ({self.started_at.strftime('%Y-%m-%d %H:%M')})"
+
+    @property
+    def duration_display(self):
+        """Human-readable duration"""
+        if self.duration_ms is None:
+            return "—"
+        seconds = self.duration_ms / 1000
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        return f"{seconds/60:.1f}m"
+
+    # Note: status_badge display is handled in the admin class, not here
+    # to avoid importing django.utils.html.format_html in models

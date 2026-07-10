@@ -146,6 +146,7 @@ model commission_records {
   @@index([status, created_at], map: "idx_commission_status_created")
   @@index([billing_cycle_end], map: "ix_commission_records_billing_cycle_end")
   @@index([billing_cycle_id], map: "ix_commission_records_billing_cycle_id")
+  @@index([shop_id, billing_cycle_id, billing_phase, status], map: "idx_commission_shop_cycle_phase_status")
   @@index([billing_cycle_start], map: "ix_commission_records_billing_cycle_start")
   @@index([billing_phase], map: "ix_commission_records_billing_phase")
   @@index([deleted_at], map: "ix_commission_records_deleted_at")
@@ -699,12 +700,12 @@ model sessions {
 }
 
 model shop_subscriptions {
-  subscription_type          subscription_type_enum
   status                     subscription_status_enum
   subscription_plan_id       String                   @db.VarChar(255)
   pricing_tier_id            String                   @db.VarChar(255)
   trial_threshold_override   Decimal?                 @db.Decimal(10, 2)
   trial_duration_days        Int?
+  trial_revenue              Decimal                  @default(0) @db.Decimal(10, 2)
   user_chosen_cap_amount     Decimal?                 @db.Decimal(10, 2)
   auto_renew                 Boolean
   shopify_subscription_id    String?                  @db.VarChar(255)
@@ -736,7 +737,6 @@ model shop_subscriptions {
   @@index([expires_at], map: "ix_shop_subscriptions_expires_at")
   @@index([shopify_subscription_id], map: "ix_shop_subscriptions_shopify_subscription_id")
   @@index([started_at], map: "ix_shop_subscriptions_started_at")
-  @@index([subscription_type], map: "ix_shop_subscriptions_subscription_type")
 }
 
 model shops {
@@ -1104,6 +1104,7 @@ enum commission_status_enum {
   TRIAL_PENDING
   TRIAL_COMPLETED
   PENDING
+  RECORDING
   RECORDED
   INVOICED
   REJECTED
@@ -1119,17 +1120,9 @@ enum subscription_plan_type_enum {
 }
 
 enum subscription_status_enum {
+  TRIAL
   ACTIVE
-  COMPLETED
-  CANCELLED
   SUSPENDED
+  CANCELLED
   EXPIRED
-  TRIAL
-  TRIAL_COMPLETED
-  PENDING_APPROVAL
-}
-
-enum subscription_type_enum {
-  TRIAL
-  PAID
 }

@@ -18,68 +18,68 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get billing plan
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Get the active subscription using the unified model
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: { in: ["active", "suspended"] },
+        is_active: true,
       },
+      include: {
+        pricing_tiers: true,
+        billing_cycles: {
+          where: { status: "ACTIVE" },
+          orderBy: { cycle_number: "desc" },
+          take: 1,
+        },
+      },
+      orderBy: { created_at: "desc" },
     });
 
-    if (!billingPlan) {
+    if (!shopSubscription) {
       return json({
         shop_id: shopRecord.id,
-        billing_status: "no_plan",
-        message: "No billing plan found",
+        billing_status: "no_subscription",
+        message: "No subscription found",
+        shop_active: shopRecord.is_active,
       });
     }
 
-    // Determine billing status
-    let status: string;
-    let message: string;
+    // Determine billing status from unified subscription status
+    const statusMap: Record<string, string> = {
+      TRIAL: "trial_active",
+      PENDING_APPROVAL: "subscription_pending",
+      ACTIVE: "subscription_active",
+      SUSPENDED: "subscription_suspended",
+      CANCELLED: "subscription_cancelled",
+      EXPIRED: "subscription_expired",
+    };
 
-    if (billingPlan.is_trial_active) {
-      // ✅ NO REFUND COMMISSION POLICY - Only calculate gross attributed revenue
-      const purchasesAgg = await prisma.purchase_attributions.aggregate({
-        where: { shop_id: shopRecord.id },
-        _sum: { total_revenue: true },
-      });
+    const subscriptionStatus = shopSubscription.status as string;
+    const billingStatus = statusMap[subscriptionStatus] || subscriptionStatus.toLowerCase();
 
-      const currentRevenue = Number(purchasesAgg._sum.total_revenue || 0);
-      const threshold = billingPlan.trial_threshold || 200;
-
-      status = "trial_active";
-      message = `Trial active - $${currentRevenue} / $${threshold} revenue`;
-    } else if (billingPlan.subscription_status === "active") {
-      status = "subscription_active";
-      message = "Subscription active";
-    } else if (billingPlan.subscription_status === "pending") {
-      status = "subscription_pending";
-      message = "Subscription pending approval";
-    } else if (billingPlan.subscription_status === "declined") {
-      status = "subscription_declined";
-      message = "Subscription declined";
-    } else {
-      status = "suspended";
-      message = "Services suspended";
-    }
+    const trialThreshold = Number(
+      shopSubscription.trial_threshold_override ||
+        shopSubscription.pricing_tiers?.trial_threshold_amount ||
+        75,
+    );
+    const trialRevenue = Number(shopSubscription.trial_revenue || 0);
 
     return json({
       shop_id: shopRecord.id,
-      billing_status: status,
-      message,
-      trial_active: billingPlan.is_trial_active,
-      trial_revenue: billingPlan.trial_revenue || 0,
-      trial_threshold: billingPlan.trial_threshold || 200,
-      subscription_id: billingPlan.subscription_id,
-      subscription_status: billingPlan.subscription_status,
-      subscription_confirmation_url: billingPlan.subscription_confirmation_url,
-      requires_subscription_approval:
-        billingPlan.requires_subscription_approval,
+      billing_status: billingStatus,
+      message: getStatusMessage(billingStatus, trialRevenue, trialThreshold),
+      trial_active: shopSubscription.status === "TRIAL",
+      trial_revenue: trialRevenue,
+      trial_threshold: trialThreshold,
+      subscription_id: shopSubscription.shopify_subscription_id,
+      subscription_status: shopSubscription.shopify_status,
+      subscription_confirmation_url: shopSubscription.confirmation_url,
       shop_active: shopRecord.is_active,
+      currency: shopRecord.currency_code || "USD",
+      commission_rate: Number(shopSubscription.pricing_tiers?.commission_rate || 0.03),
     });
   } catch (error) {
-    console.error("❌ Error getting billing status:", error);
+    logger.error({ error }, "Error getting billing status");
     return json(
       {
         success: false,
@@ -87,5 +87,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
       },
       { status: 500 },
     );
+  }
+}
+
+function getStatusMessage(
+  status: string,
+  trialRevenue: number,
+  trialThreshold: number,
+): string {
+  switch (status) {
+    case "trial_active":
+      return `Trial active — $${trialRevenue.toFixed(2)} / $${trialThreshold.toFixed(2)} revenue`;
+    case "subscription_active":
+      return "Subscription active";
+    case "subscription_pending":
+      return "Subscription pending approval";
+    case "subscription_cancelled":
+      return "Subscription cancelled";
+    case "subscription_suspended":
+      return "Services suspended — cap reached or billing issue";
+    default:
+      return `Status: ${status}`;
   }
 }

@@ -63,8 +63,10 @@ export async function action({ request }: ActionFunctionArgs) {
           admin,
         );
         break;
-      case "CANCELLED":
       case "DECLINED":
+        await handleDeclinedSubscription(shopRecord, subscriptionId);
+        break;
+      case "CANCELLED":
         await handleCancelledSubscription(shopRecord, subscriptionId);
         break;
       case "APPROACHING_CAPPED_AMOUNT":
@@ -158,7 +160,7 @@ async function handleActiveSubscription(
 
     // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: { shop_id: shopRecord.id },
+      where: { shop_id: shopRecord.id, is_active: true },
       include: {
         pricing_tiers: true,
         billing_cycles: true,
@@ -180,7 +182,6 @@ async function handleActiveSubscription(
       data: {
         shopify_subscription_id: subscriptionId,
         shopify_status: "ACTIVE",
-        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
         status: "ACTIVE",
         is_active: true,
         updated_at: new Date(),
@@ -327,6 +328,54 @@ async function handleActiveSubscription(
   }
 }
 
+async function handleDeclinedSubscription(
+  shopRecord: any,
+  subscriptionId: string,
+) {
+  try {
+    // Find the shop subscription record
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
+      where: { shop_id: shopRecord.id, is_active: true },
+    });
+
+    if (!shopSubscription) {
+      logger.error(
+        { shop: shopRecord.shop_domain, subscriptionId },
+        "No shop subscription found for declined subscription",
+      );
+      return;
+    }
+
+    // DECLINED means the merchant rejected the approval in Shopify.
+    // Reset to TRIAL status so they can set up billing again.
+    // Keep is_active=true so the app works while they retry.
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        shopify_subscription_id: null,
+        shopify_line_item_id: null,
+        shopify_status: "DECLINED",
+        status: "TRIAL",  // Reset to trial so they can set up billing again
+        confirmation_url: null,
+        cancelled_at: null,
+        updated_at: new Date(),
+      },
+    });
+
+    logger.info(
+      {
+        shop: shopRecord.shop_domain,
+        subscriptionId,
+        shopSubscriptionId: shopSubscription.id,
+      },
+      "Subscription was declined — reset to TRIAL for retry",
+    );
+  } catch (error) {
+    logger.error({ error }, "Error handling declined subscription");
+    throw error;
+  }
+}
+
 async function handleCancelledSubscription(
   shopRecord: any,
   subscriptionId: string,
@@ -334,7 +383,7 @@ async function handleCancelledSubscription(
   try {
     // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: { shop_id: shopRecord.id },
+      where: { shop_id: shopRecord.id, is_active: true },
     });
 
     if (!shopSubscription) {
@@ -365,7 +414,7 @@ async function handleCancelledSubscription(
         is_active: false,
         suspended_at: new Date(),
         suspension_reason: "subscription_cancelled",
-        service_impact: "suspended", // ✅ FIX: Shortened to fit VarChar(50) limit
+        service_impact: "suspended",
         updated_at: new Date(),
       },
     });

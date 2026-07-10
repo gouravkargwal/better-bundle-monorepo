@@ -17,7 +17,7 @@ from .enums import (
     InvoiceStatus,
     ExtensionType,
     AppBlockTarget,
-    # New enums for redesigned billing system
+    # Billing system enums
     SubscriptionPlanType,
     SubscriptionStatus,
     BillingCycleStatus,
@@ -27,7 +27,6 @@ from .enums import (
     BillingPhase,
     CommissionStatus,
     ChargeType,
-    SubscriptionType,
 )
 
 # Core business models
@@ -80,9 +79,10 @@ from .billing_cycle import BillingCycle
 # Commission models
 from .commission import CommissionRecord
 
-# Trial configuration models
+# Scheduler job execution tracking
+from .scheduler_job_execution import SchedulerJobExecution
 
-# Extension models
+# Trial configuration models
 
 # Export all models
 __all__ = [
@@ -107,7 +107,6 @@ __all__ = [
     "BillingPhase",
     "CommissionStatus",
     "ChargeType",
-    "SubscriptionType",
     # Core models
     "Shop",
     "Session",
@@ -144,4 +143,5 @@ __all__ = [
     "CommissionRecord",
     # Trial configuration models
     # Extension models
+    "SchedulerJobExecution",
 ]

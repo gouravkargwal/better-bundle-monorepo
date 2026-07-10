@@ -159,12 +159,12 @@ class LoggingSettings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_FORMAT: str = Field(default="console", env="LOG_FORMAT")
 
-    # Grafana Loki settings
-    GF_SECURITY_ENABLED: bool = Field(default=False, env="GF_SECURITY_ENABLED")
-    GF_SECURITY_URL: str = Field(default="http://loki:3100", env="GF_SECURITY_URL")
-    GF_SECURITY_ADMIN_USER: str = Field(default="admin", env="GF_SECURITY_ADMIN_USER")
-    GF_SECURITY_ADMIN_PASSWORD: str = Field(
-        default="admin", env="GF_SECURITY_ADMIN_PASSWORD"
+    # OpenObserve settings (replaces Grafana/Loki)
+    OPENOBSERVE_ENABLED: bool = Field(default=False, env="OPENOBSERVE_ENABLED")
+    OPENOBSERVE_URL: str = Field(default="http://openobserve:5080", env="OPENOBSERVE_URL")
+    OPENOBSERVE_EMAIL: str = Field(default="", env="OPENOBSERVE_EMAIL")
+    OPENOBSERVE_PASSWORD: str = Field(
+        default="", env="OPENOBSERVE_PASSWORD"
     )
 
     # Comprehensive Logging Configuration
@@ -187,16 +187,12 @@ class LoggingSettings(BaseSettings):
             "prometheus": {
                 "enabled": True,
             },
-            "grafana": {
+            "openobserve": {
                 "enabled": False,
-                "url": "http://loki:3100",
-                "username": "admin",
-                "password": "admin",
-                "service_name": "betterbundle-python-worker",
-                "labels": {
-                    "service": "betterbundle-python-worker",
-                    "env": "development",
-                },
+                "url": "http://openobserve:5080",
+                "email": "",
+                "password": "",
+                "org_id": "default",
             },
             "telemetry": {
                 "enabled": False,
@@ -220,10 +216,10 @@ class LoggingSettings(BaseSettings):
 
     def model_post_init(self, __context):
         """Update logging config with environment variables after initialization"""
-        self.LOGGING["grafana"]["enabled"] = self.GF_SECURITY_ENABLED
-        self.LOGGING["grafana"]["url"] = self.GF_SECURITY_URL
-        self.LOGGING["grafana"]["username"] = self.GF_SECURITY_ADMIN_USER
-        self.LOGGING["grafana"]["password"] = self.GF_SECURITY_ADMIN_PASSWORD
+        self.LOGGING["openobserve"]["enabled"] = self.OPENOBSERVE_ENABLED
+        self.LOGGING["openobserve"]["url"] = self.OPENOBSERVE_URL
+        self.LOGGING["openobserve"]["email"] = self.OPENOBSERVE_EMAIL
+        self.LOGGING["openobserve"]["password"] = self.OPENOBSERVE_PASSWORD
 
 
 class Settings(BaseSettings):

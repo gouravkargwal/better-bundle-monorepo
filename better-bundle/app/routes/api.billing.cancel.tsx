@@ -99,14 +99,19 @@ export async function action({ request }: ActionFunctionArgs) {
       logger.info({ shop }, "No Shopify subscription to cancel");
     }
 
-    // ✅ Clear user-chosen cap and update status since they're starting over
+    // ✅ Clear user-chosen cap and reset to TRIAL so they can set up billing again.
+    // TRIAL (not TRIAL_COMPLETED — that enum doesn't exist) allows the merchant
+    // to go through the trial → setup flow again fresh.
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         user_chosen_cap_amount: null,
+        shopify_subscription_id: null,
+        shopify_line_item_id: null,
+        confirmation_url: null,
         shopify_status: "CANCELLED",
-        status: "TRIAL_COMPLETED", // Reset to trial completed so they can set up again
-        is_active: true, // Reactivate so they can set up billing again
+        status: "TRIAL", // Reset to trial so they can set up billing again
+        is_active: true, // Keep active so they can set up billing again
         cancelled_at: new Date(),
         updated_at: new Date(),
       },

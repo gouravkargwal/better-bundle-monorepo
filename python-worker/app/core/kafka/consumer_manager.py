@@ -96,6 +96,20 @@ class KafkaConsumerManager:
                 except Exception as e:
                     logger.error(f"❌ Failed to start {name} consumer: {e}")
 
+            # Start the stuck-RECORDING commission reconciler as a background loop
+            shopify_usage_consumer = self.consumers.get("shopify_usage")
+            if shopify_usage_consumer and hasattr(
+                shopify_usage_consumer, "start_reconciler"
+            ):
+                asyncio.create_task(
+                    shopify_usage_consumer.start_reconciler(interval_seconds=300)
+                )
+                logger.info("✅ Started RECORDING commission reconciler (5-min interval)")
+            else:
+                logger.warning(
+                    "⚠️ shopify_usage consumer does not have start_reconciler — reconciler not started"
+                )
+
             self._running = True
 
         except Exception as e:

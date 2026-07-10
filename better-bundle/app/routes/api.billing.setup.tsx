@@ -33,7 +33,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // ✅ Get shop subscription - allow if trial is completed OR pending approval
+    // ✅ Get shop subscription
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
       include: {
@@ -51,74 +51,62 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // ✅ Additional validation: Check if trial threshold was actually reached
-    if (shopSubscription.status === "PENDING_APPROVAL") {
-      const actualRevenue = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopRecord.id,
-          billing_phase: "TRIAL",
-          status: {
-            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-          },
+    // Validate subscription can proceed to billing setup.
+    // Allowed statuses: PENDING_APPROVAL (trial completed, ready for approval)
+    // Not allowed: TRIAL (must complete trial first), ACTIVE (already active),
+    // CANCELLED/EXPIRED (must go through fresh setup).
+    if (shopSubscription.status === "TRIAL") {
+      return json(
+        {
+          success: false,
+          error:
+            "Your trial is still active. Please complete the trial before setting up billing.",
         },
-        _sum: {
-          attributed_revenue: true,
+        { status: 400 },
+      );
+    }
+
+    if (shopSubscription.status === "ACTIVE") {
+      return json(
+        {
+          success: false,
+          error: "A subscription is already active.",
         },
-      });
-
-      const actualAccumulatedRevenue = Number(
-        actualRevenue._sum?.attributed_revenue || 0,
+        { status: 400 },
       );
-      const thresholdAmount = Number(
-        shopSubscription.trial_threshold_override ||
-          shopSubscription.pricing_tiers?.trial_threshold_amount ||
-          0,
-      );
+    }
 
-      if (actualAccumulatedRevenue < thresholdAmount) {
-        return json(
-          {
-            success: false,
-            error:
-              "Trial threshold not reached. Please complete your trial first.",
-          },
-          { status: 400 },
-        );
-      }
+    if (shopSubscription.status === "CANCELLED" || shopSubscription.status === "EXPIRED") {
+      return json(
+        {
+          success: false,
+          error:
+            "Your previous subscription was cancelled. Please start the billing setup from scratch.",
+        },
+        { status: 400 },
+      );
+    }
+
+    // Validate trial threshold was reached before allowing billing setup
+    const trialRevenue = Number(shopSubscription.trial_revenue || 0);
+    const thresholdAmount = Number(
+      shopSubscription.trial_threshold_override ||
+        shopSubscription.pricing_tiers?.trial_threshold_amount ||
+        0,
+    );
+
+    if (trialRevenue < thresholdAmount) {
+      return json(
+        {
+          success: false,
+          error:
+            "Trial threshold not reached. Please complete your trial first.",
+        },
+        { status: 400 },
+      );
     }
 
     // ✅ No need to check existing Shopify subscriptions - we fetch status from Shopify API in real-time
-
-    // Get default subscription plan and pricing tier
-    const defaultPlan = await prisma.subscription_plans.findFirst({
-      where: {
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!defaultPlan) {
-      return json(
-        { success: false, error: "No default subscription plan found" },
-        { status: 500 },
-      );
-    }
-
-    const defaultPricingTier = await prisma.pricing_tiers.findFirst({
-      where: {
-        subscription_plan_id: defaultPlan.id,
-        currency: shopRecord.currency_code || "USD",
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!defaultPricingTier) {
-      return json(
-        { success: false, error: "No pricing tier found for currency" },
-        { status: 500 },
-      );
-    }
 
     // Create Shopify subscription using GraphQL
     const currency = shopRecord.currency_code;
@@ -166,6 +154,11 @@ export async function action({ request }: ActionFunctionArgs) {
     const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
     const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
 
+    const commissionRate = Number(
+      shopSubscription.pricing_tiers?.commission_rate || 0.03,
+    );
+    const commissionRatePct = (commissionRate * 100).toFixed(1);
+
     const variables = {
       name: "Better Bundle - Usage Based",
       // Redirect back to app after approval
@@ -175,7 +168,7 @@ export async function action({ request }: ActionFunctionArgs) {
         {
           plan: {
             appUsagePricingDetails: {
-              terms: `3% of attributed revenue (capped at $${cappedAmount}/month)`,
+              terms: `${commissionRatePct}% of attributed revenue (capped at $${cappedAmount}/month)`,
               cappedAmount: {
                 amount: cappedAmount,
                 currencyCode: currency,
@@ -211,21 +204,15 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // ✅ Mark subscription as SUSPENDED - Backend role ends here, Shopify takes over
+    // Shopify subscription created — store the IDs but keep status as TRIAL.
+    // PENDING_APPROVAL has been removed — the merchant stays in TRIAL until the
+    // APP_SUBSCRIPTIONS_UPDATE webhook confirms ACTIVE.
+    // The UI checks confirmation_url to show the approval button.
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        status: "SUSPENDED" as any, // Backend no longer tracks status
-        user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
-        is_active: false,
-        updated_at: new Date(),
-      },
-    });
-
-    // Update shop subscription with Shopify subscription info
-    await prisma.shop_subscriptions.update({
-      where: { id: shopSubscription.id },
-      data: {
+        status: "TRIAL", // Stay in TRIAL — confirmation_url handles the pending state
+        user_chosen_cap_amount: monthlyCap,
         shopify_subscription_id: subscription.id,
         shopify_line_item_id: subscription.lineItems[0].id,
         confirmation_url: confirmationUrl,

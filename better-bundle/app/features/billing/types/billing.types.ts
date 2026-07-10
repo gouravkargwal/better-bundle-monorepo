@@ -25,19 +25,32 @@ export interface TrialData {
   progress: number; // 0-100
   daysRemaining?: number;
   currency: string;
+  commissionRate: number; // e.g. 0.03 for 3%
 }
 
 export interface SubscriptionData {
   id: string;
   status: "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED";
   spendingLimit: number;
-  currentUsage: number; // Total: shopifyUsage + expectedCharge
-  shopifyUsage: number; // What's actually recorded to Shopify (RECORDED commissions)
-  expectedCharge: number; // Pending commissions not yet recorded (PENDING status only, excluding REJECTED)
-  rejectedAmount?: number; // Optional: Show rejected commissions separately for transparency
+  /**
+   * Current usage sourced from billing_cycles.usage_amount (single source of truth,
+   * maintained by the Python worker via update_billing_cycle_usage).
+   * This reflects what's been recorded to Shopify — no longer recomputed by the Remix app.
+   */
+  currentUsage: number;
+  /** Shopify GraphQL balanceUsed — for transparency in the breakdown */
+  shopifyUsage: number;
+  /**
+   * Always 0. Previously recomputed from PENDING commission records in the Remix app,
+   * duplicating the Python worker's logic. Now usage_amount is the single source of truth.
+   */
+  expectedCharge: number;
+  /** Optional: Show rejected commissions separately for transparency */
+  rejectedAmount?: number;
   usagePercentage: number;
   confirmationUrl?: string;
   currency: string;
+  commissionRate: number; // e.g. 0.03 for 3%
   billingCycle?: {
     startDate: string;
     endDate: string;

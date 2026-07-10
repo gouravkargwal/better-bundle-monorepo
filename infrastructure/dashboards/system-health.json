@@ -1,0 +1,703 @@
+{
+  "version": 5,
+  "dashboardId": "system_health",
+  "title": "System Health",
+  "description": "Service health monitoring across Remix, Python Worker, Django Admin, and Extensions",
+  "role": "",
+  "owner": "",
+  "created": "2026-07-10T07:52:43.460Z",
+  "tabs": [
+    {
+      "name": "Overview",
+      "tabId": "overview",
+      "panels": [
+        {
+          "id": "panel_log_volume",
+          "type": "area",
+          "title": "Log Volume by Service",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" FROM \"default\" WHERE service IN ('remix-app', 'python-worker', 'django-admin', 'phoenix-extension') GROUP BY time, service ORDER BY time",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "histogram"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Count",
+                    "alias": "count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [
+                  {
+                    "label": "Service",
+                    "alias": "service",
+                    "column": "service",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 8,
+            "i": 1,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_error_rate",
+          "type": "area",
+          "title": "Error Rate by Service",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" FROM \"default\" WHERE LOWER(level) IN ('error', 'critical', 'fatal') GROUP BY time, service ORDER BY time",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "histogram"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Errors",
+                    "alias": "count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [
+                  {
+                    "label": "Service",
+                    "alias": "service",
+                    "column": "service",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 8,
+            "i": 2,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_log_levels",
+          "type": "h-bar",
+          "title": "Log Levels Distribution",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT level, count(*) as \"count\" FROM \"default\" GROUP BY level ORDER BY count DESC",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Level",
+                    "alias": "level",
+                    "column": "level",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Count",
+                    "alias": "count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 8,
+            "w": 8,
+            "h": 8,
+            "i": 3,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_recent_errors",
+          "type": "table",
+          "title": "Recent Errors & Warnings",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT _timestamp as \"time\", service, level, logger, message FROM \"default\" WHERE LOWER(level) IN ('error', 'warning', 'critical') ORDER BY _timestamp DESC LIMIT 50",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Time",
+                    "alias": "time",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Service",
+                    "alias": "service",
+                    "column": "service",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Level",
+                    "alias": "level",
+                    "column": "level",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Logger",
+                    "alias": "logger",
+                    "column": "logger",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Message",
+                    "alias": "message",
+                    "column": "message",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  }
+                ],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 8,
+            "y": 8,
+            "w": 16,
+            "h": 8,
+            "i": 4,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        },
+        {
+          "id": "panel_service_uptime",
+          "type": "table",
+          "title": "Services Summary (Last 15 min)",
+          "description": "",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": "numbers",
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": true,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [
+                "#53ca53"
+              ],
+              "seriesBy": "last"
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT service, count(*) as \"log_count\", sum(CASE WHEN LOWER(level) IN ('error','critical','fatal') THEN 1 ELSE 0 END) as \"error_count\", min(_timestamp) as \"first_seen\", max(_timestamp) as \"last_seen\" FROM \"default\" WHERE _timestamp > now() - INTERVAL '15' MINUTE GROUP BY service ORDER BY service",
+              "vrlFunctionQuery": "",
+              "customQuery": false,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Service",
+                    "alias": "service",
+                    "column": "service",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": []
+                  },
+                  {
+                    "label": "Log Count",
+                    "alias": "log_count",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "count"
+                  },
+                  {
+                    "label": "Errors",
+                    "alias": "error_count",
+                    "column": "level",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "sum"
+                  },
+                  {
+                    "label": "First Seen",
+                    "alias": "first_seen",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "min"
+                  },
+                  {
+                    "label": "Last Seen",
+                    "alias": "last_seen",
+                    "column": "_timestamp",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "aggregationFunction": "max"
+                  }
+                ],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 16,
+            "w": 24,
+            "h": 6,
+            "i": 5,
+            "moved": false
+          },
+          "htmlContent": "",
+          "markdownContent": "",
+          "customChartContent": " // To know more about ECharts , \n// visit: https://echarts.apache.org/examples/en/index.html \n// Define your ECharts 'option' here. \noption = { \n \n};"
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "list": [],
+    "showDynamicFilters": true
+  },
+  "defaultDatetimeDuration": {
+    "type": "relative",
+    "relativeTimePeriod": "1h"
+  }
+}

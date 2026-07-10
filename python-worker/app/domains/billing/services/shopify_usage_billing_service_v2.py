@@ -246,7 +246,7 @@ class ShopifyUsageBillingServiceV2:
                     {
                         "plan": {
                             "appUsagePricingDetails": {
-                                "terms": f"3% of attributed revenue (max {self._get_currency_symbol(currency)}{capped_amount:.2f} per month)",
+                                "terms": f"Commission % of attributed revenue (max {self._get_currency_symbol(currency)}{capped_amount:.2f} per month)",
                                 "cappedAmount": {
                                     "amount": capped_amount,
                                     "currencyCode": currency,
@@ -519,7 +519,7 @@ class ShopifyUsageBillingServiceV2:
 
         payload = {"query": query, "variables": variables}
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             return response.json()
@@ -550,11 +550,8 @@ class ShopifyUsageBillingServiceV2:
             )
 
             if shopify_sub:
-                # Update shop subscription status
-                await self.billing_repository.update_shop_subscription_status(
-                    shop_subscription.id, SubscriptionStatus.PENDING_APPROVAL
-                )
-
+                # PENDING_APPROVAL no longer exists — merchant stays in TRIAL
+                # until the APP_SUBSCRIPTIONS_UPDATE webhook confirms ACTIVE.
                 logger.info(f"Stored Shopify subscription data for shop {shop_id}")
             else:
                 logger.error(
@@ -686,3 +683,4 @@ class ShopifyUsageBillingServiceV2:
                 )
         except Exception as e:
             logger.error(f"Error storing usage record: {e}")
+            raise

@@ -120,17 +120,16 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
             requiresCapIncrease: reason === "monthly_cap_reached",
             trialCompleted: shopSubscription.status !== "TRIAL",
             subscriptionActive: false,
-            subscriptionPending: shopSubscription.status === "PENDING_APPROVAL",
+            subscriptionPending: !!shopSubscription.confirmation_url,
           };
         }
 
         // Check subscription status
         const subscriptionActive = shopSubscription.status === "ACTIVE";
-        const subscriptionPending =
-          shopSubscription.status === "PENDING_APPROVAL";
+        const hasConfirmationUrl = !!shopSubscription.confirmation_url;
 
-        // ✅ Trial active - services active
-        if (shopSubscription.status === "TRIAL") {
+        // ✅ TRIAL without confirmation_url — services active
+        if (shopSubscription.status === "TRIAL" && !hasConfirmationUrl) {
           return {
             isSuspended: false,
             reason: "trial_active",
@@ -141,24 +140,12 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
           };
         }
 
-        // ✅ NEW: Trial completed - services SUSPENDED until user sets up billing
-        if (shopSubscription.status === ("TRIAL_COMPLETED" as any)) {
+        // ✅ TRIAL with confirmation_url — trial completed, awaiting Shopify approval
+        if (shopSubscription.status === "TRIAL" && hasConfirmationUrl) {
           return {
             isSuspended: true,
             reason: "trial_completed_awaiting_setup",
             requiresBillingSetup: true,
-            trialCompleted: true,
-            subscriptionActive: false,
-            subscriptionPending: false,
-          };
-        }
-
-        // ✅ Subscription pending approval - services SUSPENDED
-        if (subscriptionPending) {
-          return {
-            isSuspended: true,
-            reason: "subscription_pending_approval",
-            requiresBillingSetup: false,
             trialCompleted: true,
             subscriptionActive: false,
             subscriptionPending: true,

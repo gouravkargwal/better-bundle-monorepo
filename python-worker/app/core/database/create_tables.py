@@ -16,25 +16,31 @@ async def create_all_tables():
     try:
         engine = await get_engine()
 
-        # Use begin() for proper transaction management
-        async with engine.begin() as conn:
-            # Create all tables defined in the models
-            # This is safe to run multiple times - it won't recreate existing tables
-            await conn.run_sync(Base.metadata.create_all)
+        # Create tables one at a time without a wrapping transaction so that
+        # a failure on one table/index doesn't abort the entire batch.
+        # This is needed because after a hot-reload restart, indexes may already
+        # exist from the first run, causing DuplicateTableError.
+        async with engine.connect() as conn:
+            for table in Base.metadata.sorted_tables:
+                try:
+                    await conn.run_sync(Base.metadata.create_all, tables=[table])
+                    await conn.commit()
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if "already exists" in error_msg:
+                        # Table/index already exists — expected on restart
+                        await conn.rollback()
+                    else:
+                        # Real error — log but don't block other tables
+                        logger.warning(f"⚠️ Could not create table {table.name}: {e}")
+                        await conn.rollback()
 
+        logger.info("✅ Database tables verified/created")
         return True
 
     except Exception as e:
-        # Check if it's a duplicate index/table error (which is OK)
-        error_msg = str(e).lower()
-        if any(
-            keyword in error_msg
-            for keyword in ["already exists", "duplicate", "relation"]
-        ):
-            return True
-        else:
-            logger.error(f"❌ Failed to create tables: {e}")
-            return False
+        logger.error(f"❌ Failed to create tables: {e}")
+        return False
 
 
 async def drop_all_tables():

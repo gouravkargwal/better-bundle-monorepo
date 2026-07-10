@@ -12,40 +12,47 @@ export class BillingService {
     admin?: any,
   ): Promise<BillingState> {
     try {
-      // 1. Get trial revenue (single source of truth)
-      const trialRevenue = await this.getTrialRevenue(shopId);
-
-      // 2. Get trial threshold (from subscription override or pricing tier)
-      // Get active subscription (prioritize ACTIVE status, but also check SUSPENDED for cap increases)
+      // 1. Load subscription — single source of truth for trial_revenue and commission_rate
       const subscription = await prisma.shop_subscriptions.findFirst({
         where: {
           shop_id: shopId,
           is_active: true,
         },
         include: { pricing_tiers: true },
-        orderBy: {
-          created_at: "desc", // Get most recent active subscription
-        },
+        orderBy: { created_at: "desc" },
       });
+
+      const trialRevenue = Number(subscription?.trial_revenue || 0);
       const trialThreshold = Number(
         subscription?.trial_threshold_override ||
           subscription?.pricing_tiers?.trial_threshold_amount ||
           75,
       );
+      const commissionRate = Number(
+        subscription?.pricing_tiers?.commission_rate || 0.03,
+      );
 
-      // 3. Simple logic: If trial not completed, show trial
+      // Load shop currency for trial data
+      const shop = await prisma.shops.findUnique({
+        where: { id: shopId },
+        select: { currency_code: true },
+      });
+      const currency = shop?.currency_code || "USD";
+
+      // 2. If trial not completed, show trial
       if (trialRevenue < trialThreshold) {
         return {
           status: "trial_active",
-          trialData: await this.getTrialDataFromRevenue(
-            shopId,
+          trialData: this.buildTrialData(
             trialRevenue,
             trialThreshold,
+            commissionRate,
+            currency,
           ),
         };
       }
 
-      // 4. Check subscription status: Always check Shopify GraphQL first (source of truth)
+      // 3. Check subscription status: Always check Shopify GraphQL first (source of truth)
       if (admin) {
         const shopifyStatus = await this.getShopifySubscriptionStatus(
           shopId,
@@ -53,27 +60,33 @@ export class BillingService {
         );
 
         if (shopifyStatus) {
-          if (
-            shopifyStatus.status === "ACTIVE" ||
-            shopifyStatus.status === "PENDING"
-          ) {
-            // Both ACTIVE and PENDING subscriptions should show as active in our UI
-            // PENDING just means awaiting merchant approval
+          if (shopifyStatus.status === "ACTIVE") {
             return {
               status: "subscription_active",
               subscriptionData: await this.getSubscriptionDataFromShopify(
                 subscription || {},
                 shopifyStatus,
+                commissionRate,
+              ),
+            };
+          }
+          if (shopifyStatus.status === "PENDING") {
+            // Merchant created the subscription but hasn't approved it in Shopify yet
+            return {
+              status: "subscription_pending",
+              subscriptionData: await this.getSubscriptionDataFromShopify(
+                subscription || {},
+                shopifyStatus,
+                commissionRate,
               ),
             };
           }
         }
       } else if (
         subscription &&
-        subscription.subscription_type === "PAID" &&
+        subscription.status === "ACTIVE" &&
         subscription.shopify_subscription_id
       ) {
-        // No admin client, but we have subscription with Shopify ID, assume active
         return {
           status: "subscription_active",
           subscriptionData: await this.getSubscriptionDataFromShopify(
@@ -85,17 +98,19 @@ export class BillingService {
               currentUsage: 0,
               currency: subscription.pricing_tiers?.currency || "USD",
             },
+            commissionRate,
           ),
         };
       }
 
-      // 5. Trial completed, no active Shopify subscription = show setup button
+      // 4. Trial completed, no active Shopify subscription = show setup button
       return {
         status: "trial_completed",
-        trialData: await this.getTrialDataFromRevenue(
-          shopId,
+        trialData: this.buildTrialData(
           trialRevenue,
           trialThreshold,
+          commissionRate,
+          currency,
         ),
       };
     } catch (error) {
@@ -110,76 +125,78 @@ export class BillingService {
     }
   }
 
-  /**
-   * ✅ Simplified: Get trial revenue from commission records
-   */
-  private static async getTrialRevenue(shopId: string): Promise<number> {
-    const result = await prisma.commission_records.aggregate({
-      where: {
-        shop_id: shopId,
-        billing_phase: "TRIAL",
-        status: {
-          in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-        },
-      },
-      _sum: {
-        attributed_revenue: true,
-      },
-    });
-    return Number(result._sum?.attributed_revenue || 0);
-  }
-
-  /**
-   * ✅ Simplified: Get trial data from revenue (no complex status checks)
-   */
-  private static async getTrialDataFromRevenue(
-    shopId: string,
+  private static buildTrialData(
     revenue: number,
-    threshold: number = 75,
-  ): Promise<TrialData> {
+    threshold: number,
+    commissionRate: number,
+    currency: string,
+  ): TrialData {
     const progress = Math.min((revenue / threshold) * 100, 100);
-
-    // Get shop currency from database
-    const shop = await prisma.shops.findUnique({
-      where: { id: shopId },
-      select: { currency_code: true },
-    });
-
     return {
       isActive: revenue < threshold,
       thresholdAmount: threshold,
       accumulatedRevenue: revenue,
       progress: Math.round(progress),
-      currency: shop?.currency_code || "USD",
+      currency,
+      commissionRate,
     };
   }
 
   /**
-   * ✅ Simplified: Get subscription data from Shopify API
+   * Get subscription data from Shopify API.
+   *
+   * Usage is read from billing_cycles.usage_amount (single source of truth,
+   * maintained by the Python worker). No longer recomputes PENDING commissions
+   * from commission_records — eliminating the duplicate billing logic between
+   * the Remix app and the Python worker.
    */
   private static async getSubscriptionDataFromShopify(
     shopSubscription: any,
     shopifyStatus: any,
+    commissionRate: number = 0.03,
   ): Promise<SubscriptionData> {
-    const spendingLimit =
-      shopifyStatus.cappedAmount ||
-      Number(shopSubscription.user_chosen_cap_amount || 0);
+    // Load active billing cycle — single source of truth for usage and cap
+    const billingCycle = await prisma.billing_cycles.findFirst({
+      where: {
+        shop_subscription_id: shopSubscription.id,
+        status: "ACTIVE",
+      },
+    });
 
-    // ✅ Get Shopify usage from RECORDED commissions (what's actually in Shopify)
     const shopifyUsage = shopifyStatus.currentUsage || 0;
 
-    // ✅ Calculate expected charge from PENDING commissions (excluding REJECTED)
-    const { expectedCharge, rejectedAmount } =
-      await this.getCommissionBreakdown(
-        shopSubscription.shop_id,
-        shopSubscription.id,
-      );
+    // ✅ currentUsage = billing_cycles.usage_amount (maintained by Python worker
+    //    via update_billing_cycle_usage after each Shopify usage recording).
+    //    Fall back to shopifyUsage from GraphQL if no billing cycle exists yet.
+    const usageAmount = billingCycle ? Number(billingCycle.usage_amount) : shopifyUsage;
 
-    // Total current usage = Shopify usage + expected charge
-    const currentUsage = shopifyUsage + expectedCharge;
+    // ✅ spendingLimit from billing cycle, fallback to Shopify or user-chosen cap
+    const spendingLimit = billingCycle
+      ? Number(billingCycle.current_cap_amount)
+      : shopifyStatus.cappedAmount ||
+        Number(shopSubscription.user_chosen_cap_amount || 0);
+
+    // ✅ Rejected amount: lightweight query (display transparency only, not used in billing logic)
+    let rejectedAmount: number | undefined;
+    if (billingCycle) {
+      try {
+        const rejectedResult = await prisma.commission_records.aggregate({
+          where: {
+            billing_cycle_id: billingCycle.id,
+            billing_phase: "PAID",
+            status: "REJECTED",
+          },
+          _sum: { commission_earned: true },
+        });
+        rejectedAmount = Number(rejectedResult._sum?.commission_earned || 0);
+      } catch (error) {
+        logger.error({ error }, "Error fetching rejected commissions");
+        rejectedAmount = undefined;
+      }
+    }
 
     const usagePercentage =
-      spendingLimit > 0 ? Math.round((currentUsage / spendingLimit) * 100) : 0;
+      spendingLimit > 0 ? Math.round((usageAmount / spendingLimit) * 100) : 0;
 
     return {
       id: shopifyStatus.subscriptionId || shopSubscription.id,
@@ -190,77 +207,22 @@ export class BillingService {
         | "CANCELLED"
         | "EXPIRED",
       spendingLimit,
-      currentUsage,
+      currentUsage: usageAmount,
       shopifyUsage,
-      expectedCharge,
-      rejectedAmount, // Optional: Show separately
+      expectedCharge: 0, // No longer recomputed — usage_amount is the source of truth
+      rejectedAmount,
       usagePercentage,
       confirmationUrl: shopifyStatus.confirmationUrl,
       currency: shopifyStatus.currency || "USD",
+      commissionRate,
+      billingCycle: billingCycle
+        ? {
+            startDate: billingCycle.start_date.toISOString(),
+            endDate: billingCycle.end_date.toISOString(),
+            cycleNumber: billingCycle.cycle_number,
+          }
+        : undefined,
     };
-  }
-
-  /**
-   * Get commission breakdown: expected charge and rejected amount
-   */
-  private static async getCommissionBreakdown(
-    shopId: string,
-    subscriptionId: string,
-  ): Promise<{ expectedCharge: number; rejectedAmount: number }> {
-    try {
-      // Get current billing cycle
-      const currentCycle = await prisma.billing_cycles.findFirst({
-        where: {
-          shop_subscription_id: subscriptionId,
-          status: "ACTIVE",
-        },
-      });
-
-      if (!currentCycle) {
-        return { expectedCharge: 0, rejectedAmount: 0 };
-      }
-
-      // ✅ Expected charge: PENDING commissions that will be charged
-      const pendingCommissions = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_cycle_id: currentCycle.id,
-          billing_phase: "PAID",
-          status: "PENDING", // Only PENDING, exclude REJECTED
-          commission_charged: {
-            gt: 0,
-          },
-        },
-        _sum: {
-          commission_charged: true,
-        },
-      });
-
-      // ✅ Rejected amount: REJECTED commissions (for transparency, not counted in usage)
-      const rejectedCommissions = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_cycle_id: currentCycle.id,
-          billing_phase: "PAID",
-          status: "REJECTED",
-        },
-        _sum: {
-          commission_earned: true, // Show what would have been charged
-        },
-      });
-
-      return {
-        expectedCharge: Number(
-          pendingCommissions._sum?.commission_charged || 0,
-        ),
-        rejectedAmount: Number(
-          rejectedCommissions._sum?.commission_earned || 0,
-        ),
-      };
-    } catch (error) {
-      logger.error({ error, shopId }, "Error calculating commission breakdown");
-      return { expectedCharge: 0, rejectedAmount: 0 };
-    }
   }
 
   /**
@@ -356,18 +318,26 @@ export class BillingService {
 
         if (dbSubscription) {
           try {
+            // Map Shopify status to local status.
+            // PENDING_APPROVAL removed — merchant stays in TRIAL until Shopify confirms ACTIVE.
+            const localStatus =
+              subscription.status === "ACTIVE"
+                ? "ACTIVE"
+                : subscription.status === "PENDING"
+                  ? "TRIAL"
+                  : subscription.status === "CANCELLED"
+                    ? "CANCELLED"
+                    : subscription.status === "DECLINED"
+                      ? "TRIAL"
+                      : dbSubscription.status;
+
             await prisma.shop_subscriptions.update({
               where: { id: dbSubscription.id },
               data: {
                 shopify_subscription_id: subscription.id,
                 shopify_status: subscription.status,
-                subscription_type: "PAID",
-                status:
-                  subscription.status === "ACTIVE"
-                    ? "ACTIVE"
-                    : subscription.status === "PENDING"
-                      ? "ACTIVE" // PENDING subscriptions should still be shown as ACTIVE in our system
-                      : dbSubscription.status,
+                status: localStatus as any,
+                is_active: localStatus !== "CANCELLED" && localStatus !== "EXPIRED",
                 updated_at: new Date(),
               },
             });

@@ -34,6 +34,15 @@ python-multipart==0.0.6
 
 prometheus-client==0.19.0
 
+# OpenTelemetry — Traces, Metrics, and Logs
+opentelemetry-api==1.30.0
+opentelemetry-sdk==1.30.0
+opentelemetry-exporter-otlp-proto-http==1.30.0
+opentelemetry-instrumentation-fastapi==0.51b0
+opentelemetry-instrumentation-aiokafka==0.51b0
+opentelemetry-instrumentation-sqlalchemy==0.51b0
+opentelemetry-instrumentation-logging==0.51b0
+
 # Background Tasks (not used; Redis Streams consumer is custom)
 
 # Utilities

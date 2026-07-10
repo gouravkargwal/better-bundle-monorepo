@@ -19,17 +19,20 @@ logger = logging.getLogger(__name__)
 # Create router
 router = APIRouter()
 
-# Loki configuration
-LOKI_URL = os.getenv("LOKI_URL", "http://localhost:3100")
-LOKI_ENABLED = os.getenv("LOKI_ENABLED", "true").lower() == "true"
+# OpenObserve configuration (Loki-compatible API)
+OPENOBSERVE_URL = os.getenv("OPENOBSERVE_URL", "http://localhost:5080")
+OPENOBSERVE_ORG_ID = os.getenv("OPENOBSERVE_ORG_ID", "default")
+OPENOBSERVE_EMAIL = os.getenv("OPENOBSERVE_EMAIL", "")
+OPENOBSERVE_PASSWORD = os.getenv("OPENOBSERVE_PASSWORD", "")
+OPENOBSERVE_ENABLED = os.getenv("OPENOBSERVE_ENABLED", "true").lower() == "true"
 
 
-async def forward_to_loki(logs_data: Dict[str, Any]) -> bool:
+async def forward_to_openobserve(logs_data: Dict[str, Any]) -> bool:
     """
-    Forward logs to Loki
+    Forward logs to OpenObserve via Loki-compatible API
     """
-    if not LOKI_ENABLED:
-        logger.info("Loki logging disabled, skipping log forward")
+    if not OPENOBSERVE_ENABLED:
+        logger.info("OpenObserve logging disabled, skipping log forward")
         return True
 
     try:
@@ -48,8 +51,8 @@ async def forward_to_loki(logs_data: Dict[str, Any]) -> bool:
             service_name = first_log.get("service", "phoenix-extension")
             env_name = first_log.get("env", "development")
 
-        # Transform to Loki format
-        loki_payload = {
+        # Transform to Loki-compatible format
+        payload = {
             "streams": [
                 {
                     "stream": {
@@ -75,36 +78,48 @@ async def forward_to_loki(logs_data: Dict[str, Any]) -> bool:
                     )
                 )
                 log_message = json.dumps(log_entry)
-                loki_payload["streams"][0]["values"].append([timestamp_ns, log_message])
+                payload["streams"][0]["values"].append([timestamp_ns, log_message])
 
-        # Send to Loki
+        # Parse base URL
+        base_url = OPENOBSERVE_URL.rstrip("/")
+        endpoint = f"{base_url}/api/{OPENOBSERVE_ORG_ID}/loki/api/v1/push"
+
+        # Build auth header if credentials configured
+        headers = {"Content-Type": "application/json"}
+        auth = None
+        if OPENOBSERVE_EMAIL and OPENOBSERVE_PASSWORD:
+            import base64
+            auth_str = f"{OPENOBSERVE_EMAIL}:{OPENOBSERVE_PASSWORD}"
+            headers["Authorization"] = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+
+        # Send to OpenObserve
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
-                f"{LOKI_URL}/loki/api/v1/push",
-                json=loki_payload,
-                headers={"Content-Type": "application/json"},
+                endpoint,
+                json=payload,
+                headers=headers,
             )
 
             if response.status_code == 204:
                 logger.info(
-                    f"Successfully forwarded {len(loki_payload['streams'][0]['values'])} log entries to Loki"
+                    f"Successfully forwarded {len(payload['streams'][0]['values'])} log entries to OpenObserve"
                 )
                 return True
             else:
                 logger.error(
-                    f"Loki returned status {response.status_code}: {response.text}"
+                    f"OpenObserve returned status {response.status_code}: {response.text}"
                 )
                 return False
 
     except Exception as e:
-        logger.error(f"Failed to forward logs to Loki: {str(e)}")
+        logger.error(f"Failed to forward logs to OpenObserve: {str(e)}")
         return False
 
 
 @router.post("/logs")
 async def receive_logs(request: Request):
     """
-    Receive logs from Phoenix extension and forward to Loki
+    Receive logs from Phoenix extension and forward to OpenObserve
     """
     try:
         # Parse request body
@@ -127,18 +142,18 @@ async def receive_logs(request: Request):
             env_name = first_log.get("env", "unknown")
             logger.info(f"Log service: {service_name}, env: {env_name}")
 
-        # Forward to Loki
-        success = await forward_to_loki(body)
+        # Forward to OpenObserve
+        success = await forward_to_openobserve(body)
 
         if success:
             return JSONResponse(
                 status_code=200,
-                content={"success": True, "message": "Logs forwarded to Loki"},
+                content={"success": True, "message": "Logs forwarded to OpenObserve"},
             )
         else:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "message": "Failed to forward logs to Loki"},
+                content={"success": False, "message": "Failed to forward logs to OpenObserve"},
             )
 
     except json.JSONDecodeError:
@@ -157,8 +172,8 @@ async def logs_health():
         status_code=200,
         content={
             "status": "healthy",
-            "loki_enabled": LOKI_ENABLED,
-            "loki_url": LOKI_URL,
+            "openobserve_enabled": OPENOBSERVE_ENABLED,
+            "openobserve_url": OPENOBSERVE_URL,
             "timestamp": datetime.utcnow().isoformat(),
         },
     )

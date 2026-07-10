@@ -17,7 +17,7 @@ if __name__ == "__main__":
         file=settings.logging.LOGGING["file"],
         console=settings.logging.LOGGING["console"],
         prometheus=settings.logging.LOGGING["prometheus"],
-        grafana=settings.logging.LOGGING["grafana"],
+        openobserve=settings.logging.LOGGING["openobserve"],
         telemetry=settings.logging.LOGGING["telemetry"],
         gcp=settings.logging.LOGGING["gcp"],
         aws=settings.logging.LOGGING["aws"],

@@ -191,7 +191,7 @@ export class OnboardingService {
             { is_active: true },
             {
               status: {
-                in: ["TRIAL", "PENDING_APPROVAL", "ACTIVE", "SUSPENDED"] as any,
+                in: ["TRIAL", "ACTIVE", "SUSPENDED"] as any,
               },
             },
           ],
@@ -236,7 +236,6 @@ export class OnboardingService {
           shop_id: shopRecord.id,
           subscription_plan_id: defaultPlan.id,
           pricing_tier_id: pricingTier.id,
-          subscription_type: "TRIAL",
           status: "TRIAL",
           started_at: new Date(),
           is_active: true,

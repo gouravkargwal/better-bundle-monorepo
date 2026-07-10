@@ -3,8 +3,10 @@ Kafka-based Shopify Usage consumer
 Handles Shopify usage record creation, retries, and reprocessing rejected commissions
 """
 
+import asyncio
 from typing import Dict, Any
 from decimal import Decimal
+from datetime import datetime, timedelta
 
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
@@ -22,13 +24,91 @@ from app.core.database.models.enums import (
     SubscriptionStatus,
 )
 from app.shared.helpers import now_utc
+from app.core.redis_client import get_redis_client
 
 from sqlalchemy import select, and_
 from app.core.database.models.commission import CommissionRecord
+from app.core.database.models.scheduler_job_execution import SchedulerJobExecution
 from sqlalchemy import update
 from app.core.database.models.shop_subscription import ShopSubscription
 
 logger = get_logger(__name__)
+
+
+# =====================================================================
+# Standalone reconciler — callable from both the background loop and API
+# =====================================================================
+
+
+async def reconcile_stuck_recording_commissions() -> int:
+    """
+    Reconcile commissions stuck in RECORDING status.
+
+    When commission_service_v2 sets a commission to RECORDING and then calls
+    Shopify's appUsageRecordCreate, if the process crashes after Shopify succeeds
+    but before updating the commission to RECORDED, the commission stays in RECORDING.
+
+    This function:
+    1. Finds commissions stuck in RECORDING for > 5 minutes
+    2. If they have shopify_usage_record_id -> sets to RECORDED (Shopify succeeded)
+    3. If they don't -> resets to PENDING for retry
+
+    Returns the number of commissions reconciled.
+    """
+    try:
+        cutoff_time = datetime.utcnow() - timedelta(minutes=5)
+
+        async with get_transaction_context() as session:
+            query = select(CommissionRecord).where(
+                and_(
+                    CommissionRecord.status == CommissionStatus.RECORDING,
+                    CommissionRecord.updated_at < cutoff_time,
+                )
+            )
+            result = await session.execute(query)
+            stuck_commissions = result.scalars().all()
+
+            if not stuck_commissions:
+                return 0
+
+            reconciled = 0
+            for commission in stuck_commissions:
+                if commission.shopify_usage_record_id:
+                    # Shopify succeeded but we crashed before marking RECORDED
+                    commission.status = CommissionStatus.RECORDED
+                    logger.info(
+                        f"Reconciled commission {commission.id}: "
+                        f"had shopify_usage_record_id, marking RECORDED"
+                    )
+                else:
+                    # Process likely crashed before Shopify call or Shopify returned error
+                    # Reset to PENDING for retry on next event
+                    commission.status = CommissionStatus.PENDING
+                    commission.error_count = (commission.error_count or 0) + 1
+                    commission.last_error = "Stuck in RECORDING - reset to PENDING for retry"
+                    commission.last_error_at = now_utc()
+                    logger.warning(
+                        f"Reconciled commission {commission.id}: "
+                        f"no usage record, reset to PENDING for retry"
+                    )
+                commission.updated_at = now_utc()
+                reconciled += 1
+
+            await session.flush()
+
+            if reconciled > 0:
+                logger.info(f"Reconciled {reconciled} stuck RECORDING commissions")
+
+            return reconciled
+
+    except Exception as e:
+        logger.error(f"Error reconciling stuck RECORDING commissions: {e}")
+        return 0
+
+
+# =====================================================================
+# Kafka consumer class
+# =====================================================================
 
 
 class ShopifyUsageKafkaConsumer:
@@ -46,10 +126,10 @@ class ShopifyUsageKafkaConsumer:
             )
 
             self._initialized = True
-            logger.info("✅ Shopify Usage Kafka consumer initialized")
+            logger.info("Shopify Usage Kafka consumer initialized")
 
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Shopify Usage consumer: {e}")
+            logger.error(f"Failed to initialize Shopify Usage consumer: {e}")
             raise
 
     async def start_consuming(self):
@@ -58,18 +138,60 @@ class ShopifyUsageKafkaConsumer:
             await self.initialize()
 
         try:
-            logger.info("🚀 Starting Shopify Usage consumer...")
+            logger.info("Starting Shopify Usage consumer...")
             async for message in self.consumer.consume():
                 try:
                     await self._handle_message(message)
                     await self.consumer.commit(message)
                 except Exception as e:
-                    logger.error(f"❌ Error processing Shopify usage message: {e}")
+                    logger.error(f"Error processing Shopify usage message: {e}")
                     # Don't break - continue processing other messages
                     continue
         except Exception as e:
-            logger.error(f"❌ Error in Shopify Usage consumer: {e}")
+            logger.error(f"Error in Shopify Usage consumer: {e}")
             raise
+
+    async def start_reconciler(self, interval_seconds: int = 300):
+        """
+        Background loop that periodically reconciles commissions stuck in RECORDING status.
+
+        Uses a distributed Redis lock to ensure only one instance of the reconciler
+        runs across multiple replicas. If Redis is unavailable, runs anyway (best-effort).
+
+        Args:
+            interval_seconds: How often to run the reconciler (default 5 minutes).
+        """
+        loop_name = "reconcile_stuck_recording_commissions"
+        logger.info(f"Starting background reconciler every {interval_seconds}s")
+
+        while True:
+            try:
+                # Attempt to acquire a distributed lock via Redis
+                lock_acquired = False
+                try:
+                    redis_client = await get_redis_client()
+                    lock_key = f"lock:{loop_name}"
+                    # SET NX with 60s expiry - if it exists, another instance holds the lock
+                    lock_acquired = await redis_client.set(
+                        lock_key, now_utc().isoformat(), nx=True, ex=60
+                    )
+                except Exception:
+                    # Redis unavailable - run without lock (best-effort)
+                    lock_acquired = True
+
+                if lock_acquired:
+                    reconciled = await reconcile_stuck_recording_commissions()
+                    if reconciled > 0:
+                        logger.info(f"Reconciled {reconciled} stuck commissions")
+
+                await asyncio.sleep(interval_seconds)
+
+            except asyncio.CancelledError:
+                logger.info("Background reconciler cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Background reconciler error: {e}")
+                await asyncio.sleep(interval_seconds)
 
     async def close(self):
         """Close consumer"""
@@ -93,11 +215,11 @@ class ShopifyUsageKafkaConsumer:
             shop_id = payload.get("shop_id")
 
             if not event_type:
-                logger.warning(f"⚠️ No event_type in message: {payload}")
+                logger.warning(f"No event_type in message: {payload}")
                 return
 
             logger.info(
-                f"🔄 Processing Shopify usage event: {event_type} for shop {shop_id}"
+                f"Processing Shopify usage event: {event_type} for shop {shop_id}"
             )
 
             async with get_transaction_context() as session:
@@ -125,10 +247,10 @@ class ShopifyUsageKafkaConsumer:
                         shopify_billing,
                     )
                 else:
-                    logger.warning(f"⚠️ Unknown event type: {event_type}")
+                    logger.warning(f"Unknown event type: {event_type}")
 
         except Exception as e:
-            logger.error(f"❌ Error handling Shopify usage message: {e}")
+            logger.error(f"Error handling Shopify usage message: {e}")
             raise
 
     async def _handle_record_usage(self, payload: Dict[str, Any]):
@@ -136,7 +258,7 @@ class ShopifyUsageKafkaConsumer:
         try:
             commission_id = payload.get("commission_id")
             if not commission_id:
-                logger.error("❌ No commission_id in record_usage event")
+                logger.error("No commission_id in record_usage event")
                 return
 
             async with get_transaction_context() as session:
@@ -152,15 +274,15 @@ class ShopifyUsageKafkaConsumer:
 
                 if result.get("success"):
                     logger.info(
-                        f"✅ Successfully recorded commission {commission_id} to Shopify"
+                        f"Successfully recorded commission {commission_id} to Shopify"
                     )
                 else:
                     logger.error(
-                        f"❌ Failed to record commission {commission_id}: {result.get('error')}"
+                        f"Failed to record commission {commission_id}: {result.get('error')}"
                     )
 
         except Exception as e:
-            logger.error(f"❌ Error in _handle_record_usage: {e}")
+            logger.error(f"Error in _handle_record_usage: {e}")
             raise
 
     async def _handle_cap_increase(self, payload: Dict[str, Any]):
@@ -172,12 +294,12 @@ class ShopifyUsageKafkaConsumer:
 
             if not shop_id or not cycle_id:
                 logger.error(
-                    "❌ Missing shop_id or billing_cycle_id in cap_increase event"
+                    "Missing shop_id or billing_cycle_id in cap_increase event"
                 )
                 return
 
             logger.info(
-                f"🔄 Processing cap increase for shop {shop_id}, cycle {cycle_id}, new cap: {new_cap_amount}"
+                f"Processing cap increase for shop {shop_id}, cycle {cycle_id}, new cap: {new_cap_amount}"
             )
 
             # Reprocess rejected commissions (this will handle reactivating subscription if needed)
@@ -202,14 +324,13 @@ class ShopifyUsageKafkaConsumer:
                             updated_at=now_utc(),
                         )
                     )
-                    # Transaction will be committed automatically by get_transaction_context()
 
                     logger.info(
-                        f"✅ Reactivated subscription {shop_subscription.id} after cap increase"
+                        f"Reactivated subscription {shop_subscription.id} after cap increase"
                     )
 
         except Exception as e:
-            logger.error(f"❌ Error in _handle_cap_increase: {e}")
+            logger.error(f"Error in _handle_cap_increase: {e}")
             raise
 
     async def _handle_reprocess_rejected(
@@ -227,18 +348,18 @@ class ShopifyUsageKafkaConsumer:
 
             if not shop_id or not cycle_id:
                 logger.error(
-                    "❌ Missing shop_id or billing_cycle_id in reprocess_rejected_commissions event"
+                    "Missing shop_id or billing_cycle_id in reprocess_rejected_commissions event"
                 )
                 return
 
             logger.info(
-                f"🔄 Processing reprocess_rejected_commissions event for shop {shop_id}, cycle {cycle_id}"
+                f"Processing reprocess_rejected_commissions event for shop {shop_id}, cycle {cycle_id}"
             )
 
             await self._reprocess_rejected_commissions(shop_id, cycle_id)
 
         except Exception as e:
-            logger.error(f"❌ Error in _handle_reprocess_rejected: {e}", exc_info=True)
+            logger.error(f"Error in _handle_reprocess_rejected: {e}", exc_info=True)
             raise
 
     async def _reprocess_rejected_commissions(
@@ -281,7 +402,7 @@ class ShopifyUsageKafkaConsumer:
                 )
         except Exception as e:
             logger.error(
-                f"❌ Error reprocessing rejected commissions: {e}", exc_info=True
+                f"Error reprocessing rejected commissions: {e}", exc_info=True
             )
             raise
 
@@ -307,21 +428,19 @@ class ShopifyUsageKafkaConsumer:
             # Get current billing cycle
             current_cycle = await billing_repo.get_billing_cycle_by_id(cycle_id)
             if not current_cycle:
-                logger.error(f"❌ Billing cycle {cycle_id} not found")
+                logger.error(f"Billing cycle {cycle_id} not found")
                 return
 
             logger.info(
-                f"📊 Current billing cycle: {cycle_id} (cap: {current_cycle.current_cap_amount}, usage: {current_cycle.usage_amount})"
+                f"Current billing cycle: {cycle_id} (cap: {current_cycle.current_cap_amount}, usage: {current_cycle.usage_amount})"
             )
 
             # Query for both REJECTED and PENDING commissions in PAID phase
-            # These need reprocessing based on current cap
             query = select(CommissionRecord).where(
                 and_(
                     CommissionRecord.shop_id == shop_id,
                     CommissionRecord.billing_cycle_id == cycle_id,
                     CommissionRecord.billing_phase == "PAID",
-                    # Include REJECTED commissions and PENDING commissions
                     (
                         (CommissionRecord.status == CommissionStatus.REJECTED)
                         | (CommissionRecord.status == CommissionStatus.PENDING)
@@ -334,12 +453,12 @@ class ShopifyUsageKafkaConsumer:
 
             if not commissions_to_reprocess:
                 logger.info(
-                    f"ℹ️ No rejected/pending commissions to reprocess for cycle {cycle_id}"
+                    f"No rejected/pending commissions to reprocess for cycle {cycle_id}"
                 )
                 return
 
             logger.info(
-                f"🔄 Reprocessing {len(commissions_to_reprocess)} commissions (REJECTED + PENDING) for cycle {cycle_id}"
+                f"Reprocessing {len(commissions_to_reprocess)} commissions (REJECTED + PENDING) for cycle {cycle_id}"
             )
 
             total_reprocessed = 0
@@ -347,8 +466,7 @@ class ShopifyUsageKafkaConsumer:
 
             # Process each commission
             for commission in commissions_to_reprocess:
-                # ✅ CRITICAL: Refresh cycle to get current usage_amount before calculating remaining_cap
-                # This ensures we use the actual usage after previous commissions were recorded
+                # Refresh cycle to get current usage_amount before calculating remaining_cap
                 await session.refresh(current_cycle)
 
                 # Calculate remaining cap from actual current usage
@@ -357,7 +475,6 @@ class ShopifyUsageKafkaConsumer:
                 )
 
                 # Re-evaluate charge amounts based on current cap
-                # Always recalculate from commission_earned to account for cap changes
                 amount_to_charge = Decimal(commission.commission_earned)
 
                 # Use commission service's charge calculation logic
@@ -379,7 +496,7 @@ class ShopifyUsageKafkaConsumer:
                 # Record to Shopify if there's a charge amount
                 if commission.commission_charged > 0:
                     logger.info(
-                        f"🎯 Re-recording commission {commission.id} to Shopify "
+                        f"Re-recording commission {commission.id} to Shopify "
                         f"(charge: ${commission.commission_charged}, remaining_cap: ${remaining_cap})"
                     )
 
@@ -391,25 +508,23 @@ class ShopifyUsageKafkaConsumer:
                     )
 
                     if record_result.get("success"):
-                        # ✅ Usage is already updated by record_commission_to_shopify → _store_usage_record
-                        # No need to update again here (would cause double-counting)
+                        # Usage is already updated by record_commission_to_shopify
                         total_charged += commission.commission_charged
                         total_reprocessed += 1
                         logger.info(
-                            f"✅ Successfully re-recorded commission {commission.id} to Shopify"
+                            f"Successfully re-recorded commission {commission.id} to Shopify"
                         )
                     else:
                         # If Shopify recording failed, mark as REJECTED
                         commission.charge_type = ChargeType.REJECTED
                         commission.status = CommissionStatus.REJECTED
-                        # Restore overflow amount
                         commission.commission_overflow = (
                             commission.commission_overflow
                             + commission.commission_charged
                         )
                         commission.commission_charged = Decimal("0")
                         logger.warning(
-                            f"⚠️ Failed to record commission {commission.id} to Shopify: {record_result.get('error')}"
+                            f"Failed to record commission {commission.id} to Shopify: {record_result.get('error')}"
                         )
                         await session.flush()
                 else:
@@ -418,11 +533,10 @@ class ShopifyUsageKafkaConsumer:
                         commission.charge_type = ChargeType.REJECTED
                         commission.status = CommissionStatus.REJECTED
                         logger.info(
-                            f"⚠️ Commission {commission.id} still has no charge amount (overflow: ${charge_data['overflow']}), marking as REJECTED"
+                            f"Commission {commission.id} still has no charge amount (overflow: ${charge_data['overflow']}), marking as REJECTED"
                         )
                         await session.flush()
 
-                # ✅ Check remaining cap AFTER usage update (will refresh on next iteration)
                 # Refresh cycle to get updated usage for next iteration
                 await session.refresh(current_cycle)
                 remaining_cap_after = Decimal(
@@ -432,21 +546,16 @@ class ShopifyUsageKafkaConsumer:
                 # Stop processing if no remaining cap
                 if remaining_cap_after <= 0:
                     logger.info(
-                        f"⚠️ Remaining cap exhausted. Stopping reprocessing. "
+                        f"Remaining cap exhausted. Stopping reprocessing. "
                         f"{len(commissions_to_reprocess) - total_reprocessed - 1} commissions remaining."
                     )
                     break
 
-            # ✅ CRITICAL: Do NOT update billing cycle usage here!
-            # Usage is already updated in record_commission_to_shopify → _store_usage_record
-            # Calling update_billing_cycle_usage here would cause double-counting
-
-            # Transaction will be committed automatically by get_transaction_context()
             logger.info(
-                f"✅ Reprocessed {total_reprocessed} commissions, charged ${total_charged} for cycle {cycle_id} "
+                f"Reprocessed {total_reprocessed} commissions, charged ${total_charged} for cycle {cycle_id} "
                 f"(usage already tracked in billing cycle during recording)"
             )
 
         except Exception as e:
-            logger.error(f"❌ Error reprocessing commissions: {e}", exc_info=True)
+            logger.error(f"Error reprocessing commissions: {e}", exc_info=True)
             raise

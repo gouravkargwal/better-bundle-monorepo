@@ -5,8 +5,6 @@
 
 export enum SubscriptionStatus {
   TRIAL = "trial",
-  PENDING_APPROVAL = "pending_approval",
-  TRIAL_COMPLETED = "trial_completed",
   ACTIVE = "active",
   SUSPENDED = "suspended",
   CANCELLED = "cancelled",
@@ -17,6 +15,7 @@ export enum CommissionStatus {
   TRIAL_PENDING = "trial_pending",
   TRIAL_COMPLETED = "trial_completed",
   PENDING = "pending",
+  RECORDING = "recording",
   RECORDED = "recorded",
   INVOICED = "invoiced",
   REJECTED = "rejected",

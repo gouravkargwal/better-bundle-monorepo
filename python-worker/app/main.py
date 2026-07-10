@@ -14,6 +14,10 @@ from app.core.config.settings import settings
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 
+# Initialize OpenTelemetry tracing
+from app.core.telemetry import init_telemetry, instrument_fastapi, instrument_sqlalchemy
+init_telemetry()
+
 from app.domains.shopify.services import (
     ShopifyDataCollectionService,
     ShopifyAPIClient,
@@ -93,6 +97,10 @@ app.include_router(session_router)
 app.include_router(interaction_router)
 app.include_router(recommendation_router)
 
+# Instrument FastAPI for OpenTelemetry tracing
+# Must be done after all routes are included
+instrument_fastapi(app)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -123,6 +131,11 @@ async def initialize_services():
             engine = await get_engine()
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
+
+            # Instrument SQLAlchemy for OpenTelemetry tracing
+            # Pass the sync engine for proper async query span capture
+            instrument_sqlalchemy(engine=engine.sync_engine)
+
             logger.info("✅ Database connection verified")
         except Exception as e:
             logger.error(f"❌ Database connection failed: {e}")

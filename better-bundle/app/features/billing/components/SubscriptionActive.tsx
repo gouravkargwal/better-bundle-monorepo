@@ -63,6 +63,9 @@ export function SubscriptionActive({
   const usagePercentage = subscriptionData.usagePercentage;
   const isNearCap = usagePercentage > 80;
   const isAtCap = usagePercentage >= 100;
+  const commissionRate = subscriptionData.commissionRate;
+  const revenueFromCommission = (commission: number) =>
+    commissionRate > 0 ? commission / commissionRate : 0;
 
   // Auto-dismiss toast after 5 seconds
   useEffect(() => {
@@ -224,7 +227,7 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(subscriptionData.currentUsage / 0.03)}
+                      {formatCurrency(revenueFromCommission(subscriptionData.currentUsage))}
                     </Text>
                     <BlockStack gap="100">
                       <InlineStack align="space-between">
@@ -233,7 +236,7 @@ export function SubscriptionActive({
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           {formatCurrency(
-                            subscriptionData.spendingLimit / 0.03,
+                            revenueFromCommission(subscriptionData.spendingLimit),
                           )}
                         </Text>
                       </InlineStack>
@@ -274,10 +277,11 @@ export function SubscriptionActive({
                       {formatCurrency(subscriptionData.currentUsage)}
                     </Text>
 
-                    {/* ✅ Smart Breakdown: Show only when relevant */}
-                    {subscriptionData.expectedCharge > 0 ||
-                    (subscriptionData.rejectedAmount &&
-                      subscriptionData.rejectedAmount > 0) ? (
+                    {/* ✅ Breakdown: Show rejected commissions if any, otherwise a simple summary.
+                        currentUsage comes from billing_cycles.usage_amount (single source of truth).
+                        expectedCharge is always 0 — the Python worker maintains usage_amount directly. */}
+                    {subscriptionData.rejectedAmount &&
+                    subscriptionData.rejectedAmount > 0 ? (
                       <div
                         style={{
                           padding: "12px",
@@ -295,70 +299,43 @@ export function SubscriptionActive({
                           >
                             💳 Charge Breakdown
                           </Text>
+                          <Text as="span" variant="bodySm" tone="subdued">
+                            ✓{" "}
+                            {formatCurrency(
+                              subscriptionData.currentUsage,
+                            )}{" "}
+                            charged to Shopify
+                          </Text>
                           <InlineStack align="space-between">
                             <Text as="span" variant="bodySm" tone="subdued">
-                              ✓ Recorded:
+                              🚫 Rejected (cap was reached):
                             </Text>
                             <Text
                               as="span"
                               variant="bodySm"
                               fontWeight="medium"
+                              tone="critical"
                             >
                               {formatCurrency(
-                                subscriptionData.shopifyUsage || 0,
+                                subscriptionData.rejectedAmount,
                               )}
                             </Text>
                           </InlineStack>
-                          {subscriptionData.expectedCharge > 0 && (
-                            <InlineStack align="space-between">
-                              <Text as="span" variant="bodySm" tone="subdued">
-                                ⏳ Pending:
-                              </Text>
-                              <Text
-                                as="span"
-                                variant="bodySm"
-                                fontWeight="medium"
-                              >
-                                {formatCurrency(
-                                  subscriptionData.expectedCharge,
-                                )}
-                              </Text>
-                            </InlineStack>
-                          )}
-                          {subscriptionData.rejectedAmount &&
-                            subscriptionData.rejectedAmount > 0 && (
-                              <InlineStack align="space-between">
-                                <Text as="span" variant="bodySm" tone="subdued">
-                                  🚫 Rejected:
-                                </Text>
-                                <Text
-                                  as="span"
-                                  variant="bodySm"
-                                  fontWeight="medium"
-                                  tone="critical"
-                                >
-                                  {formatCurrency(
-                                    subscriptionData.rejectedAmount,
-                                  )}
-                                </Text>
-                              </InlineStack>
-                            )}
                         </BlockStack>
                       </div>
                     ) : (
                       <Text as="span" variant="bodySm" tone="subdued">
                         ✓ All{" "}
                         {formatCurrency(
-                          subscriptionData.shopifyUsage ||
-                            subscriptionData.currentUsage,
+                          subscriptionData.currentUsage,
                         )}{" "}
                         recorded to Shopify
                       </Text>
                     )}
 
                     <Text as="span" variant="bodySm" tone="subdued">
-                      3% commission on{" "}
-                      {formatCurrency(subscriptionData.currentUsage / 0.03)}{" "}
+                      {(commissionRate * 100).toFixed(1)}% commission on{" "}
+                      {formatCurrency(revenueFromCommission(subscriptionData.currentUsage))}{" "}
                       revenue
                     </Text>
                     <BlockStack gap="100">
@@ -427,8 +404,7 @@ export function SubscriptionActive({
                           {Number(
                             (
                               (subscriptionData.currentUsage /
-                                0.03 /
-                                (subscriptionData.spendingLimit / 0.03)) *
+                                subscriptionData.spendingLimit) *
                               100
                             ).toFixed(1),
                           )}
@@ -449,12 +425,12 @@ export function SubscriptionActive({
                       />
                       <InlineStack align="space-between">
                         <Text as="span" variant="bodySm" fontWeight="semibold">
-                          {formatCurrency(subscriptionData.currentUsage / 0.03)}
+                          {formatCurrency(revenueFromCommission(subscriptionData.currentUsage))}
                         </Text>
                         <Text as="span" variant="bodySm" tone="subdued">
                           /{" "}
                           {formatCurrency(
-                            subscriptionData.spendingLimit / 0.03,
+                            revenueFromCommission(subscriptionData.spendingLimit),
                           )}{" "}
                           max
                         </Text>
@@ -647,8 +623,9 @@ export function SubscriptionActive({
                     orders containing your bundles
                   </Text>
                   <Text as="p" variant="bodySm">
-                    <strong>Your Charge:</strong> 3% of attributed revenue, up
-                    to your monthly cap
+                    <strong>Your Charge:</strong>{" "}
+                    {(commissionRate * 100).toFixed(1)}% of attributed revenue,
+                    up to your monthly cap
                   </Text>
                   <Text as="p" variant="bodySm">
                     <strong>The Cap:</strong> Maximum you'll pay per 30-day
