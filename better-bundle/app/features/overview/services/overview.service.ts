@@ -241,7 +241,10 @@ export class OverviewService {
             if (Array.isArray(extensions)) {
               extensions.forEach((ext: any) => {
                 const extensionName =
-                  ext.extension_type || ext.extension_name || ext.name || "Unknown Extension";
+                  ext.extension_type ||
+                  ext.extension_name ||
+                  ext.name ||
+                  "Unknown Extension";
                 if (!extensionStats.has(extensionName)) {
                   extensionStats.set(extensionName, {
                     type: extensionName,
@@ -314,8 +317,7 @@ export class OverviewService {
 
       const currentRevenue =
         Number(currentMonthRevenue._sum.total_revenue) || 0;
-      const previousRevenue =
-        Number(lastMonthRevenue._sum.total_revenue) || 0;
+      const previousRevenue = Number(lastMonthRevenue._sum.total_revenue) || 0;
       const monthlyGrowth =
         previousRevenue > 0
           ? ((currentRevenue - previousRevenue) / previousRevenue) * 100
@@ -366,29 +368,27 @@ export class OverviewService {
         } as any;
       }
 
-      // Check TFRS model status by looking at products in product_features
-      const productCount = await prisma.product_features
+      // Check TFRS readiness by looking at products in ProductData
+      // (the canonical product table populated by data collection)
+      const productCount = await prisma.product_data
         .count({
-          where: { shop_id: shopId },
+          where: { shop_id: shopId, is_active: true },
         })
         .catch(() => 0);
 
-      const userCount = await prisma.user_features
-        .count({
-          where: { shop_id: shopId },
-        })
-        .catch(() => 0);
-
-      const ready = productCount > 0;
+      // Use products as proxy for readiness — TFRS can train with just
+      // product catalog (embeddings) for cold-start recommendations,
+      // and user interactions are additive once orders arrive.
+      const ready = productCount >= 3;
       logger.info(
-        { productCount, userCount, ready },
+        { productCount, ready },
         "TFRS readiness check result",
       );
 
       return {
         ready,
         productssynced: productCount,
-        usersTracked: userCount,
+        usersTracked: 0,
         qualityScore: ready ? 0.5 : 0,
       } as any;
     } catch (error: any) {

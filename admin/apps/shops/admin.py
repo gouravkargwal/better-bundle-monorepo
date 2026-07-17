@@ -10,7 +10,7 @@ import requests
 from django.conf import settings
 from .models import Shop, OrderData
 from apps.billing.models import ShopSubscription, BillingCycle, BillingInvoice
-from apps.revenue.models import CommissionRecord
+# CommissionRecord no longer used — migrated to flat-rate billing
 
 
 @admin.register(Shop)
@@ -124,21 +124,21 @@ class ShopAdmin(admin.ModelAdmin):
             return "poor"
 
     def revenue_summary(self, obj):
-        """Show total revenue and commission"""
+        """Show total revenue and attributed revenue"""
         try:
             total_revenue = (
                 obj.order_data.aggregate(total=models.Sum("total_amount"))["total"] or 0
             )
 
-            total_commission = (
+            total_attributed = (
                 obj.purchase_attributions.aggregate(
-                    total=models.Sum("attributed_revenue")
+                    total=models.Sum("total_revenue")
                 )["total"]
                 or 0
             )
 
             return (
-                f"Revenue: ${total_revenue:.2f} | Commission: ${total_commission:.2f}"
+                f"Revenue: ${total_revenue:.2f} | Attributed: ${total_attributed:.2f}"
             )
         except:
             return "N/A"
@@ -539,7 +539,7 @@ class ShopAdmin(admin.ModelAdmin):
     def shop_overview_view(self, request):
         """
         Consolidated shop overview page — shows everything about a shop
-        (info, subscription, billing cycle, commissions, invoices) in one place.
+        (info, subscription, billing cycle, invoices) in one place.
         """
         shop_id = request.GET.get("shop_id")
         shop_domain = request.GET.get("shop")
@@ -587,21 +587,7 @@ class ShopAdmin(admin.ModelAdmin):
             active_cycle = cycles.filter(status="ACTIVE").first()
             past_cycles = list(cycles.filter(~Q(status="ACTIVE"))[:5])
 
-        # Commission records — recent
-        recent_commissions = CommissionRecord.objects.filter(shop=shop).select_related(
-            "billing_cycle"
-        ).order_by("-order_date")[:10]
-
-        # Commission stats
-        commission_stats = CommissionRecord.objects.filter(shop=shop).aggregate(
-            total_attributed=Sum("attributed_revenue"),
-            total_earned=Sum("commission_earned"),
-            total_charged=Sum("commission_charged"),
-            total_count=Count("id"),
-            pending_count=Count("id", filter=Q(status="PENDING")),
-            rejected_count=Count("id", filter=Q(status="REJECTED")),
-            recorded_count=Count("id", filter=Q(status="RECORDED")),
-        )
+        # Commission records removed — migrated to flat-rate billing
 
         # Invoices — recent
         if subscription:
@@ -645,8 +631,7 @@ class ShopAdmin(admin.ModelAdmin):
             "subscription": subscription,
             "active_cycle": active_cycle,
             "past_cycles": past_cycles,
-            "recent_commissions": recent_commissions,
-            "commission_stats": commission_stats,
+            # commission data removed — flat-rate billing
             "recent_invoices": recent_invoices,
             "invoice_stats": invoice_stats,
             "total_orders": total_orders,

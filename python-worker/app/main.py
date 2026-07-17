@@ -32,7 +32,6 @@ from app.core.kafka.consumer_manager import KafkaConsumerManager
 from app.api.v1.attribution_backfill import router as attribution_backfill_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
-from app.api.v1.fbt_status import router as fbt_status_router
 from app.api.v1.logs import router as logs_router
 from app.api.v1.data_collection import router as data_collection_router
 from app.routes.auth_routes import router as auth_router
@@ -84,7 +83,6 @@ app = FastAPI(
 app.include_router(attribution_backfill_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
-app.include_router(fbt_status_router)
 app.include_router(logs_router)
 app.include_router(data_collection_router)
 app.include_router(auth_router)
@@ -171,6 +169,10 @@ async def initialize_services():
         await create_all_tables()
         logger.info("✅ Database tables verified/created")
 
+        # Seed default subscription plan (idempotent)
+        await seed_subscription_plan()
+        logger.info("✅ Subscription plan seeded")
+
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager
 
@@ -194,8 +196,40 @@ async def initialize_services():
         raise
 
 
+async def seed_subscription_plan():
+    """Create the default flat subscription plan if it doesn't exist."""
+    from decimal import Decimal
+    from datetime import datetime, UTC
+    from sqlalchemy import select
+    from app.core.database.session import get_transaction_context
+    from app.core.database.models.subscription_plan import SubscriptionPlan
+
+    plan_name = "BetterBundle Flat"
+    async with get_transaction_context() as session:
+        result = await session.execute(
+            select(SubscriptionPlan).where(SubscriptionPlan.name == plan_name)
+        )
+        if result.scalar_one_or_none():
+            logger.info(f"Subscription plan '{plan_name}' already exists")
+            return
+
+        plan = SubscriptionPlan(
+            name=plan_name,
+            description="Flat monthly subscription — $99/mo, 14-day free trial, 50% off your first month",
+            monthly_price=Decimal("99.00"),
+            trial_days=14,
+            is_active=True,
+            is_default=True,
+            effective_from=datetime.now(UTC),
+        )
+        session.add(plan)
+        await session.commit()
+        logger.info(
+            f"✅ Created default subscription plan: {plan_name} ($99/mo, 14-day trial)"
+        )
+
+
 async def cleanup_services():
-    """Cleanup all services"""
     try:
 
         # Kafka consumers are stopped by kafka_consumer_manager in lifespan

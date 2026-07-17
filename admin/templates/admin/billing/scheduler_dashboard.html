@@ -116,18 +116,8 @@
       {% endif %}
 
       <div>
-        <a href="{% url 'admin:billing_scheduler_trigger' job_name=job_name %}"
-           class="btn-trigger btn-primary"
-           onclick="return confirm('Trigger &quot;{{ stats.definition.label }}&quot; now?');">
-          &#9654; Run Now
-        </a>
-        {% if stats.definition.params_required %}
-        <span style="font-size:11px;color:#888;margin-left:8px;">
-          (requires shop_id via URL: ?shop_id=...)
-        </span>
-        {% endif %}
         {% if stats.definition.auto_runs %}
-        <span class="status-badge status-success" style="margin-left:8px;">auto</span>
+        <span class="status-badge status-success">auto</span>
         {% endif %}
       </div>
     </div>
@@ -194,8 +184,8 @@
         <td style="width:33%;vertical-align:top;padding:8px;">
           <strong style="color:#1a1a1a;">&#9654; Background Jobs (auto)</strong><br>
           <span style="font-size:12px;">
-            Run continuously inside the Python worker process. The <strong>Reconcile Stuck Commissions</strong>
-            job runs every 5 minutes via an asyncio background task with a Redis distributed lock.
+            Run continuously inside the Python worker process. The background task manager
+            executes predefined jobs automatically with Redis distributed locking.
             No external cron needed.
           </span>
         </td>
@@ -208,11 +198,10 @@
           </span>
         </td>
         <td style="width:33%;vertical-align:top;padding:8px;">
-          <strong style="color:#1a1a1a;">&#9654; Manual Triggers</strong><br>
+          <strong style="color:#1a1a1a;">&#9654; Job History</strong><br>
           <span style="font-size:12px;">
-            Click "Run Now" on any job above. The Django admin calls the Python worker API
-            which executes the job immediately and logs the result to the
-            <code>scheduler_job_executions</code> table. View full history in the
+            Job executions are logged to the
+            <code>scheduler_job_executions</code> table automatically. View full history in the
             <a href="{% url 'admin:billing_schedulerjobexecution_changelist' %}">Job Executions</a> list.
           </span>
         </td>

@@ -53,8 +53,8 @@ async def fix():
 
         # Check for key tables
         key_tables = [
-            "shops", "commission_records", "scheduler_job_executions",
-            "billing_cycles", "shop_subscriptions"
+            "shops", "scheduler_job_executions",
+            "shop_subscriptions"
         ]
         print()
         for kt in key_tables:

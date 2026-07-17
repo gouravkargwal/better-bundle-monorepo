@@ -26,7 +26,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     return json(data);
   } catch (error) {
-    logger.error({ error }, "Failed to load onboarding data");
+    logger.error({ err: error }, "Failed to load onboarding data");
     return json(
       {
         error:
@@ -52,7 +52,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return authRedirect("/app/overview");
   } catch (error) {
     logger.error(
-      { error, shop: session.shop },
+      { err: error, shop: session.shop },
       "Failed to complete onboarding",
     );
     return json(

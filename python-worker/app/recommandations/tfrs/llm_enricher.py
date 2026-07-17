@@ -21,9 +21,19 @@ class LLMEnricher:
     def __init__(
         self,
         api_key: Optional[str] = None,
+        use_vertexai: Optional[bool] = None,
         model_name: str = "gemini-2.0-flash-001",
     ):
-        self.api_key = api_key or os.getenv("VERTEX_AI_API_KEY")
+        self.api_key = api_key or os.getenv("GOOGLE_AI_API_KEY") or os.getenv(
+            "VERTEX_AI_API_KEY"
+        )
+        if use_vertexai is None:
+            use_vertexai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        self.use_vertexai = use_vertexai
         self.model_name = model_name
         self._client = None
         self._enabled = bool(self.api_key)
@@ -36,11 +46,13 @@ class LLMEnricher:
             return None
 
         try:
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=self.api_key)
-            self._client = genai.GenerativeModel(self.model_name)
-            logger.info(f"✅ Gemini initialized: {self.model_name}")
+            self._client = genai.Client(
+                api_key=self.api_key, vertexai=self.use_vertexai
+            )
+            backend = "Vertex AI" if self.use_vertexai else "Google AI Studio"
+            logger.info(f"✅ Gemini initialized ({backend}): {self.model_name}")
             return self._client
         except Exception as e:
             logger.error(f"Failed to init Gemini: {e}")
@@ -72,7 +84,9 @@ class LLMEnricher:
 
         try:
             prompt = self._build_enrichment_prompt(context, user_context, recommended)
-            response = client.generate_content(prompt)
+            response = client.models.generate_content(
+                model=self.model_name, contents=prompt
+            )
             enriched = self._parse_response(response.text, recommended)
             return enriched
         except Exception as e:
@@ -111,7 +125,9 @@ class LLMEnricher:
             "Frequently Bought Together", "Based on Your Cart".
             Return ONLY the title, nothing else.
             """
-            response = client.generate_content(prompt)
+            response = client.models.generate_content(
+                model=self.model_name, contents=prompt
+            )
             title = response.text.strip().strip('"').strip("'")
             return title[:60] if title else self._default_title(context)
         except Exception:

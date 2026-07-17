@@ -20,6 +20,7 @@ sys.path.insert(0, python_worker_dir)
 
 # Determine environment from --env flag (default: dev)
 import argparse
+
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument("--env", default="dev", choices=["dev", "prod"])
 args, _ = parser.parse_known_args()
@@ -53,6 +54,9 @@ env_db_url = os.environ.get("DATABASE_URL", "")
 if env_db_url:
     # Ensure asyncpg driver is used
     DATABASE_URL = env_db_url.replace("postgresql://", "postgresql+asyncpg://")
+    # Replace Docker service hostnames with localhost when running natively on macOS
+    for docker_host in ("postgres", "redis", "kafka_b"):
+        DATABASE_URL = DATABASE_URL.replace(f"@{docker_host}:", "@localhost:")
 else:
     DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle"
 

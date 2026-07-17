@@ -11,31 +11,7 @@ export enum SubscriptionStatus {
   EXPIRED = "expired",
 }
 
-export enum CommissionStatus {
-  TRIAL_PENDING = "trial_pending",
-  TRIAL_COMPLETED = "trial_completed",
-  PENDING = "pending",
-  RECORDING = "recording",
-  RECORDED = "recorded",
-  INVOICED = "invoiced",
-  REJECTED = "rejected",
-  FAILED = "failed",
-  CAPPED = "capped",
-}
-
-export enum ChargeType {
-  FULL = "full",
-  PARTIAL = "partial",
-  OVERFLOW_ONLY = "overflow_only",
-  TRIAL = "trial",
-  REJECTED = "rejected",
-}
-
-export enum BillingPhase {
-  TRIAL = "trial",
-  PAID = "paid",
-}
-
+// CommissionStatus, ChargeType, and BillingPhase enums removed — migrated to flat-rate billing
 export enum TrialStatus {
   ACTIVE = "active",
   COMPLETED = "completed",

@@ -68,7 +68,7 @@
   {% if not shop %}
     <div class="alert alert-info">
       Enter a shop domain above to see a complete overview of their subscription,
-      billing, commissions, and invoices — all in one page.
+      billing and invoices — all in one page.
     </div>
   {% endif %}
 
@@ -104,7 +104,6 @@
         <div class="quick-actions">
           <a href="{% url 'admin:shops_shop_change' shop.id %}" class="act-primary">&#9998; Edit Shop</a>
           <a href="{% url 'admin:shops_orderdata_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128230; Orders</a>
-          <a href="{% url 'admin:revenue_commissionrecord_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128176; Commissions</a>
         </div>
       </div>
 
@@ -117,7 +116,6 @@
         </div>
         <div class="stat-row">
           <div class="stat-item"><div class="val" style="color:{% if o.attribution_pct >= 90 %}#2e7d32{% elif o.attribution_pct >= 70 %}#e65100{% else %}#c62828{% endif %}">{{ o.attribution_pct }}%</div><div class="lbl">Attribution</div></div>
-          <div class="stat-item"><div class="val">{{ o.commission_stats.total_count|default:0 }}</div><div class="lbl">Commissions</div></div>
           <div class="stat-item"><div class="val">{{ o.attribution_count }}</div><div class="lbl">Attributions</div></div>
         </div>
       </div>
@@ -167,7 +165,6 @@
             <tr><td class="label">Cap</td><td class="value">${{ c.current_cap_amount|floatformat:2 }}</td></tr>
             <tr><td class="label">Usage</td><td class="value">${{ c.usage_amount|floatformat:2 }}</td></tr>
             <tr><td class="label">Remaining</td><td class="value">${{ o.remaining_cap|floatformat:2 }}</td></tr>
-            <tr><td class="label">Commissions</td><td class="value">{{ c.commission_count }}</td></tr>
           </table>
           <div style="margin-top:12px;background:#f0f0f0;border-radius:4px;height:8px;overflow:hidden;">
             <div style="height:100%;width:{{ c.usage_percentage|floatformat:1 }}%;background:{% if c.usage_percentage > 90 %}#c62828{% elif c.usage_percentage > 75 %}#e65100{% else %}#4caf50{% endif %};border-radius:4px;"></div>
@@ -181,53 +178,6 @@
         {% endif %}
       </div>
     </div>
-
-    <!-- ════ Commission Summary ════ -->
-    <h2 class="section-title">&#128176; Commission Summary</h2>
-    <div class="ov-grid">
-      <div class="ov-card">
-        <h3>Aggregate</h3>
-        <div class="stat-row">
-          <div class="stat-item"><div class="val">${{ o.commission_stats.total_attributed|default:"0.00"|floatformat:2 }}</div><div class="lbl">Attributed</div></div>
-          <div class="stat-item"><div class="val">${{ o.commission_stats.total_earned|default:"0.00"|floatformat:2 }}</div><div class="lbl">Earned</div></div>
-          <div class="stat-item"><div class="val">${{ o.commission_stats.total_charged|default:"0.00"|floatformat:2 }}</div><div class="lbl">Charged</div></div>
-        </div>
-        <div class="stat-row">
-          <div class="stat-item"><div class="val" style="color:{% if o.commission_stats.pending_count > 0 %}#e65100{% else %}#2e7d32{% endif %}">{{ o.commission_stats.pending_count|default:"0" }}</div><div class="lbl">Pending</div></div>
-          <div class="stat-item"><div class="val" style="color:{% if o.commission_stats.rejected_count > 0 %}#c62828{% else %}#2e7d32{% endif %}">{{ o.commission_stats.rejected_count|default:"0" }}</div><div class="lbl">Rejected</div></div>
-          <div class="stat-item"><div class="val">{{ o.commission_stats.recorded_count|default:"0" }}</div><div class="lbl">Recorded</div></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Recent Commissions -->
-    {% if o.recent_commissions %}
-    <div style="background:#fff;border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-      <table class="data-table">
-        <thead>
-          <tr><th>Order</th><th>Date</th><th>Attributed</th><th>Earned</th><th>Charged</th><th>Status</th><th>Phase</th><th>Charge</th></tr>
-        </thead>
-        <tbody>
-          {% for c in o.recent_commissions %}
-          <tr>
-            <td><a href="{% url 'admin:revenue_commissionrecord_change' c.id %}">{{ c.order_id|slice:":12" }}...</a></td>
-            <td>{{ c.order_date|date:"M d" }}</td>
-            <td>${{ c.attributed_revenue|floatformat:2 }}</td>
-            <td>${{ c.commission_earned|floatformat:2 }}</td>
-            <td>${{ c.commission_charged|floatformat:2 }}</td>
-            <td><span class="status-badge
-              {% if c.status == 'RECORDED' %}status-active
-              {% elif c.status == 'PENDING' or c.status == 'TRIAL_PENDING' %}status-pending
-              {% elif c.status == 'REJECTED' or c.status == 'FAILED' %}status-cancelled
-              {% else %}status-other{% endif %}">{{ c.get_status_display }}</span></td>
-            <td>{{ c.get_billing_phase_display }}</td>
-            <td>{{ c.get_charge_type_display }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
 
     <!-- ════ Invoices ════ -->
     {% if o.recent_invoices %}
@@ -264,7 +214,6 @@
         {% if o.subscription %}
         <a href="{% url 'admin:shops_shop_change' shop.id %}" class="act-primary">&#9998; Edit Shop</a>
         <a href="{% url 'admin:shops_shop_changelist' %}?q={{ shop.shop_domain }}" class="act-secondary">&#128269; Find in List</a>
-        <a href="{% url 'admin:revenue_commissionrecord_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128176; View Commissions</a>
         <a href="{% url 'admin:billing_shopsubscription_changelist' %}?shop__id__exact={{ shop.id }}" class="act-secondary">&#128197; View Subscription</a>
         {% endif %}
         <a href="{% url 'admin:shops_shop_overview' %}?shop={{ shop.shop_domain }}" class="act-secondary">&#128260; Refresh</a>

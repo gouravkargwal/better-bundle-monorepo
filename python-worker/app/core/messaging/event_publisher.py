@@ -177,7 +177,7 @@ class EventPublisher:
             "source": "shopify_usage",
         }
 
-        key = usage_data.get("shop_id") or usage_data.get("commission_id")
+        key = usage_data.get("shop_id")
 
         try:
             message_id = await self._producer.send(

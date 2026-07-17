@@ -3,15 +3,12 @@ Billing admin configuration
 """
 
 import json
-import requests
 from django.contrib import admin
 from django.utils.html import format_html
 from django.db.models import Sum, Count, Q, Max
 from django.contrib import messages
 from django.utils import timezone
 from django.conf import settings
-from django.urls import path, reverse
-from django.shortcuts import render
 from datetime import timedelta
 from decimal import Decimal
 from .models import (
@@ -236,7 +233,6 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
         1. Shows a dialog to enter the new cap amount
         2. Updates user_chosen_cap_amount on the subscription
         3. Also updates current_cap_amount on the active billing cycle
-        4. Publishes a cap_increase Kafka event to reprocess rejected commissions
 
         Use this when a merchant requests a cap increase via support.
         """
@@ -265,17 +261,6 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
                 if active_cycle:
                     active_cycle.current_cap_amount = new_cap_decimal
                     active_cycle.save()
-
-                    # Call Python worker to publish cap increase event
-                    python_worker_url = getattr(settings, "PYTHON_WORKER_URL", "http://localhost:8001")
-                    try:
-                        requests.post(
-                            f"{python_worker_url}/api/billing/jobs/trigger/reprocess-rejected",
-                            json={"shop_id": str(sub.shop_id)},
-                            timeout=10,
-                        )
-                    except Exception:
-                        pass  # Non-blocking — cap is already updated
 
                 self.message_user(
                     request,
@@ -337,7 +322,6 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
                 initial_cap_amount=cap,
                 current_cap_amount=cap,
                 usage_amount=Decimal("0"),
-                commission_count=0,
                 status="ACTIVE",
                 activated_at=timezone.now(),
             )
@@ -367,13 +351,13 @@ class BillingCycleAdmin(admin.ModelAdmin):
         "current_cap_amount",
         "usage_amount",
         "usage_percentage_display",
-        "commission_count",
     ]
     list_filter = ["status", "start_date", "end_date", "activated_at"]
     search_fields = ["shop_subscription__shop__shop_domain"]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["-start_date"]
-    actions = ["increase_cycle_cap"]
+    actions = []
+
 
     def usage_percentage_display(self, obj):
         """Display usage percentage with color coding"""
@@ -385,50 +369,6 @@ class BillingCycleAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("shop_subscription__shop")
-
-    def increase_cycle_cap(self, request, queryset):
-        """
-        Increase the current cap amount on selected billing cycles.
-
-        Add ?new_cap=X to the URL when triggering this action.
-        If no URL param is provided, shows instructions.
-        """
-        new_cap = request.GET.get("new_cap")
-        if not new_cap:
-            self.message_user(
-                request,
-                "ℹ️ To increase cap, re-run this action with ?new_cap=5000.00 in the URL",
-                level=messages.INFO,
-            )
-            return
-
-        try:
-            new_cap_decimal = Decimal(new_cap)
-        except (ValueError, Decimal.InvalidOperation):
-            self.message_user(
-                request, f"❌ Invalid cap amount: {new_cap}", level=messages.ERROR
-            )
-            return
-
-        updated = 0
-        for cycle in queryset:
-            old_cap = cycle.current_cap_amount
-            cycle.current_cap_amount = new_cap_decimal
-            cycle.updated_at = timezone.now()
-            cycle.save()
-            updated += 1
-            self.message_user(
-                request,
-                f"✅ {cycle}: Cap ${old_cap:.2f} → ${new_cap_decimal:.2f}",
-                level=messages.SUCCESS,
-            )
-
-        if updated:
-            self.message_user(
-                request, f"🎯 Updated cap on {updated} billing cycles", level=messages.SUCCESS
-            )
-
-    increase_cycle_cap.short_description = "💰 Increase Cycle Cap (add ?new_cap=X to URL)"
 
 
 @admin.register(BillingInvoice)
@@ -472,17 +412,8 @@ class BillingInvoiceAdmin(admin.ModelAdmin):
 # =====================================================================
 
 
-# Predefined jobs the admin dashboard knows about
+# Predefined jobs the admin dashboard knows about (commission-based jobs removed — flat-rate billing)
 SCHEDULED_JOBS = [
-    {
-        "name": "reconcile-stuck-commissions",
-        "label": "Reconcile Stuck Commissions",
-        "group": "billing",
-        "description": "Finds commissions stuck in RECORDING status and marks them RECORDED (if Shopify succeeded) or resets to PENDING (if Shopify failed). Runs automatically every 5 minutes.",
-        "interval_display": "Every 5 minutes",
-        "auto_runs": True,
-        "params_required": False,
-    },
     {
         "name": "process-billing",
         "label": "Process Monthly Billing",
@@ -492,65 +423,7 @@ SCHEDULED_JOBS = [
         "auto_runs": False,  # Triggered by external cron
         "params_required": False,
     },
-    {
-        "name": "reprocess-rejected",
-        "label": "Reprocess Rejected Commissions",
-        "group": "billing",
-        "description": "Re-evaluate REJECTED commissions against the current cap and re-record them to Shopify if cap space is available. Requires a shop_id.",
-        "interval_display": "On demand",
-        "auto_runs": False,
-        "params_required": True,
-    },
 ]
-
-
-def _get_python_worker_url():
-    """Get the Python worker API base URL from settings."""
-    from django.conf import settings
-
-    return getattr(settings, "PYTHON_WORKER_URL", "http://localhost:8001")
-
-
-def _fetch_last_executions(limit: int = 50) -> list:
-    """Fetch recent job executions from the Python worker API."""
-    try:
-        url = f"{_get_python_worker_url()}/api/billing/jobs/last-executions?limit={limit}"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception:
-        pass
-    return []
-
-
-def _fetch_last_run_for_job(job_name: str) -> dict | None:
-    """Fetch the most recent execution for a specific job."""
-    try:
-        url = f"{_get_python_worker_url()}/api/billing/jobs/last-run/{job_name}"
-        resp = requests.get(url, timeout=5)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data if data else None
-    except Exception:
-        pass
-    return None
-
-
-def _trigger_job(job_name: str, shop_id: str = None) -> dict:
-    """Trigger a job manually via the Python worker API."""
-    try:
-        url = f"{_get_python_worker_url()}/api/billing/jobs/trigger/{job_name}"
-        body = {}
-        if shop_id:
-            body["shop_id"] = shop_id
-        resp = requests.post(url, json=body, timeout=120)
-        if resp.status_code == 200:
-            return resp.json()
-        return {"success": False, "message": f"API error: {resp.status_code} - {resp.text[:200]}"}
-    except requests.exceptions.Timeout:
-        return {"success": False, "message": "Request timed out after 120s"}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
 
 
 @admin.register(SchedulerJobExecution)
@@ -671,105 +544,3 @@ class SchedulerJobExecutionAdmin(admin.ModelAdmin):
             },
         ),
     )
-
-    def get_urls(self):
-        """Add scheduler dashboard URLs to this admin page."""
-        urls = super().get_urls()
-        custom_urls = [
-            path(
-                "dashboard/",
-                self.admin_site.admin_view(self.scheduler_dashboard_view),
-                name="billing_scheduler_dashboard",
-            ),
-            path(
-                "trigger/<job_name>/",
-                self.admin_site.admin_view(self.scheduler_trigger_job),
-                name="billing_scheduler_trigger",
-            ),
-        ]
-        return custom_urls + urls
-
-    def scheduler_dashboard_view(self, request):
-        """
-        Render the scheduler dashboard page showing all known jobs,
-        their last run status, and manual trigger buttons.
-        """
-        last_executions = _fetch_last_executions(limit=100)
-
-        # Build per-job stats
-        job_stats = {}
-        for job_def in SCHEDULED_JOBS:
-            job_name = job_def["name"]
-            executions = [e for e in last_executions if e.get("job_name") == job_name]
-            last_run = executions[0] if executions else None
-
-            total_runs = len(executions)
-            success_count = sum(1 for e in executions if e.get("success") is True)
-            failure_count = sum(1 for e in executions if e.get("success") is False)
-
-            job_stats[job_name] = {
-                "definition": job_def,
-                "last_run": last_run,
-                "total_runs": total_runs,
-                "success_count": success_count,
-                "failure_count": failure_count,
-                "recent_success": last_run and last_run.get("success") is True,
-                "last_run_display": self._format_run_display(last_run),
-            }
-
-        # Recent activity across all jobs
-        all_executions = sorted(
-            last_executions,
-            key=lambda e: e.get("started_at", ""),
-            reverse=True,
-        )[:30]
-
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Scheduler Dashboard",
-            "job_stats": job_stats,
-            "recent_executions": all_executions,
-            "opts": self.model._meta,
-            "available_apps": self.admin_site.get_app_list(request),
-        }
-        return render(request, "admin/billing/scheduler_dashboard.html", context)
-
-    def scheduler_trigger_job(self, request, job_name: str):
-        """
-        Handle a manual job trigger from the scheduler dashboard.
-        """
-        shop_id = request.GET.get("shop_id")
-        result = _trigger_job(job_name, shop_id=shop_id)
-
-        if result.get("success"):
-            self.message_user(
-                request,
-                f"✅ {job_name}: {result.get('message', 'Triggered successfully')} "
-                f"({result.get('duration_ms', '?')}ms)",
-                level=messages.SUCCESS,
-            )
-        else:
-            self.message_user(
-                request,
-                f"❌ {job_name}: {result.get('message', 'Failed to trigger')}",
-                level=messages.ERROR,
-            )
-
-        return HttpResponseRedirect(reverse("admin:billing_scheduler_dashboard"))
-
-    def _format_run_display(self, execution: dict | None) -> str:
-        """Format a run record for display."""
-        if not execution:
-            return "Never run"
-
-        started = execution.get("started_at", "")
-        status = execution.get("status", "")
-        duration = execution.get("duration_ms")
-
-        parts = [started[:19].replace("T", " ") if started else "?"]
-        if status:
-            parts.append(f"[{status}]")
-        if duration:
-            parts.append(f"({duration / 1000:.1f}s)")
-
-        return " ".join(parts)

@@ -6,17 +6,14 @@ import logger from "app/utils/logger";
 export class OnboardingService {
   async getOnboardingData(shopDomain: string, admin: any) {
     try {
-      // Get shop info from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
-
-      // Get flat plan configuration
       const planInfo = await this.getPlanInfo(shopData.currencyCode);
 
       return {
         planInfo,
       };
     } catch (error) {
-      logger.error({ error }, "Error getting onboarding data");
+      logger.error({ err: error }, "Error getting onboarding data");
       throw new Error("Failed to get onboarding data");
     }
   }
@@ -74,7 +71,7 @@ export class OnboardingService {
 
       return shop;
     } catch (error) {
-      logger.error({ error }, "Error getting shop info from Shopify");
+      logger.error({ err: error }, "Error getting shop info from Shopify");
       throw new Error("Failed to fetch shop data from Shopify API");
     }
   }
@@ -99,7 +96,7 @@ export class OnboardingService {
         trialDays: Number(defaultPlan.trial_days ?? 14),
       };
     } catch (error) {
-      logger.error({ error }, "Error getting plan info");
+      logger.error({ err: error }, "Error getting plan info");
       throw new Error("Failed to get plan info");
     }
   }
@@ -115,7 +112,7 @@ export class OnboardingService {
 
         return shop;
       } catch (error) {
-        logger.error({ error }, "Error completing onboarding transaction");
+        logger.error({ err: error }, "Error completing onboarding transaction");
         throw new Error("Failed to complete onboarding transaction");
       }
     });
@@ -153,10 +150,22 @@ export class OnboardingService {
           is_active: true,
           onboarding_completed: false,
           shopify_plus: shopData.plan.shopifyPlus || false,
+          setup_guide_visited: false,
         },
       });
-    } catch (error) {
-      logger.error({ error }, "Error creating or updating shop");
+    } catch (error: any) {
+      logger.error(
+        {
+          err: {
+            name: error?.name,
+            code: error?.code,
+            message: error?.message,
+            meta: error?.meta,
+          },
+          shopDomain: shopData?.myshopifyDomain,
+        },
+        "Error creating or updating shop",
+      );
       throw new Error("Failed to create or update shop");
     }
   }
@@ -210,8 +219,6 @@ export class OnboardingService {
           status: "TRIAL",
           started_at: new Date(),
           expires_at: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
-          // Required by schema; commission model removed so no revenue threshold
-          trial_revenue: 0,
           is_active: true,
           auto_renew: true,
         },
@@ -241,7 +248,7 @@ export class OnboardingService {
         data: { onboarding_completed: true },
       });
     } catch (error) {
-      logger.error({ error }, "Error marking onboarding completed");
+      logger.error({ err: error }, "Error marking onboarding completed");
       throw new Error("Failed to mark onboarding completed");
     }
   }
@@ -300,7 +307,7 @@ export class OnboardingService {
 
       return null;
     } catch (error) {
-      logger.error({ error }, "Failed to activate Atlas web pixel");
+      logger.error({ err: error }, "Failed to activate Atlas web pixel");
       // Don't throw the error to prevent breaking the entire afterAuth flow
       return null;
     }
@@ -339,7 +346,7 @@ export class OnboardingService {
       const messageId = await producer.publishDataJobEvent(jobData);
       return { success: true, messageId };
     } catch (error: any) {
-      logger.error({ error }, "Failed to publish data collection job");
+      logger.error({ err: error }, "Failed to publish data collection job");
       throw new Error(`Failed to trigger analysis: ${error.message}`);
     }
   }

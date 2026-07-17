@@ -269,7 +269,7 @@ def build_billing_operations():
         "panel_billing_activity", "area", "Billing Events Over Time",
         "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" "
         "FROM \"default\" WHERE service = 'python-worker' AND "
-        "(message LIKE '%commission%' OR message LIKE '%billing%' "
+        "(message LIKE '%billing%' "
         "OR message LIKE '%subscription%') GROUP BY time ORDER BY time",
         "default", "logs",
         [field_entry("Time", "time", "_timestamp", "histogram")],
@@ -282,25 +282,13 @@ def build_billing_operations():
         "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" "
         "FROM \"default\" WHERE service = 'python-worker' AND "
         "LOWER(level) IN ('error','critical') AND "
-        "(message LIKE '%commission%' OR message LIKE '%billing%') "
+        "message LIKE '%billing%' "
         "GROUP BY time ORDER BY time",
         "default", "logs",
         [field_entry("Time", "time", "_timestamp", "histogram")],
         [field_entry("Errors", "count", "_timestamp", "count")],
     )
     panels.append(set_layout(p, 12, 0, 12, 8, 2))
-
-    p = make_panel(
-        "panel_commission_processing", "area", "Commission Processing Activity",
-        "SELECT histogram(_timestamp) as \"time\", count(*) as \"count\" "
-        "FROM \"default\" WHERE message LIKE '%commission%' "
-        "GROUP BY time, level ORDER BY time",
-        "default", "logs",
-        [field_entry("Time", "time", "_timestamp", "histogram")],
-        [field_entry("Count", "count", "_timestamp", "count")],
-        [field_entry("Level", "level", "level")],
-    )
-    panels.append(set_layout(p, 0, 8, 12, 8, 3))
 
     p = make_panel(
         "panel_webhook_events", "area", "Webhook Activity (Remix App)",
@@ -334,11 +322,10 @@ def build_billing_operations():
         "panel_billing_summary", "table", "Billing Summary Stats",
         "SELECT service, count(*) as \"total_logs\", "
         "sum(CASE WHEN LOWER(level) = 'error' THEN 1 ELSE 0 END) as \"errors\", "
-        "sum(CASE WHEN message LIKE '%commission%' THEN 1 ELSE 0 END) as \"commissions\", "
         "sum(CASE WHEN message LIKE '%billing%' THEN 1 ELSE 0 END) as \"billing_events\", "
         "sum(CASE WHEN message LIKE '%subscription%' THEN 1 ELSE 0 END) as \"subscription_changes\" "
         "FROM \"default\" WHERE _timestamp > now() - INTERVAL '1' HOUR AND "
-        "(message LIKE '%commission%' OR message LIKE '%billing%' "
+        "(message LIKE '%billing%' "
         "OR message LIKE '%subscription%' OR service = 'remix-app') "
         "GROUP BY service ORDER BY service",
         "default", "logs",
@@ -346,7 +333,6 @@ def build_billing_operations():
             field_entry("Service", "service", "service"),
             field_entry("Total Logs", "total_logs", "_timestamp", "count"),
             field_entry("Errors", "errors", "level", "sum"),
-            field_entry("Commissions", "commissions", "message", "sum"),
             field_entry("Billing Events", "billing_events", "message", "sum"),
             field_entry("Subscription Changes", "subscription_changes", "message", "sum"),
         ],
@@ -356,7 +342,7 @@ def build_billing_operations():
 
     return make_dashboard(
         "billing_operations", "Billing Operations",
-        "Billing-specific monitoring: commissions, subscriptions, billing events, and revenue",
+        "Billing-specific monitoring: subscriptions, billing events, and revenue",
         [{"name": "Billing", "tabId": "billing", "panels": panels}],
         "24h"
     )

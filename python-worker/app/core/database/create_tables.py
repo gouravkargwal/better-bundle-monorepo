@@ -16,6 +16,15 @@ async def create_all_tables():
     try:
         engine = await get_engine()
 
+        # Ensure pgvector extension is installed before creating any tables.
+        # The ProductFeatures model uses Vector(768), which requires the
+        # PostgreSQL vector extension. CREATE IF NOT EXISTS is idempotent
+        # and safe to run on every startup — the Docker init script only
+        # fires on first DB volume creation.
+        async with engine.connect() as conn:
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            await conn.commit()
+
         # Create tables one at a time without a wrapping transaction so that
         # a failure on one table/index doesn't abort the entire batch.
         # This is needed because after a hot-reload restart, indexes may already

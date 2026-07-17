@@ -61,9 +61,8 @@ pandas==2.1.4
 # TensorFlow requires numpy>=1.26.0
 numpy>=1.26.0
 
-# Vertex AI (Google Cloud AI Platform for embeddings + Gemini)
-google-cloud-aiplatform>=1.50.0
-google-generativeai>=0.8.0
+# Gemini embeddings (Google AI Studio now, Vertex AI Express Mode later — both via API key)
+google-genai>=1.2.0
 
 # Development
 pytest==7.4.3

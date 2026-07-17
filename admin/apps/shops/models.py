@@ -76,12 +76,8 @@ class Shop(BaseModel):
 
     @property
     def total_revenue(self):
-        """Calculate total revenue from commission records"""
-        from apps.revenue.models import CommissionRecord
-
-        result = CommissionRecord.objects.filter(shop=self).aggregate(
-            total=Sum("commission_earned")
-        )
+        """Calculate total revenue from order data"""
+        result = self.order_data.aggregate(total=Sum("total_amount"))
         return result["total"] or 0
 
     @property

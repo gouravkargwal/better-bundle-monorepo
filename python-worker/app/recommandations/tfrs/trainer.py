@@ -27,7 +27,7 @@ from app.core.database.models import (
     LineItemData,
 )
 from app.core.logging import get_logger
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from .config import TfrsConfig
@@ -239,7 +239,7 @@ class TfrsTrainer:
                 .where(
                     OrderData.shop_id == shop_id,
                     OrderData.customer_id.isnot(None),
-                    OrderData.financial_status == "paid",
+                    func.lower(OrderData.financial_status) == "paid",
                 )
                 .group_by(OrderData.customer_id)
                 .limit(10000)
@@ -264,9 +264,10 @@ class TfrsTrainer:
                         "purchase_frequency_score": min(1.0, total_purchases / 50),
                         "recency_score": recency_score,
                         "retention_score": recency_score,
-                        "total_spent": total_spent,
-                        "customer_tier": customer_tier,
-                        "default_address": default_address,
+                        # _enrich_users_with_customer_data sets these
+                        "total_spent": 0.0,
+                        "customer_tier": 0,
+                        "default_address": {},
                     }
                 )
 
@@ -360,7 +361,7 @@ class TfrsTrainer:
                 .options(selectinload(OrderData.line_items))
                 .where(
                     OrderData.shop_id == shop_id,
-                    OrderData.financial_status == "paid",
+                    func.lower(OrderData.financial_status) == "paid",
                     OrderData.test == False,
                     OrderData.customer_id.isnot(None),
                 )

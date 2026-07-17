@@ -1,9 +1,13 @@
 """
-Vertex AI embeddings service for product understanding.
+Gemini embeddings service for product understanding.
 
 Generates semantic embeddings from product text (title, description, tags)
-using Vertex AI text-embedding-004 to enable content-based recommendation
+using the Gemini embedding model to enable content-based recommendation
 for cold-start products.
+
+Authenticates via API key (Google AI Studio today; Vertex AI Express Mode
+supports the same API-key flow, so switching backends later only requires
+setting GOOGLE_GENAI_USE_VERTEXAI=true alongside the existing key).
 """
 
 import logging
@@ -14,51 +18,64 @@ logger = logging.getLogger(__name__)
 
 
 class VertexAIEmbeddings:
-    """Generate embeddings via Vertex AI text-embedding-004."""
+    """Generate embeddings via the Gemini API using an API key."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        project_id: Optional[str] = None,
-        location: str = "us-central1",
-        model_name: str = "text-embedding-004",
+        use_vertexai: Optional[bool] = None,
+        model_name: Optional[str] = None,
     ):
-        self.api_key = api_key or os.getenv("VERTEX_AI_API_KEY")
-        self.project_id = project_id or os.getenv("VERTEX_AI_PROJECT_ID")
-        self.location = location
-        self.model_name = model_name
+        self.api_key = (
+            api_key or os.getenv("GOOGLE_AI_API_KEY") or os.getenv("VERTEX_AI_API_KEY")
+        )
+        if use_vertexai is None:
+            use_vertexai = os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "false").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        self.use_vertexai = use_vertexai
+        # Prefer env var, then passed arg, then default
+        self.model_name = (
+            model_name
+            or os.getenv("VERTEX_AI_EMBEDDING_MODEL")
+            or "models/gemini-embedding-2"
+        )
         self._client = None
 
     async def _ensure_client(self):
-        """Lazy-init the Vertex AI client."""
+        """Lazy-init the Gemini API client."""
         if self._client is not None:
             return self._client
 
+        if not self.api_key:
+            raise RuntimeError(
+                "Missing API key: set GOOGLE_AI_API_KEY (Google AI Studio) or "
+                "VERTEX_AI_API_KEY (Vertex AI Express Mode)."
+            )
+
         try:
-            from vertexai.language_models import TextEmbeddingModel
-            import vertexai
+            from google import genai
 
-            if self.api_key:
-                os.environ["VERTEX_AI_API_KEY"] = self.api_key
-
-            if self.project_id:
-                vertexai.init(project=self.project_id, location=self.location)
-            else:
-                vertexai.init(location=self.location)
-
-            self._client = TextEmbeddingModel.from_pretrained(self.model_name)
-            logger.info(f"✅ Vertex AI embeddings initialized: {self.model_name}")
+            self._client = genai.Client(
+                api_key=self.api_key, vertexai=self.use_vertexai
+            )
+            backend = "Vertex AI" if self.use_vertexai else "Google AI Studio"
+            logger.info(
+                f"✅ Gemini embeddings initialized ({backend}): {self.model_name}"
+            )
             return self._client
 
         except Exception as e:
-            logger.error(f"Failed to init Vertex AI embeddings: {e}")
+            logger.error(f"Failed to init Gemini embeddings client: {e}")
             raise
 
     async def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for a list of texts."""
         client = await self._ensure_client()
-        embeddings = client.get_embeddings(texts)
-        return [emb.values for emb in embeddings]
+        result = client.models.embed_content(model=self.model_name, contents=texts)
+        return [embedding.values for embedding in result.embeddings]
 
     async def embed_product(self, product: Dict[str, Any]) -> List[float]:
         """Generate embedding for a single product."""
@@ -104,7 +121,5 @@ class VertexAIEmbeddings:
 
 
 def create_embedding_service() -> VertexAIEmbeddings:
-    """Create the Vertex AI embedding service."""
-    api_key = os.getenv("VERTEX_AI_API_KEY")
-    project_id = os.getenv("VERTEX_AI_PROJECT_ID")
-    return VertexAIEmbeddings(api_key=api_key, project_id=project_id)
+    """Create the Gemini embedding service, authenticated via API key."""
+    return VertexAIEmbeddings()

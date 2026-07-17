@@ -181,7 +181,6 @@ export class KafkaProducerService {
 
       const key =
         usageData.shop_id ||
-        usageData.commission_id ||
         usageData.shop_domain ||
         "unknown";
 

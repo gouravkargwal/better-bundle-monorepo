@@ -86,8 +86,8 @@ KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 # TFRS + VERTEX AI (replaces Gorse)
 # ===========================================
 TFRS_MODEL_PATH=models/tfrs
-VERTEX_AI_API_KEY=
-VERTEX_AI_PROJECT_ID=
+GOOGLE_AI_API_KEY=
+GOOGLE_GENAI_USE_VERTEXAI=false
 
 # ===========================================
 # SHOPIFY APP CONFIGURATION (Development)
