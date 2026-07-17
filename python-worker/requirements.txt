@@ -57,8 +57,8 @@ tensorflow-recommenders==0.7.3
 mlxtend==0.22.0
 pandas==2.1.4
 
-# Product Embeddings (Vertex AI + local fallback)
-numpy==1.24.3
+# TensorFlow requires numpy>=1.26.0
+numpy>=1.26.0
 
 # Vertex AI (Google Cloud AI Platform for embeddings + Gemini)
 google-cloud-aiplatform>=1.50.0

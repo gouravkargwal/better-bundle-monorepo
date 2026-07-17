@@ -1,11 +1,10 @@
 """
-TFRS two-tower recommendation model.
+TFRS two-tower recommendation model with rich features.
 
-Uses TensorFlow Recommenders to build a retrieval + ranking model.
-- Query tower: user features + past purchase embeddings
-- Candidate tower: product features + Vertex AI text embeddings
-- Retrieval task: find top-N candidates
-- Ranking task: score candidates by predicted conversion
+Enhanced with:
+- Query tower: user features + cart context + time/day + customer_tier
+- Candidate tower: text + image embeddings, tags, collections, price signals
+- Context-aware ranking
 """
 
 import logging
@@ -18,19 +17,38 @@ logger = logging.getLogger(__name__)
 
 
 class QueryTower(tf.keras.Model):
-    """User query tower — encodes user features into an embedding."""
+    """User query tower — encodes user + context features into an embedding.
+
+    Features:
+    - User ID + purchase history (LTV, frequency, recency)
+    - Customer tier (new/regular/VIP)
+    - Context: time of day, day of week, weekend flag, placement context
+    - Cart contents (if available during serving)
+    """
 
     def __init__(self, embedding_dim: int = 64):
         super().__init__()
         self.embedding_dim = embedding_dim
 
-        # User ID embedding (sparse)
+        # User ID embedding
         self.user_embedding = tf.keras.Sequential(
             [
                 tf.keras.layers.IntegerLookup(mask_token=None, oov_token=0),
                 tf.keras.layers.Embedding(embedding_dim * 10, embedding_dim),
             ]
         )
+
+        # Customer tier embedding (0=new, 1=regular, 2=VIP, 3=wholesale)
+        self.tier_embedding = tf.keras.layers.Embedding(4, 4)
+
+        # Context embeddings
+        self.time_embedding = tf.keras.layers.Embedding(
+            4, 2
+        )  # morning/afternoon/evening/night
+        self.weekend_embedding = tf.keras.layers.Embedding(2, 1)  # weekday/weekend
+        self.context_embedding = tf.keras.layers.Embedding(
+            10, 4
+        )  # checkout/post_purchase/etc
 
         # Numeric feature processing
         self.numeric_dense = tf.keras.Sequential(
@@ -42,7 +60,7 @@ class QueryTower(tf.keras.Model):
             ]
         )
 
-        # Final projection to embedding space
+        # Final projection
         self.projection = tf.keras.Sequential(
             [
                 tf.keras.layers.Dense(embedding_dim, activation=None),
@@ -51,20 +69,18 @@ class QueryTower(tf.keras.Model):
         )
 
     def call(self, features: Dict[str, tf.Tensor]) -> tf.Tensor:
-        """Forward pass: user features → user embedding."""
         embeddings = []
 
-        # User ID embedding
+        # User ID
         if "user_id" in features:
             user_ids = tf.strings.to_number(
                 tf.strings.strip(features["user_id"]), tf.int64
             )
             embeddings.append(self.user_embedding(user_ids))
 
-        # Numeric features
+        # Purchase history numerics
         numeric_features = []
         for col in [
-            "log_price",
             "total_purchases",
             "lifetime_value",
             "avg_order_value",
@@ -76,24 +92,42 @@ class QueryTower(tf.keras.Model):
                 numeric_features.append(
                     tf.reshape(tf.cast(features[col], tf.float32), [-1, 1])
                 )
-
         if numeric_features:
-            numeric_concat = tf.concat(numeric_features, axis=1)
-            embeddings.append(self.numeric_dense(numeric_concat))
+            embeddings.append(self.numeric_dense(tf.concat(numeric_features, axis=1)))
 
-        # Concatenate all embeddings
+        # Customer tier
+        if "customer_tier" in features:
+            embeddings.append(
+                self.tier_embedding(tf.cast(features["customer_tier"], tf.int32))
+            )
+
+        # Time of day (categorical)
+        if "time_of_day" in features:
+            embeddings.append(
+                self.time_embedding(tf.cast(features["time_of_day"], tf.int32))
+            )
+
+        # Weekend flag
+        if "is_weekend" in features:
+            embeddings.append(
+                self.weekend_embedding(tf.cast(features["is_weekend"], tf.int32))
+            )
+
+        # Context (checkout vs post_purchase etc)
+        if "context_id" in features:
+            embeddings.append(
+                self.context_embedding(tf.cast(features["context_id"], tf.int32))
+            )
+
         if not embeddings:
             return tf.zeros(
                 [tf.shape(next(iter(features.values())))[0], self.embedding_dim]
             )
 
         combined = tf.concat(embeddings, axis=1)
-
-        # Project to embedding dimension
         return self.projection(self._ensure_dim(combined))
 
     def _ensure_dim(self, x: tf.Tensor) -> tf.Tensor:
-        """Ensure minimum dimensions for projection layer."""
         if x.shape[-1] < self.embedding_dim:
             pad = self.embedding_dim - x.shape[-1]
             return tf.pad(x, [[0, 0], [0, pad]])
@@ -101,14 +135,28 @@ class QueryTower(tf.keras.Model):
 
 
 class CandidateTower(tf.keras.Model):
-    """Product candidate tower — encodes product features into an embedding."""
+    """Product candidate tower — encodes rich product features.
 
-    def __init__(self, embedding_dim: int = 64, text_embedding_dim: int = 128):
+    Features:
+    - Product ID + text embedding (title/desc) + image embedding
+    - Price signals: bucket, log price, on-sale flag
+    - Categorical: product type, vendor
+    - Tags + collections (multi-hot via mean embedding)
+    - Inventory score
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int = 64,
+        text_embedding_dim: int = 128,
+        image_embedding_dim: int = 128,
+        tag_embedding_dim: int = 16,
+        collection_embedding_dim: int = 16,
+    ):
         super().__init__()
         self.embedding_dim = embedding_dim
-        self.text_embedding_dim = text_embedding_dim
 
-        # Product ID embedding
+        # Product ID
         self.product_embedding = tf.keras.Sequential(
             [
                 tf.keras.layers.IntegerLookup(mask_token=None, oov_token=0),
@@ -116,7 +164,7 @@ class CandidateTower(tf.keras.Model):
             ]
         )
 
-        # Text embedding from Vertex AI (pre-computed, frozen during training)
+        # Text embedding projection (Vertex AI → dense)
         self.text_projection = tf.keras.Sequential(
             [
                 tf.keras.layers.Dense(64, activation="relu"),
@@ -124,9 +172,33 @@ class CandidateTower(tf.keras.Model):
             ]
         )
 
-        # Categorical features
+        # Image embedding projection (Vertex AI → dense)
+        self.image_projection = tf.keras.Sequential(
+            [
+                tf.keras.layers.Dense(32, activation="relu"),
+                tf.keras.layers.Dense(16, activation="relu"),
+            ]
+        )
+
+        # Categorical: product type, vendor
         self.type_embedding = tf.keras.layers.Embedding(100, 8)
         self.vendor_embedding = tf.keras.layers.Embedding(500, 16)
+
+        # Tags: multi-hot → mean embedding
+        self.tag_embedding = tf.keras.layers.Embedding(500, tag_embedding_dim)
+        self.collection_embedding = tf.keras.layers.Embedding(
+            500, collection_embedding_dim
+        )
+
+        # Price signals
+        self.price_bucket_emb = tf.keras.layers.Embedding(10, 4)
+
+        # Numeric: log_price, inventory_score, is_on_sale, has_images
+        self.numeric_dense = tf.keras.Sequential(
+            [
+                tf.keras.layers.Dense(16, activation="relu"),
+            ]
+        )
 
         # Final projection
         self.projection = tf.keras.Sequential(
@@ -137,39 +209,64 @@ class CandidateTower(tf.keras.Model):
         )
 
     def call(self, features: Dict[str, tf.Tensor]) -> tf.Tensor:
-        """Forward pass: product features → product embedding."""
         embeddings = []
 
-        # Product ID embedding
+        # Product ID
         if "product_id" in features:
             product_ids = tf.strings.to_number(
                 tf.strings.strip(features["product_id"]), tf.int64
             )
             embeddings.append(self.product_embedding(product_ids))
 
-        # Text embedding (from Vertex AI)
-        if "embedding" in features:
-            text_emb = tf.cast(features["embedding"], tf.float32)
-            embeddings.append(self.text_projection(text_emb))
+        # Text embedding (Vertex AI from title+description)
+        if "text_embedding" in features:
+            embeddings.append(
+                self.text_projection(tf.cast(features["text_embedding"], tf.float32))
+            )
 
-        # Price bucket
+        # Image embedding (Vertex AI multimodal)
+        if "image_embedding" in features:
+            embeddings.append(
+                self.image_projection(tf.cast(features["image_embedding"], tf.float32))
+            )
+
+        # Price signals
         if "price_bucket" in features:
-            price_emb = tf.keras.layers.Embedding(10, 4)(
-                tf.cast(features["price_bucket"], tf.int32)
+            embeddings.append(
+                self.price_bucket_emb(tf.cast(features["price_bucket"], tf.int32))
             )
-            embeddings.append(price_emb)
 
-        # Product type
+        # Product type + vendor
         if "product_type_id" in features:
-            type_emb = self.type_embedding(
-                tf.cast(features["product_type_id"], tf.int32)
+            embeddings.append(
+                self.type_embedding(tf.cast(features["product_type_id"], tf.int32))
             )
-            embeddings.append(type_emb)
-
-        # Vendor
         if "vendor_id" in features:
-            vendor_emb = self.vendor_embedding(tf.cast(features["vendor_id"], tf.int32))
-            embeddings.append(vendor_emb)
+            embeddings.append(
+                self.vendor_embedding(tf.cast(features["vendor_id"], tf.int32))
+            )
+
+        # Tags (multi-hot → mean pooling)
+        if "tag_ids" in features:
+            tag_ids = tf.cast(features["tag_ids"], tf.int32)
+            tag_embs = self.tag_embedding(tag_ids)
+            embeddings.append(tf.reduce_mean(tag_embs, axis=1))
+
+        # Collections (multi-hot → mean pooling)
+        if "collection_ids" in features:
+            coll_ids = tf.cast(features["collection_ids"], tf.int32)
+            coll_embs = self.collection_embedding(coll_ids)
+            embeddings.append(tf.reduce_mean(coll_embs, axis=1))
+
+        # Numeric flags
+        numeric_feats = []
+        for col in ["log_price", "inventory_score", "is_on_sale", "has_images"]:
+            if col in features:
+                numeric_feats.append(
+                    tf.reshape(tf.cast(features[col], tf.float32), [-1, 1])
+                )
+        if numeric_feats:
+            embeddings.append(self.numeric_dense(tf.concat(numeric_feats, axis=1)))
 
         if not embeddings:
             return tf.zeros(
@@ -195,13 +292,12 @@ class RankingModel(tf.keras.Model):
         self.dense_layers.add(tf.keras.layers.Dense(1, activation="sigmoid"))
 
     def call(self, user_emb: tf.Tensor, item_emb: tf.Tensor) -> tf.Tensor:
-        """Score a (user, item) pair."""
         concat = tf.concat([user_emb, item_emb], axis=1)
         return self.dense_layers(concat)
 
 
 class BetterBundleModel(tfrs.Model):
-    """Two-tower retrieval + ranking model for BetterBundle."""
+    """Two-tower retrieval + ranking model with rich features."""
 
     def __init__(
         self,
@@ -210,21 +306,18 @@ class BetterBundleModel(tfrs.Model):
         products: tf.data.Dataset,
     ):
         super().__init__()
-
         self.query_tower = query_tower
         self.candidate_tower = candidate_tower
         self.ranking_model = RankingModel()
 
-        # Retrieval task: find top candidates
         self.retrieval_task = tfrs.tasks.Retrieval(
             metrics=tfrs.metrics.FactorizedTopK(
                 candidates=products.batch(128).map(self.candidate_tower),
-                k=100,  # Evaluate top-100 accuracy
+                k=100,
             ),
             loss=tfrs.losses.CachedCrossEntropyLoss(),
         )
 
-        # Ranking task: score retrieved candidates
         self.ranking_task = tfrs.tasks.Ranking(
             loss=tf.keras.losses.MeanSquaredError(),
             metrics=[
@@ -244,16 +337,10 @@ class BetterBundleModel(tfrs.Model):
             "score": tf.squeeze(score, axis=-1),
         }
 
-    def compute_loss(
-        self,
-        features: Dict[str, tf.Tensor],
-        training: bool = False,
-    ) -> tf.Tensor:
-        # Get embeddings
+    def compute_loss(self, features, training=False) -> tf.Tensor:
         user_emb = self.query_tower(features)
         item_emb = self.candidate_tower(features)
 
-        # Retrieval loss (candidate selection)
         retrieval_loss = self.retrieval_task(
             user_emb,
             item_emb,
@@ -262,21 +349,10 @@ class BetterBundleModel(tfrs.Model):
             ),
         )
 
-        # Ranking loss (conversion prediction)
         labels = tf.cast(
             features.get("label", tf.zeros([tf.shape(user_emb)[0]])), tf.float32
         )
         predicted_score = tf.squeeze(self.ranking_model(user_emb, item_emb), axis=-1)
-        ranking_loss = self.ranking_task(
-            labels=labels,
-            predictions=predicted_score,
-        )
+        ranking_loss = self.ranking_task(labels=labels, predictions=predicted_score)
 
-        # Combined loss (retrieval + ranking weighted)
         return retrieval_loss + 0.5 * ranking_loss
-
-    def get_config(self):
-        return {
-            "query_tower": self.query_tower,
-            "candidate_tower": self.candidate_tower,
-        }

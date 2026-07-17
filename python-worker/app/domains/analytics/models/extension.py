@@ -17,6 +17,7 @@ class ExtensionType(str, Enum):
     ATLAS = "atlas"  # Web pixels (behavioral tracking)
     APOLLO = "apollo"  # Post-purchase extensions
     MERCURY = "mercury"  # Shopify Plus checkout extensions
+    PHOENIX = "phoenix"  # Cart page extensions (recommendations + attribution)
 
 
 class ExtensionContext(str, Enum):

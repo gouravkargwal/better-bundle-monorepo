@@ -51,9 +51,6 @@ class Shop(BaseModel):
     collection_features = relationship(
         "CollectionFeatures", back_populates="shop", cascade="all, delete-orphan"
     )
-    customer_behavior_features = relationship(
-        "CustomerBehaviorFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
     customer_data = relationship(
         "CustomerData", back_populates="shop", cascade="all, delete-orphan"
     )

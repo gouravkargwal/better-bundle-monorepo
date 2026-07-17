@@ -1,28 +1,31 @@
 """
-Kafka-based feature computation consumer for processing feature engineering jobs
+Feature computation consumer — triggers TFRS model training after data normalization.
+
+Replaces the old FeatureEngineeringService pipeline. Instead of computing
+intermediate feature tables (which are no longer needed), it directly triggers
+TFRS training which reads from canonical tables (ProductData, UserInteraction).
 """
 
 from typing import Dict, Any
-from datetime import datetime
 
 from app.shared.helpers import now_utc
 
 from app.core.kafka.consumer import KafkaConsumer
 from app.core.config.kafka_settings import kafka_settings
-from app.domains.ml.services import FeatureEngineeringService
 from app.core.logging import get_logger
 from app.repository.ShopRepository import ShopRepository
 from app.core.services.dlq_service import DLQService
+from app.recommandations.tfrs.scheduler import TfrsScheduler
 
 logger = get_logger(__name__)
 
 
 class FeatureComputationKafkaConsumer:
-    """Kafka consumer for feature computation jobs"""
+    """Kafka consumer for feature computation jobs — triggers TFRS training."""
 
     def __init__(self):
         self.consumer = KafkaConsumer(kafka_settings.model_dump())
-        self.feature_service = FeatureEngineeringService()
+        self.tfrs_scheduler = TfrsScheduler()
         self._initialized = False
         self.shop_repo = ShopRepository()
         self.dlq_service = DLQService()
@@ -30,14 +33,11 @@ class FeatureComputationKafkaConsumer:
     async def initialize(self):
         """Initialize consumer"""
         try:
-            # Initialize Kafka consumer
             await self.consumer.initialize(
                 topics=["feature-computation-jobs"],
                 group_id="feature-computation-processors",
             )
-
             self._initialized = True
-
         except Exception as e:
             logger.error(f"Failed to initialize feature computation consumer: {e}")
             raise
@@ -65,37 +65,19 @@ class FeatureComputationKafkaConsumer:
             await self.consumer.close()
 
     async def _handle_message(self, message: Dict[str, Any]):
-        """Handle individual feature computation messages"""
+        """Handle individual feature computation messages."""
         try:
-
             payload = message.get("value") or message
             if isinstance(payload, str):
-                try:
-                    import json
+                import json
 
+                try:
                     payload = json.loads(payload)
                 except Exception:
                     pass
 
-            # Extract message data
             job_id = payload.get("job_id")
             shop_id = payload.get("shop_id")
-            features_ready_raw = payload.get("features_ready", False)
-
-            if isinstance(features_ready_raw, bool):
-                features_ready = features_ready_raw
-            elif isinstance(features_ready_raw, (int, float)):
-                features_ready = bool(features_ready_raw)
-            else:
-                try:
-                    features_ready = str(features_ready_raw).strip().lower() in (
-                        "true",
-                        "1",
-                        "yes",
-                        "on",
-                    )
-                except Exception:
-                    features_ready = False
             metadata = payload.get("metadata", {})
 
             if not job_id or not shop_id:
@@ -116,9 +98,9 @@ class FeatureComputationKafkaConsumer:
                 await self.consumer.commit(message)
                 return
 
-            # Only process if features are not ready (need to be computed)
-            if not features_ready:
-                await self._compute_features_for_shop(job_id, shop_id, metadata)
+            # Trigger TFRS training for this shop
+            # TFRS reads directly from ProductData, UserInteraction, PurchaseAttribution
+            await self._trigger_tfrs_training(job_id, shop_id, metadata)
 
         except Exception as e:
             logger.error(
@@ -128,21 +110,33 @@ class FeatureComputationKafkaConsumer:
             )
             raise
 
-    async def _compute_features_for_shop(
+    async def _trigger_tfrs_training(
         self, job_id: str, shop_id: str, metadata: Dict[str, Any]
     ):
-        """Compute features for a shop using full computation"""
+        """Trigger TFRS model training for a shop after data normalization."""
         try:
-            # Determine batch size based on metadata or use default
-            batch_size = metadata.get("batch_size", 100)
-
-            await self.feature_service.run_comprehensive_pipeline_for_shop(
-                shop_id=shop_id, batch_size=batch_size
+            logger.info(
+                f"🧠 Triggering TFRS training for shop {shop_id} (job: {job_id})"
             )
+
+            result = await self.tfrs_scheduler.train_shop(shop_id)
+
+            if result.get("status") == "success":
+                logger.info(
+                    f"✅ TFRS training complete for shop {shop_id}: "
+                    f"{result.get('training_time_seconds', 0):.1f}s, "
+                    f"loss={result.get('final_loss', 'N/A')}"
+                )
+            elif result.get("status") == "skipped":
+                logger.info(
+                    f"⏭️ TFRS training skipped for shop {shop_id}: {result.get('reason')}"
+                )
+            else:
+                logger.warning(f"⚠️ TFRS training result for shop {shop_id}: {result}")
 
         except Exception as e:
             logger.error(
-                f"Feature computation error",
+                f"TFRS training failed for shop {shop_id}",
                 job_id=job_id,
                 shop_id=shop_id,
                 error=str(e),

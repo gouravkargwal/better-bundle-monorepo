@@ -1,22 +1,28 @@
 """
 TFRS-based recommendation engine for BetterBundle.
 
-Replaces Gorse as the primary recommendation engine.
-Uses TensorFlow Recommenders two-tower architecture to leverage
-all product features, user features, and interaction data that
-Gorse could not consume.
+Two-tower deep learning model with rich features:
+- Product: text embeddings, image embeddings, price signals, tags, collections, inventory
+- User: purchase history, customer tier, location
+- Context: time of day, day of week, placement context
 """
 
 from .config import TfrsConfig
 from .features import FeatureTransformer
-from .model import BetterBundleModel
+from .model import BetterBundleModel, QueryTower, CandidateTower
 from .trainer import TfrsTrainer
 from .serving import TfrsServing
+from .embeddings import VertexAIEmbeddings
+from .llm_enricher import LLMEnricher
 
 __all__ = [
     "TfrsConfig",
     "FeatureTransformer",
     "BetterBundleModel",
+    "QueryTower",
+    "CandidateTower",
     "TfrsTrainer",
     "TfrsServing",
+    "VertexAIEmbeddings",
+    "LLMEnricher",
 ]

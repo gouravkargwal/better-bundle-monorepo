@@ -16,6 +16,7 @@ import numpy as np
 from app.core.logging import get_logger
 from .config import TfrsConfig
 from .features import FeatureTransformer
+from datetime import datetime
 
 logger = get_logger(__name__)
 
@@ -171,13 +172,15 @@ class TfrsServing:
                     "product_id": p.product_id,
                     "title": p.title,
                     "price": p.price or 0,
+                    "compare_at_price": p.compare_at_price or 0,
                     "product_type": p.product_type or "",
                     "vendor": p.vendor or "",
                     "description": p.description or "",
                     "tags": p.tags or [],
                     "collections": p.collections or [],
                     "total_inventory": p.total_inventory or 0,
-                    "image": (p.images or [{}])[0].get("src") if p.images else None,
+                    "images": p.images or [],
+                    "is_active": p.is_active,
                     "url": f"/products/{p.handle}" if p.handle else None,
                 }
                 for p in products
@@ -191,47 +194,93 @@ class TfrsServing:
         user_id: str,
         context: str,
     ) -> Optional[Dict[str, Any]]:
-        """Build query features for a known user."""
-        from app.core.database.models import CustomerBehaviorFeatures
+        """Build query features for a known user from canonical tables."""
         from app.core.database.session import get_transaction_context
-        from sqlalchemy import select
+        from app.core.database.models import OrderData, CustomerData
+        from sqlalchemy import select, func
+
+        now = datetime.utcnow()
+
+        # Context features (time of day, day of week, etc.)
+        context_features = self.features.build_context_features(
+            context=context, user_id=user_id
+        )
 
         async with get_transaction_context() as session:
+            # Aggregate from OrderData
             result = await session.execute(
-                select(CustomerBehaviorFeatures).where(
-                    CustomerBehaviorFeatures.shop_id == shop_id,
-                    CustomerBehaviorFeatures.customer_id == user_id,
+                select(
+                    func.count(OrderData.id).label("total_purchases"),
+                    func.coalesce(func.sum(OrderData.total_amount), 0).label(
+                        "lifetime_value"
+                    ),
+                    func.avg(OrderData.total_amount).label("avg_order_value"),
+                    func.max(OrderData.order_date).label("last_purchase_date"),
+                ).where(
+                    OrderData.shop_id == shop_id,
+                    OrderData.customer_id == user_id,
+                    OrderData.financial_status == "paid",
                 )
             )
-            user = result.scalar_one_or_none()
+            row = result.one_or_none()
 
-            if user is None:
-                # Try UserFeatures
-                from app.core.database.models import UserFeatures
+            # Default features for new/anonymous users
+            features = {
+                "user_id": user_id,
+                "total_purchases": 0,
+                "lifetime_value": 0,
+                "avg_order_value": 0,
+                "purchase_frequency_score": 0,
+                "recency_score": 0,
+                "retention_score": 0.5,
+                "total_spent": 0,
+                "customer_tier": 0,
+            }
 
-                result = await session.execute(
-                    select(UserFeatures).where(
-                        UserFeatures.shop_id == shop_id,
-                        UserFeatures.customer_id == user_id,
+            if row and row.total_purchases and row.total_purchases > 0:
+                total_purchases = row.total_purchases or 0
+                lifetime_value = float(row.lifetime_value or 0)
+                last_purchase = row.last_purchase_date
+                days_since = (now - last_purchase).days if last_purchase else 365
+                recency_score = max(0, 1.0 - (days_since / 365))
+
+                # CustomerData enrichment
+                cust_result = await session.execute(
+                    select(CustomerData).where(
+                        CustomerData.shop_id == shop_id,
+                        CustomerData.customer_id == user_id,
                     )
                 )
-                user = result.scalar_one_or_none()
+                cust = cust_result.scalar_one_or_none()
+                total_spent = (
+                    float(cust.total_spent) if cust and cust.total_spent else 0
+                )
 
-            if user is None:
-                return None
+                # Customer tier
+                if total_spent == 0:
+                    customer_tier = 0
+                elif total_spent < 100:
+                    customer_tier = 1
+                elif total_spent < 500:
+                    customer_tier = 2
+                else:
+                    customer_tier = 3
 
-            return {
-                "user_id": user_id,
-                "total_purchases": float(getattr(user, "total_purchases", 0)),
-                "lifetime_value": float(getattr(user, "lifetime_value", 0)),
-                "avg_order_value": float(getattr(user, "avg_order_value", 0)),
-                "purchase_frequency_score": float(
-                    getattr(user, "purchase_frequency_score", 0)
-                ),
-                "recency_score": float(getattr(user, "recency_score", 0)),
-                "retention_score": 1.0 - float(getattr(user, "churn_risk_score", 0.5)),
-                "context": context,
-            }
+                features.update(
+                    {
+                        "total_purchases": total_purchases,
+                        "lifetime_value": lifetime_value,
+                        "avg_order_value": float(row.avg_order_value or 0),
+                        "purchase_frequency_score": min(1.0, total_purchases / 50),
+                        "recency_score": recency_score,
+                        "retention_score": recency_score,
+                        "total_spent": total_spent,
+                        "customer_tier": customer_tier,
+                    }
+                )
+
+            features.update(context_features)
+            return features
 
     async def _build_session_features(
         self,
@@ -255,8 +304,13 @@ class TfrsServing:
                     shop_id, user_session.customer_id, context
                 )
 
-        # No user info — return context-only features
-        return {"context": context, "user_id": "anonymous"}
+        # No user info — return context-only features for anonymous
+        context_features = self.features.build_context_features(
+            context=context, user_id="anonymous"
+        )
+        base = {"user_id": "anonymous", "customer_tier": 0}
+        base.update(context_features)
+        return base
 
     def _batch_features(
         self,
@@ -276,22 +330,75 @@ class TfrsServing:
             elif isinstance(val, list):
                 batch[key] = tf.constant([val] * n, dtype=tf.float32)
 
-        # Add product features
-        for key in ["product_id", "price", "product_type", "vendor"]:
-            vals = [p.get(key, "") for p in products]
-            if isinstance(vals[0], str):
-                batch[key] = tf.constant(vals, dtype=tf.string)
-            else:
-                batch[key] = tf.constant(vals, dtype=tf.float32)
+        # Product ID
+        batch["product_id"] = tf.constant(
+            [p.get("product_id", "") for p in products], dtype=tf.string
+        )
 
-        # Add text embeddings if available
-        for p in products:
-            if "embedding" not in p:
-                p["embedding"] = [0.0] * self.config.text_embedding_dim
-
-        batch["embedding"] = tf.constant(
+        # Price signals
+        prices = tf.constant([p.get("price", 0) for p in products], dtype=tf.float32)
+        batch["log_price"] = tf.math.log1p(prices)
+        batch["is_on_sale"] = tf.constant(
             [
-                p.get("embedding", [0.0] * self.config.text_embedding_dim)
+                1 if p.get("compare_at_price", 0) > p.get("price", 0) else 0
+                for p in products
+            ],
+            dtype=tf.float32,
+        )
+
+        # Categorical
+        batch["product_type_id"] = tf.constant(
+            [
+                self.features.product_type_vocab.get(p.get("product_type", ""), 0)
+                for p in products
+            ],
+            dtype=tf.float32,
+        )
+        batch["vendor_id"] = tf.constant(
+            [self.features.vendor_vocab.get(p.get("vendor", ""), 0) for p in products],
+            dtype=tf.float32,
+        )
+
+        # Tags and collections (multi-hot IDs)
+        batch["tag_ids"] = tf.constant(
+            [self.features._tags_to_ids(p.get("tags", [])) for p in products],
+            dtype=tf.float32,
+        )
+        batch["collection_ids"] = tf.constant(
+            [
+                self.features._collections_to_ids(p.get("collections", []))
+                for p in products
+            ],
+            dtype=tf.float32,
+        )
+
+        # Numeric flags
+        batch["inventory_score"] = tf.constant(
+            [np.log1p(p.get("total_inventory", 0)) for p in products],
+            dtype=tf.float32,
+        )
+        batch["has_images"] = tf.constant(
+            [1 if p.get("images") and len(p["images"]) > 0 else 0 for p in products],
+            dtype=tf.float32,
+        )
+
+        # Text embeddings (placeholder — loaded on first pass)
+        for p in products:
+            if "text_embedding" not in p:
+                p["text_embedding"] = [0.0] * self.config.text_embedding_dim
+            if "image_embedding" not in p:
+                p["image_embedding"] = [0.0] * self.config.image_embedding_dim
+
+        batch["text_embedding"] = tf.constant(
+            [
+                p.get("text_embedding", [0.0] * self.config.text_embedding_dim)
+                for p in products
+            ],
+            dtype=tf.float32,
+        )
+        batch["image_embedding"] = tf.constant(
+            [
+                p.get("image_embedding", [0.0] * self.config.image_embedding_dim)
                 for p in products
             ],
             dtype=tf.float32,

@@ -2,9 +2,10 @@
 User interaction model for SQLAlchemy
 
 Represents user interactions with extensions.
+Includes revenue attribution fields for merchant-facing analytics.
 """
 
-from sqlalchemy import Column, String, ForeignKey, Index
+from sqlalchemy import Column, String, Float, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin, CustomerMixin
@@ -19,6 +20,10 @@ class UserInteraction(BaseModel, ShopMixin, CustomerMixin):
     extension_type = Column(String(50), nullable=False, index=True)
     interaction_type = Column(String(50), nullable=False, index=True)
     interaction_metadata = Column(JSON, default={}, nullable=False)
+
+    # Revenue attribution fields (linked from PurchaseAttribution on conversion)
+    order_id = Column(String(255), nullable=True, index=True)
+    attributed_revenue = Column(Float, default=0.0, nullable=True)
 
     # Relationships
     session = relationship("UserSession", back_populates="interactions")
@@ -46,6 +51,7 @@ class UserInteraction(BaseModel, ShopMixin, CustomerMixin):
             "customer_id",
             "created_at",
         ),
+        Index("ix_user_interaction_order_id", "order_id"),
     )
 
     def __repr__(self) -> str:

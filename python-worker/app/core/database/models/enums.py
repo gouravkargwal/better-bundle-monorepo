@@ -21,32 +21,6 @@ class RawDataFormat(str, Enum):
     GRAPHQL = "graphql"
 
 
-class BillingPlanType(str, Enum):
-    """Billing plan types"""
-
-    REVENUE_SHARE = "revenue_share"
-    PERFORMANCE_TIER = "performance_tier"
-    HYBRID = "hybrid"
-    USAGE_BASED = "usage_based"
-
-
-class BillingPlanStatus(str, Enum):
-    """Billing plan status"""
-
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    SUSPENDED = "suspended"
-    TRIAL = "trial"
-
-
-class BillingCycle(str, Enum):
-    """Billing cycle types"""
-
-    MONTHLY = "monthly"
-    QUARTERLY = "quarterly"
-    ANNUALLY = "annually"
-
-
 class InvoiceStatus(str, Enum):
     """Invoice status"""
 
@@ -157,15 +131,6 @@ class BillingCycleStatus(str, Enum):
     COMPLETED = "completed"  # Cycle ended normally
     CANCELLED = "cancelled"  # Cycle cancelled (subscription ended)
     SUSPENDED = "suspended"  # Cycle suspended
-
-
-class TrialStatus(str, Enum):
-    """Trial status — kept for legacy compatibility, prefer SubscriptionStatus.TRIAL"""
-
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    EXPIRED = "expired"
-    CANCELLED = "cancelled"
 
 
 class ShopifySubscriptionStatus(str, Enum):

@@ -21,13 +21,14 @@ import numpy as np
 from app.core.database.session import get_transaction_context
 from app.core.database.models import (
     ProductData,
-    UserFeatures,
-    CustomerBehaviorFeatures,
     UserInteraction,
     PurchaseAttribution,
+    OrderData,
+    LineItemData,
 )
 from app.core.logging import get_logger
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from .config import TfrsConfig
 from .features import FeatureTransformer
@@ -54,6 +55,7 @@ class TfrsTrainer:
         users = await self._load_users(shop_id)
         interactions = await self._load_interactions(shop_id)
         attributions = await self._load_attributions(shop_id)
+        co_purchases = await self._load_co_purchases(shop_id)
 
         if len(products) < self.config.min_products_for_training:
             logger.warning(
@@ -66,17 +68,25 @@ class TfrsTrainer:
             f"Loaded: {len(products)} products, "
             f"{len(users)} users, "
             f"{len(interactions)} interactions, "
-            f"{len(attributions)} attributions"
+            f"{len(attributions)} attributions, "
+            f"{len(co_purchases)} co-purchase pairs"
         )
 
-        # 2. Build vocabularies
+        # 2. Enrich users with CustomerData (tier, location)
+        users = await self._enrich_users_with_customer_data(shop_id, users)
+
+        # 3. Build vocabularies
         self.features.build_vocabularies(products, users)
 
-        # 3. Build feature DataFrames
+        # 4. Build feature DataFrames
         products_df = await self.features.build_product_features(products)
         users_df = await self.features.build_user_features(users)
         train_df = await self.features.build_training_dataset(
-            interactions, attributions, products_df, users_df
+            interactions,
+            attributions,
+            products_df,
+            users_df,
+            co_purchase_examples=co_purchases,
         )
 
         if len(train_df) < self.config.min_interactions_for_training:
@@ -164,51 +174,116 @@ class TfrsTrainer:
                     "title": p.title,
                     "description": p.description or "",
                     "price": p.price or 0,
+                    "compare_at_price": p.compare_at_price or 0,
                     "product_type": p.product_type or "",
                     "vendor": p.vendor or "",
                     "tags": p.tags or [],
                     "collections": p.collections or [],
                     "total_inventory": p.total_inventory or 0,
+                    "images": p.images or [],
                     "is_active": p.is_active,
                 }
                 for p in products
             ]
 
     async def _load_users(self, shop_id: str) -> List[Dict[str, Any]]:
-        """Load user features for a shop."""
+        """Load user data from canonical OrderData.
+
+        Reads directly from canonical tables rather than feature tables,
+        since the feature computation pipeline was removed with Gorse.
+        """
+        from sqlalchemy import func
+        from app.shared.helpers import now_utc
+        from datetime import timedelta
+
         async with get_transaction_context() as session:
-            # Try CustomerBehaviorFeatures first (richer), fall back to UserFeatures
             result = await session.execute(
-                select(CustomerBehaviorFeatures)
-                .where(CustomerBehaviorFeatures.shop_id == shop_id)
+                select(
+                    OrderData.customer_id,
+                    func.count(OrderData.id).label("total_purchases"),
+                    func.coalesce(func.sum(OrderData.total_amount), 0).label(
+                        "lifetime_value"
+                    ),
+                    func.avg(OrderData.total_amount).label("avg_order_value"),
+                    func.max(OrderData.order_date).label("last_purchase_date"),
+                )
+                .where(
+                    OrderData.shop_id == shop_id,
+                    OrderData.customer_id.isnot(None),
+                    OrderData.financial_status == "paid",
+                )
+                .group_by(OrderData.customer_id)
                 .limit(10000)
             )
-            users = result.scalars().all()
+            rows = result.all()
 
-            if not users:
-                result = await session.execute(
-                    select(UserFeatures)
-                    .where(UserFeatures.shop_id == shop_id)
-                    .limit(10000)
+            now = now_utc()
+            users = []
+            for row in rows:
+                total_purchases = row.total_purchases or 0
+                lifetime_value = float(row.lifetime_value or 0)
+                last_purchase = row.last_purchase_date
+                days_since = (now - last_purchase).days if last_purchase else 365
+                recency_score = max(0, 1.0 - (days_since / 365))
+
+                users.append(
+                    {
+                        "customer_id": row.customer_id,
+                        "total_purchases": total_purchases,
+                        "lifetime_value": lifetime_value,
+                        "avg_order_value": float(row.avg_order_value or 0),
+                        "purchase_frequency_score": min(1.0, total_purchases / 50),
+                        "recency_score": recency_score,
+                        "retention_score": recency_score,
+                        "total_spent": total_spent,
+                        "customer_tier": customer_tier,
+                        "default_address": default_address,
+                    }
                 )
-                users = result.scalars().all()
 
-            return [
-                {
-                    "customer_id": u.customer_id,
-                    "total_purchases": getattr(u, "total_purchases", 0),
-                    "lifetime_value": getattr(u, "lifetime_value", 0),
-                    "avg_order_value": getattr(u, "avg_order_value", 0),
-                    "purchase_frequency_score": getattr(
-                        u, "purchase_frequency_score", 0
-                    ),
-                    "recency_score": getattr(u, "recency_score", 0),
-                    "churn_risk_score": getattr(u, "churn_risk_score", 1.0),
-                    "primary_category": getattr(u, "primary_category", ""),
-                    "category_diversity": getattr(u, "category_diversity", 0),
-                }
-                for u in users
-            ]
+            return users
+
+    # ------------------------------------------------------------------
+    # Customer enrichment (for tier + location features)
+    # ------------------------------------------------------------------
+
+    async def _enrich_users_with_customer_data(
+        self, shop_id: str, users: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Enrich user records with CustomerData (total_spent, location)."""
+        from app.core.database.models import CustomerData
+        from sqlalchemy import select
+
+        async with get_transaction_context() as session:
+            result = await session.execute(
+                select(CustomerData).where(
+                    CustomerData.shop_id == shop_id,
+                    CustomerData.is_active == True,
+                )
+            )
+            customer_map = {}
+            for c in result.scalars().all():
+                customer_map[c.customer_id] = c
+
+        for user in users:
+            cust = customer_map.get(user["customer_id"])
+            total_spent = float(cust.total_spent) if cust and cust.total_spent else 0
+            user["total_spent"] = total_spent
+
+            # Customer tier
+            if total_spent == 0:
+                user["customer_tier"] = 0  # new
+            elif total_spent < 100:
+                user["customer_tier"] = 1  # regular
+            elif total_spent < 500:
+                user["customer_tier"] = 2  # VIP
+            else:
+                user["customer_tier"] = 3  # wholesale
+
+            # Default address
+            user["default_address"] = cust.default_address if cust else {}
+
+        return users
 
     async def _load_interactions(self, shop_id: str) -> List[Dict[str, Any]]:
         """Load recent user interactions for a shop."""
@@ -240,6 +315,65 @@ class TfrsTrainer:
                 }
                 for i in interactions
             ]
+
+    async def _load_co_purchases(self, shop_id: str) -> List[Dict[str, Any]]:
+        """Load co-purchase signals from order line items.
+
+        When two products appear in the same order, that's a positive
+        signal that they are complementary. This teaches the model
+        "frequently bought together" patterns without a separate FBT engine.
+
+        Returns a list of training examples with label=0.4 (co-purchase weight).
+        """
+        async with get_transaction_context() as session:
+            result = await session.execute(
+                select(OrderData)
+                .options(selectinload(OrderData.line_items))
+                .where(
+                    OrderData.shop_id == shop_id,
+                    OrderData.financial_status == "paid",
+                    OrderData.test == False,
+                    OrderData.customer_id.isnot(None),
+                )
+                .limit(self.config.max_co_purchase_examples or 50000)
+            )
+            orders = result.scalars().all()
+
+            examples = []
+            multi_item_count = 0
+            for order in orders:
+                items = [
+                    li.product_id for li in (order.line_items or []) if li.product_id
+                ]
+                if len(items) < 2:
+                    continue
+                multi_item_count += 1
+
+                # All pairs in both directions: A→B and B→A
+                for i in range(len(items)):
+                    for j in range(i + 1, len(items)):
+                        examples.append(
+                            {
+                                "user_id": order.customer_id,
+                                "product_id": items[j],
+                                "label": 0.4,
+                                "interaction_type": "co_purchase",
+                            }
+                        )
+                        examples.append(
+                            {
+                                "user_id": order.customer_id,
+                                "product_id": items[i],
+                                "label": 0.4,
+                                "interaction_type": "co_purchase",
+                            }
+                        )
+
+            logger.info(
+                f"Loaded {len(examples)} co-purchase examples "
+                f"from {multi_item_count} multi-item orders"
+            )
+            return examples
 
     async def _load_attributions(self, shop_id: str) -> List[Dict[str, Any]]:
         """Load purchase attributions for a shop."""

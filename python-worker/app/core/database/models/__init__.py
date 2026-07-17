@@ -11,9 +11,6 @@ from .base import Base
 from .enums import (
     RawSourceType,
     RawDataFormat,
-    BillingPlanType,
-    BillingPlanStatus,
-    BillingCycle,
     InvoiceStatus,
     ExtensionType,
     AppBlockTarget,
@@ -21,7 +18,6 @@ from .enums import (
     SubscriptionPlanType,
     SubscriptionStatus,
     BillingCycleStatus,
-    TrialStatus,
     ShopifySubscriptionStatus,
     AdjustmentReason,
     BillingPhase,
@@ -45,13 +41,11 @@ from .raw_data import (
     RawCollection,
 )
 
-
 # Feature models
 from .features import (
     UserFeatures,
     ProductFeatures,
     CollectionFeatures,
-    CustomerBehaviorFeatures,
     InteractionFeatures,
     SessionFeatures,
     ProductPairFeatures,
@@ -65,7 +59,6 @@ from .identity import UserIdentityLink
 from .user_session import UserSession
 from .user_interaction import UserInteraction
 from .purchase_attribution import PurchaseAttribution
-
 
 # Billing models (legacy - removed)
 # Old billing models have been replaced with new subscription system
@@ -91,9 +84,6 @@ __all__ = [
     # Enums
     "RawSourceType",
     "RawDataFormat",
-    "BillingPlanType",
-    "BillingPlanStatus",
-    "BillingCycle",
     "InvoiceStatus",
     "ExtensionType",
     "AppBlockTarget",
@@ -101,7 +91,6 @@ __all__ = [
     "SubscriptionPlanType",
     "SubscriptionStatus",
     "BillingCycleStatus",
-    "TrialStatus",
     "ShopifySubscriptionStatus",
     "AdjustmentReason",
     "BillingPhase",
@@ -124,7 +113,6 @@ __all__ = [
     "UserFeatures",
     "ProductFeatures",
     "CollectionFeatures",
-    "CustomerBehaviorFeatures",
     "InteractionFeatures",
     "SessionFeatures",
     "ProductPairFeatures",
@@ -141,7 +129,6 @@ __all__ = [
     "ShopSubscription",
     "BillingCycle",
     "CommissionRecord",
-    # Trial configuration models
     # Extension models
     "SchedulerJobExecution",
 ]

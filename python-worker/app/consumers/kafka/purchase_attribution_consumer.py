@@ -291,6 +291,39 @@ class PurchaseAttributionKafkaConsumer:
                 billing = BillingServiceV2(session)
                 await billing.process_purchase_attribution(purchase_event)
 
+                # ✅ Link attribution back to UserInteraction records for analytics
+                # This lets us track which recommendations actually drove revenue
+                session_id_attr = (
+                    getattr(user_session, "id", None)
+                    if user_session
+                    else purchase_event.session_id
+                )
+                if session_id_attr and order_id:
+                    from sqlalchemy import update as sa_update
+
+                    await session.execute(
+                        sa_update(UserInteraction)
+                        .where(
+                            UserInteraction.session_id == session_id_attr,
+                            UserInteraction.interaction_type.in_(
+                                [
+                                    "recommendation_clicked",
+                                    "product_added_to_cart",
+                                    "checkout_started",
+                                ]
+                            ),
+                        )
+                        .values(
+                            order_id=str(order_id),
+                            attributed_revenue=float(total_amount)
+                            / max(len(products), 1),
+                        )
+                    )
+                    logger.info(
+                        f"✅ Linked attribution for session {session_id_attr}: "
+                        f"order={order_id}, revenue={total_amount}"
+                    )
+
         except Exception as e:
             logger.error("Failed to process purchase attribution", error=str(e))
             raise

@@ -19,7 +19,6 @@ from app.recommandations.cache import RecommendationCacheService
 from app.recommandations.analytics import RecommendationAnalytics
 from app.recommandations.enrichment import ProductEnrichment
 from app.recommandations.exclusion_service import ProductExclusionService
-from app.recommandations.session_service import SessionDataService
 from app.recommandations.recommendation_executor import RecommendationExecutor
 from app.recommandations.shop_lookup_service import ShopLookupService
 from app.recommandations.client_id_resolver import ClientIdResolver
@@ -57,7 +56,6 @@ class RecommendationServices:
     client_id_resolver: ClientIdResolver
     exclusion: ProductExclusionService
     cache: RecommendationCacheService
-    session: SessionDataService
     executor: RecommendationExecutor
     enrichment: ProductEnrichment
     analytics: RecommendationAnalytics
@@ -74,7 +72,6 @@ services = RecommendationServices(
     client_id_resolver=ClientIdResolver(),
     exclusion=ProductExclusionService(),
     cache=RecommendationCacheService(),
-    session=SessionDataService(),
     executor=recommendation_executor,
     enrichment=ProductEnrichment(),
     analytics=RecommendationAnalytics(),
@@ -324,79 +321,21 @@ async def fetch_recommendations_logic(
                 limit=request.limit,
             )
         elif request.context == "checkout_page":
-            # Mercury checkout-specific recommendations - FBT ONLY
+            # Mercury checkout — TFRS handles it via the standard fallback chain
             logger.info(
-                f"🎯 Mercury: Generating FBT-only checkout recommendations for shop {shop_domain}"
+                f"🎯 Mercury: Checkout recommendations via TFRS fallback chain for shop {shop_domain}"
             )
-
-            # Use FBT directly for checkout recommendations
-            from app.recommandations.frequently_bought_together import (
-                FrequentlyBoughtTogetherService,
+            result = await services.executor.execute_fallback_chain(
+                context="checkout_page",
+                shop_id=shop.id,
+                product_ids=request.product_ids,
+                user_id=effective_user_id,
+                session_id=request.session_id,
+                category=category,
+                limit=request.limit,
+                metadata=request.metadata,
+                exclude_items=final_exclude_items,
             )
-
-            fbt_service = FrequentlyBoughtTogetherService()
-            cart_items = request.product_ids or request.metadata.get("cart_items", [])
-            cart_value = request.metadata.get("cart_value", 0.0)
-
-            # For FBT, we need at least one product in cart
-            if not cart_items:
-                result = {
-                    "success": False,
-                    "items": [],
-                    "source": "fbt_no_cart_items",
-                    "error": "No cart items provided for FBT recommendations",
-                }
-            else:
-                # Use the first cart item for FBT recommendations
-                primary_product = cart_items[0]
-                result = await fbt_service.get_frequently_bought_together(
-                    shop_id=shop.id,
-                    product_id=primary_product,
-                    limit=request.limit,
-                    cart_value=cart_value,
-                )
-
-                # Add Mercury-specific metadata
-                if result.get("success"):
-                    result["smart_selection"] = {
-                        "selected_type": "frequently_bought_together",
-                        "visitor_type": ("returning" if effective_user_id else "new"),
-                        "checkout_context": "mercury_fbt_only",
-                        "cart_value": cart_value,
-                        "checkout_step": request.metadata.get("checkout_step"),
-                        "reason": "fbt_complementary_upsells",
-                        "primary_product": primary_product,
-                    }
-
-                # If TFRS failed or returned no items, fallback to popular
-                if not result.get("success") or not result.get("items"):
-                    # Ensure session-based fallback can use cart contents
-                    fallback_metadata = dict(request.metadata or {})
-                    if cart_items:
-                        fallback_metadata["cart_contents"] = cart_items
-
-                    # Skip FBT in fallback to avoid retrying it; prefer session/user/popular
-                    custom_levels = {
-                        "checkout_page": [
-                            "session_recommendations",
-                            "user_recommendations",
-                            "popular_category",
-                            "popular",
-                        ]
-                    }
-
-                    result = await services.executor.execute_fallback_chain(
-                        context="checkout_page",
-                        shop_id=shop.id,
-                        product_ids=request.product_ids,
-                        user_id=effective_user_id,
-                        session_id=request.session_id,
-                        category=category,
-                        limit=request.limit,
-                        metadata=fallback_metadata,
-                        exclude_items=final_exclude_items,
-                        fallback_levels=custom_levels,
-                    )
         else:  # Default fallback for other contexts
             result = await services.executor.execute_fallback_chain(
                 context=request.context,
@@ -462,6 +401,23 @@ async def fetch_recommendations_logic(
     final_items = services.enrichment.enhance_recommendations_with_currency(
         final_items, shop_currency
     )
+
+    # 7b. LLM Enrichment — Gemini explanations + section titles
+    if final_items:
+        try:
+            user_context = {
+                "cart_items": request.product_ids or [],
+                "context": request.context,
+            }
+            enriched = await services.llm.enrich_recommendations(
+                context=request.context,
+                user_context=user_context,
+                recommended=final_items,
+            )
+            if enriched:
+                final_items = enriched
+        except Exception as e:
+            logger.warning(f"LLM enrichment failed (non-blocking): {e}")
 
     response_data = {
         "recommendations": final_items,

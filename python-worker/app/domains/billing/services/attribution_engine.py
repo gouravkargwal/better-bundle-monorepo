@@ -35,7 +35,6 @@ from ..models.attribution_models import (
     InteractionType,
     AttributionMetrics,
 )
-from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
 from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
 from app.core.database.models.enums import BillingPhase
 
@@ -69,7 +68,6 @@ class AttributionEngine:
         ✅ SCENARIO 9: Configurable Attribution Windows
         """
         self.session = session
-        self.adapter_factory = InteractionEventAdapterFactory()
         self.commission_service = CommissionServiceV2(session)
         # ✅ INDUSTRY STANDARD: Configurable attribution windows
         self.attribution_windows = {
@@ -589,9 +587,7 @@ class AttributionEngine:
                         "createdAt": interaction["created_at"],
                     }
 
-                    product_id = self.adapter_factory.extract_product_id(
-                        interaction_dict
-                    )
+                    product_id = self._extract_product_id(interaction_dict)
 
                     if not product_id:
                         logger.warning(
@@ -622,6 +618,21 @@ class AttributionEngine:
 
         return product_interactions
 
+    @staticmethod
+    def _extract_product_id(interaction_dict: Dict[str, Any]) -> Optional[str]:
+        """Extract product_id from an interaction dict.
+
+        This replaces the old InteractionEventAdapterFactory.extract_product_id()
+        which was removed with the Gorse pipeline.
+        """
+        metadata = interaction_dict.get("metadata", {}) or {}
+        # Try multiple possible field names
+        for key in ["productId", "product_id", "itemId", "item_id"]:
+            val = metadata.get(key)
+            if val:
+                return str(val)
+        return None
+
     def _extract_product_id_from_interaction(
         self, interaction: Dict[str, Any]
     ) -> Optional[str]:
@@ -637,7 +648,7 @@ class AttributionEngine:
                 "shopId": interaction["shop_id"],
                 "createdAt": interaction["created_at"],
             }
-            return self.adapter_factory.extract_product_id(interaction_dict)
+            return self._extract_product_id(interaction_dict)
         except Exception as e:
             logger.error(f"Error extracting product_id: {e}")
             return None

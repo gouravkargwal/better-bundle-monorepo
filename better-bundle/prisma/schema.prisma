@@ -7,43 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model billing_cycles {
-  shop_subscription_id String                    @db.VarChar(255)
-  cycle_number         Int
-  start_date           DateTime                  @db.Timestamptz(6)
-  end_date             DateTime                  @db.Timestamptz(6)
-  initial_cap_amount   Decimal                   @db.Decimal(10, 2)
-  current_cap_amount   Decimal                   @db.Decimal(10, 2)
-  usage_amount         Decimal                   @db.Decimal(10, 2)
-  commission_count     Int
-  status               billing_cycle_status_enum
-  activated_at         DateTime?                 @db.Timestamptz(6)
-  completed_at         DateTime?                 @db.Timestamptz(6)
-  cancelled_at         DateTime?                 @db.Timestamptz(6)
-  cycle_metadata       String?                   @db.VarChar(1000)
-  id                   String                    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at           DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at           DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_subscriptions   shop_subscriptions        @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  commission_records   commission_records[]
-
-  @@unique([shop_subscription_id, status], map: "ix_billing_cycle_unique_active")
-  @@index([shop_subscription_id, status], map: "ix_billing_cycle_active")
-  @@index([start_date, end_date], map: "ix_billing_cycle_dates")
-  @@index([cycle_number], map: "ix_billing_cycle_number")
-  @@index([status], map: "ix_billing_cycle_status")
-  @@index([shop_subscription_id], map: "ix_billing_cycle_subscription")
-  @@index([activated_at], map: "ix_billing_cycles_activated_at")
-  @@index([cancelled_at], map: "ix_billing_cycles_cancelled_at")
-  @@index([completed_at], map: "ix_billing_cycles_completed_at")
-  @@index([cycle_number], map: "ix_billing_cycles_cycle_number")
-  @@index([end_date], map: "ix_billing_cycles_end_date")
-  @@index([shop_subscription_id], map: "ix_billing_cycles_shop_subscription_id")
-  @@index([start_date], map: "ix_billing_cycles_start_date")
-  @@index([status], map: "ix_billing_cycles_status")
-}
-
 model collection_data {
   collection_id   String    @db.VarChar
   title           String    @db.VarChar(500)
@@ -100,98 +63,6 @@ model collection_features {
   @@index([shop_id, collection_conversion_rate], map: "ix_collection_features_shop_id_collection_conversion_rate")
   @@index([shop_id, collection_engagement_score], map: "ix_collection_features_shop_id_collection_engagement_score")
   @@index([shop_id, collection_popularity_score], map: "ix_collection_features_shop_id_collection_popularity_score")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model commission_records {
-  id                      String                 @id @db.VarChar(255)
-  shop_id                 String                 @db.VarChar(255)
-  purchase_attribution_id String                 @unique(map: "ix_commission_records_purchase_attribution_id") @db.VarChar(255)
-  billing_cycle_id        String?                @db.VarChar(255)
-  order_id                String                 @db.VarChar(255)
-  order_date              DateTime               @db.Timestamptz(6)
-  attributed_revenue      Decimal                @db.Decimal(10, 2)
-  commission_rate         Decimal                @db.Decimal(5, 4)
-  commission_earned       Decimal                @db.Decimal(10, 2)
-  commission_charged      Decimal                @db.Decimal(10, 2)
-  commission_overflow     Decimal                @db.Decimal(10, 2)
-  billing_cycle_start     DateTime?              @db.Timestamptz(6)
-  billing_cycle_end       DateTime?              @db.Timestamptz(6)
-  cycle_usage_before      Decimal                @db.Decimal(10, 2)
-  cycle_usage_after       Decimal                @db.Decimal(10, 2)
-  capped_amount           Decimal                @db.Decimal(10, 2)
-  trial_accumulated       Decimal                @db.Decimal(10, 2)
-  billing_phase           billing_phase_enum
-  status                  commission_status_enum
-  charge_type             charge_type_enum
-  shopify_usage_record_id String?                @unique(map: "ix_commission_records_shopify_usage_record_id") @db.VarChar(255)
-  shopify_recorded_at     DateTime?              @db.Timestamptz(6)
-  shopify_response        Json?                  @db.Json
-  currency                String                 @db.VarChar(3)
-  notes                   String?
-  commission_metadata     Json?                  @db.Json
-  error_count             Int
-  last_error              String?
-  last_error_at           DateTime?              @db.Timestamptz(6)
-  deleted_at              DateTime?              @db.Timestamptz(6)
-  created_at              DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at              DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  billing_cycles          billing_cycles?        @relation(fields: [billing_cycle_id], references: [id], onUpdate: NoAction)
-  purchase_attributions   purchase_attributions  @relation(fields: [purchase_attribution_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  shops                   shops                  @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([shop_id, billing_cycle_start, billing_cycle_end], map: "idx_commission_shop_cycle")
-  @@index([shop_id, billing_phase, status], map: "idx_commission_shop_phase_status")
-  @@index([shopify_usage_record_id], map: "idx_commission_shopify_record")
-  @@index([status, created_at], map: "idx_commission_status_created")
-  @@index([billing_cycle_end], map: "ix_commission_records_billing_cycle_end")
-  @@index([billing_cycle_id], map: "ix_commission_records_billing_cycle_id")
-  @@index([shop_id, billing_cycle_id, billing_phase, status], map: "idx_commission_shop_cycle_phase_status")
-  @@index([billing_cycle_start], map: "ix_commission_records_billing_cycle_start")
-  @@index([billing_phase], map: "ix_commission_records_billing_phase")
-  @@index([deleted_at], map: "ix_commission_records_deleted_at")
-  @@index([order_date], map: "ix_commission_records_order_date")
-  @@index([order_id], map: "ix_commission_records_order_id")
-  @@index([shop_id], map: "ix_commission_records_shop_id")
-  @@index([status], map: "ix_commission_records_status")
-}
-
-model customer_behavior_features {
-  user_lifecycle_stage        String?  @db.VarChar(100)
-  purchase_frequency_score    Float
-  interaction_diversity_score Float
-  category_diversity          Int
-  primary_category            String?  @db.VarChar(100)
-  conversion_rate             Float
-  avg_order_value             Float
-  lifetime_value              Float
-  recency_score               Float
-  churn_risk_score            Float
-  total_interactions          Int
-  days_since_last_purchase    Int?
-  last_computed_at            DateTime @db.Timestamptz(6)
-  id                          String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                  DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                     String   @db.VarChar
-  customer_id                 String?  @db.VarChar
-  shops                       shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, customer_id], map: "ix_cb_features_shop_cust")
-  @@index([shop_id, avg_order_value], map: "ix_cb_features_shop_avg_order_value")
-  @@index([shop_id, category_diversity], map: "ix_cb_features_shop_category_diversity")
-  @@index([shop_id, churn_risk_score], map: "ix_cb_features_shop_churn_risk_score")
-  @@index([shop_id, conversion_rate], map: "ix_cb_features_shop_conversion_rate")
-  @@index([shop_id, days_since_last_purchase], map: "ix_cb_features_shop_days_since_last_purchase")
-  @@index([shop_id, interaction_diversity_score], map: "ix_cb_features_shop_interaction_diversity_score")
-  @@index([shop_id, lifetime_value], map: "ix_cb_features_shop_lifetime_value")
-  @@index([shop_id, primary_category], map: "ix_cb_features_shop_primary_category")
-  @@index([shop_id, purchase_frequency_score], map: "ix_cb_features_shop_purchase_frequency_score")
-  @@index([shop_id, recency_score], map: "ix_cb_features_shop_recency_score")
-  @@index([shop_id, total_interactions], map: "ix_cb_features_shop_total_interactions")
-  @@index([shop_id, user_lifecycle_stage], map: "ix_cb_features_shop_user_lifecycle_stage")
-  @@index([customer_id], map: "ix_customer_behavior_features_customer_id")
-  @@index([shop_id], map: "ix_customer_behavior_features_shop_id")
 }
 
 model customer_data {
@@ -338,27 +209,23 @@ model order_data {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model pricing_tiers {
-  subscription_plan_id   String               @db.VarChar(255)
-  currency               String               @db.VarChar(3)
-  trial_threshold_amount Decimal              @db.Decimal(10, 2)
-  commission_rate        Decimal              @db.Decimal(5, 4)
+  subscription_plan_id   String             @db.VarChar(255)
+  currency               String             @db.VarChar(3)
+  trial_threshold_amount Decimal            @db.Decimal(10, 2)
+  commission_rate        Decimal            @db.Decimal(5, 4)
   is_active              Boolean
   is_default             Boolean
-  minimum_charge         Decimal?             @db.Decimal(10, 2)
+  minimum_charge         Decimal?           @db.Decimal(10, 2)
   proration_enabled      Boolean
-  tier_metadata          String?              @db.VarChar(1000)
-  effective_from         DateTime             @db.Timestamptz(6)
-  effective_to           DateTime?            @db.Timestamptz(6)
-  id                     String               @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at             DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at             DateTime             @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  subscription_plans     subscription_plans   @relation(fields: [subscription_plan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  shop_subscriptions     shop_subscriptions[]
+  tier_metadata          String?            @db.VarChar(1000)
+  effective_from         DateTime           @db.Timestamptz(6)
+  effective_to           DateTime?          @db.Timestamptz(6)
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at             DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at             DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  subscription_plans     subscription_plans @relation(fields: [subscription_plan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([subscription_plan_id, currency, is_default], map: "ix_pricing_tier_unique_default")
-  @@index([is_active], map: "ix_pricing_tier_active")
-  @@index([currency], map: "ix_pricing_tier_currency")
-  @@index([is_default], map: "ix_pricing_tier_default")
   @@index([effective_from, effective_to], map: "ix_pricing_tier_effective")
   @@index([subscription_plan_id, currency], map: "ix_pricing_tier_plan_currency")
   @@index([currency], map: "ix_pricing_tiers_currency")
@@ -367,6 +234,9 @@ model pricing_tiers {
   @@index([is_active], map: "ix_pricing_tiers_is_active")
   @@index([is_default], map: "ix_pricing_tiers_is_default")
   @@index([subscription_plan_id], map: "ix_pricing_tiers_subscription_plan_id")
+  @@index([is_active], map: "ix_pricing_tier_active")
+  @@index([currency], map: "ix_pricing_tier_currency")
+  @@index([is_default], map: "ix_pricing_tier_default")
 }
 
 model product_data {
@@ -485,38 +355,37 @@ model product_pair_features {
 }
 
 model purchase_attributions {
-  session_id                String              @db.VarChar(255)
-  order_id                  String              @db.VarChar(255)
-  contributing_extensions   Json                @db.Json
-  attribution_weights       Json                @db.Json
-  total_revenue             Decimal             @db.Decimal(10, 2)
-  attributed_revenue        Json                @db.Json
+  session_id                String        @db.VarChar(255)
+  order_id                  String        @db.VarChar(255)
+  contributing_extensions   Json          @db.Json
+  attribution_weights       Json          @db.Json
+  total_revenue             Decimal       @db.Decimal(10, 2)
+  attributed_revenue        Json          @db.Json
   total_interactions        Int
-  interactions_by_extension Json                @db.Json
-  purchase_at               DateTime            @db.Timestamptz(6)
-  attribution_algorithm     String              @db.VarChar(50)
-  metadata                  Json                @db.Json
-  id                        String              @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                DateTime            @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                   String              @db.VarChar
-  customer_id               String?             @db.VarChar
-  commission_records        commission_records?
-  user_sessions             user_sessions       @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  shops                     shops               @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  interactions_by_extension Json          @db.Json
+  purchase_at               DateTime      @db.Timestamptz(6)
+  attribution_algorithm     String        @db.VarChar(50)
+  metadata                  Json          @db.Json
+  id                        String        @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                   String        @db.VarChar
+  customer_id               String?       @db.VarChar
+  user_sessions             user_sessions @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  shops                     shops         @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([shop_id, order_id], map: "ix_purchase_attribution_shop_id_order_id")
-  @@index([customer_id], map: "ix_purchase_attribution_customer_id")
-  @@index([order_id], map: "ix_purchase_attribution_order_id")
-  @@index([purchase_at], map: "ix_purchase_attribution_purchase_at")
   @@index([session_id], map: "ix_purchase_attribution_session_id")
-  @@index([shop_id], map: "ix_purchase_attribution_shop_id")
   @@index([shop_id, customer_id, purchase_at], map: "ix_purchase_attribution_shop_id_customer_id_purchase_at")
   @@index([shop_id, purchase_at], map: "ix_purchase_attribution_shop_id_purchase_at")
   @@index([customer_id], map: "ix_purchase_attributions_customer_id")
   @@index([order_id], map: "ix_purchase_attributions_order_id")
   @@index([purchase_at], map: "ix_purchase_attributions_purchase_at")
   @@index([shop_id], map: "ix_purchase_attributions_shop_id")
+  @@index([customer_id], map: "ix_purchase_attribution_customer_id")
+  @@index([order_id], map: "ix_purchase_attribution_order_id")
+  @@index([purchase_at], map: "ix_purchase_attribution_purchase_at")
+  @@index([shop_id], map: "ix_purchase_attribution_shop_id")
 }
 
 model raw_collections {
@@ -699,87 +568,44 @@ model sessions {
   @@index([shop], map: "ix_sessions_shop")
 }
 
-model shop_subscriptions {
-  status                     subscription_status_enum
-  subscription_plan_id       String                   @db.VarChar(255)
-  pricing_tier_id            String                   @db.VarChar(255)
-  trial_threshold_override   Decimal?                 @db.Decimal(10, 2)
-  trial_duration_days        Int?
-  trial_revenue              Decimal                  @default(0) @db.Decimal(10, 2)
-  user_chosen_cap_amount     Decimal?                 @db.Decimal(10, 2)
-  auto_renew                 Boolean
-  shopify_subscription_id    String?                  @db.VarChar(255)
-  shopify_line_item_id       String?                  @db.VarChar(255)
-  shopify_status             String?                  @db.VarChar(50)
-  confirmation_url           String?
-  started_at                 DateTime                 @db.Timestamptz(6)
-  completed_at               DateTime?                @db.Timestamptz(6)
-  cancelled_at               DateTime?                @db.Timestamptz(6)
-  expires_at                 DateTime?                @db.Timestamptz(6)
-  is_active                  Boolean
-  shop_subscription_metadata Json?
-  id                         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                    String                   @db.VarChar
-  billing_cycles             billing_cycles[]
-  pricing_tiers              pricing_tiers            @relation(fields: [pricing_tier_id], references: [id], onUpdate: NoAction)
-  shops                      shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  subscription_plans         subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
-
-  @@index([cancelled_at], map: "ix_shop_subscriptions_cancelled_at")
-  @@index([is_active], map: "ix_shop_subscriptions_is_active")
-  @@index([pricing_tier_id], map: "ix_shop_subscriptions_pricing_tier_id")
-  @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
-  @@index([status], map: "ix_shop_subscriptions_status")
-  @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
-  @@index([completed_at], map: "ix_shop_subscriptions_completed_at")
-  @@index([expires_at], map: "ix_shop_subscriptions_expires_at")
-  @@index([shopify_subscription_id], map: "ix_shop_subscriptions_shopify_subscription_id")
-  @@index([started_at], map: "ix_shop_subscriptions_started_at")
-}
-
 model shops {
-  shop_domain                String                       @unique(map: "shop_domain_unique") @db.VarChar(255)
-  custom_domain              String?                      @db.VarChar(255)
-  access_token               String                       @db.VarChar(1000)
-  plan_type                  String                       @db.VarChar(50)
-  currency_code              String?                      @db.VarChar(10)
-  money_format               String?                      @db.VarChar(100)
-  is_active                  Boolean
-  onboarding_completed       Boolean
-  shopify_plus               Boolean
-  suspended_at               DateTime?                    @db.Timestamptz(6)
-  suspension_reason          String?                      @db.VarChar(255)
-  service_impact             String?                      @db.VarChar(50)
-  email                      String?                      @db.VarChar(255)
-  last_analysis_at           DateTime?                    @db.Timestamptz(6)
-  id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  setup_guide_visited        Boolean                      @default(false)
-  collection_data            collection_data[]
-  collection_features        collection_features[]
-  commission_records         commission_records[]
-  customer_behavior_features customer_behavior_features[]
-  customer_data              customer_data[]
-  interaction_features       interaction_features[]
-  order_data                 order_data[]
-  product_data               product_data[]
-  product_features           product_features[]
-  product_pair_features      product_pair_features[]
-  purchase_attributions      purchase_attributions[]
-  raw_collections            raw_collections[]
-  raw_customers              raw_customers[]
-  raw_orders                 raw_orders[]
-  raw_products               raw_products[]
-  search_product_features    search_product_features[]
-  session_features           session_features[]
-  shop_subscriptions         shop_subscriptions[]
-  user_features              user_features[]
-  user_identity_links        user_identity_links[]
-  user_interactions          user_interactions[]
-  user_sessions              user_sessions[]
+  shop_domain             String                    @unique(map: "shop_domain_unique") @db.VarChar(255)
+  custom_domain           String?                   @db.VarChar(255)
+  access_token            String                    @db.VarChar(1000)
+  plan_type               String                    @db.VarChar(50)
+  currency_code           String?                   @db.VarChar(10)
+  money_format            String?                   @db.VarChar(100)
+  is_active               Boolean
+  onboarding_completed    Boolean
+  setup_guide_visited     Boolean
+  shopify_plus            Boolean
+  suspended_at            DateTime?                 @db.Timestamptz(6)
+  suspension_reason       String?                   @db.VarChar(255)
+  service_impact          String?                   @db.VarChar(50)
+  email                   String?                   @db.VarChar(255)
+  last_analysis_at        DateTime?                 @db.Timestamptz(6)
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at              DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  collection_data         collection_data[]
+  collection_features     collection_features[]
+  customer_data           customer_data[]
+  interaction_features    interaction_features[]
+  order_data              order_data[]
+  product_data            product_data[]
+  product_features        product_features[]
+  product_pair_features   product_pair_features[]
+  purchase_attributions   purchase_attributions[]
+  raw_collections         raw_collections[]
+  raw_customers           raw_customers[]
+  raw_orders              raw_orders[]
+  raw_products            raw_products[]
+  search_product_features search_product_features[]
+  session_features        session_features[]
+  user_features           user_features[]
+  user_identity_links     user_identity_links[]
+  user_interactions       user_interactions[]
+  user_sessions           user_sessions[]
 
   @@index([is_active], map: "ix_shops_is_active")
   @@index([last_analysis_at], map: "ix_shops_last_analysis_at")
@@ -802,10 +628,7 @@ model subscription_plans {
   created_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   pricing_tiers           pricing_tiers[]
-  shop_subscriptions      shop_subscriptions[]
 
-  @@index([is_active], map: "ix_subscription_plan_active")
-  @@index([is_default], map: "ix_subscription_plan_default")
   @@index([effective_from, effective_to], map: "ix_subscription_plan_effective")
   @@index([name], map: "ix_subscription_plan_name")
   @@index([plan_type], map: "ix_subscription_plan_type")
@@ -814,6 +637,8 @@ model subscription_plans {
   @@index([is_active], map: "ix_subscription_plans_is_active")
   @@index([is_default], map: "ix_subscription_plans_is_default")
   @@index([plan_type], map: "ix_subscription_plans_plan_type")
+  @@index([is_active], map: "ix_subscription_plan_active")
+  @@index([is_default], map: "ix_subscription_plan_default")
 }
 
 model user_features {
@@ -871,6 +696,8 @@ model user_interactions {
   extension_type       String        @db.VarChar(50)
   interaction_type     String        @db.VarChar(50)
   interaction_metadata Json          @db.Json
+  order_id             String?       @db.VarChar(255)
+  attributed_revenue   Float?
   id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   created_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at           DateTime      @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
@@ -890,8 +717,10 @@ model user_interactions {
   @@index([shop_id, interaction_type], map: "ix_user_interaction_shop_id_interaction_type")
   @@index([customer_id], map: "ix_user_interactions_customer_id")
   @@index([extension_type], map: "ix_user_interactions_extension_type")
+  @@index([order_id], map: "ix_user_interaction_order_id")
   @@index([interaction_type], map: "ix_user_interactions_interaction_type")
   @@index([shop_id], map: "ix_user_interactions_shop_id")
+  @@index([order_id], map: "ix_user_interactions_order_id")
 }
 
 model user_sessions {
@@ -927,157 +756,27 @@ model user_sessions {
   @@index([status], map: "ix_status")
 }
 
-model feedback {
-  feedback_type String   @db.VarChar(256)
-  user_id       String   @db.VarChar(256)
-  item_id       String   @db.VarChar(256)
-  time_stamp    DateTime @db.Timestamptz(6)
-  comment       String   @default("")
+model scheduler_job_executions {
+  id              BigInt    @id @default(autoincrement())
+  job_name        String    @db.VarChar(100)
+  job_group       String?   @db.VarChar(100)
+  started_at      DateTime  @db.Timestamptz(6)
+  completed_at    DateTime? @db.Timestamptz(6)
+  duration_ms     Int?
+  status          String    @db.VarChar(20)
+  success         Boolean?
+  result_summary  String?
+  error_message   String?
+  error_details   String?
+  triggered_by    String    @db.VarChar(20)
+  attempt_number  Int
+  items_processed Int?
+  metadata_json   Json?
+  created_at      DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
 
-  @@id([feedback_type, user_id, item_id])
-  @@index([item_id], map: "item_id_index")
-  @@index([user_id], map: "user_id_index")
-}
-
-model items {
-  item_id    String   @id @db.VarChar(256)
-  is_hidden  Boolean  @default(false)
-  categories Json     @default("[]") @db.Json
-  time_stamp DateTime @db.Timestamptz(6)
-  labels     Json     @default("[]") @db.Json
-  comment    String   @default("")
-}
-
-model users {
-  user_id   String @id @db.VarChar(256)
-  labels    Json   @default("[]") @db.Json
-  subscribe Json   @default("[]") @db.Json
-  comment   String @default("")
-}
-
-model auth_group {
-  id                     Int                      @id @default(autoincrement())
-  name                   String                   @unique @db.VarChar(150)
-  auth_group_permissions auth_group_permissions[]
-  auth_user_groups       auth_user_groups[]
-
-  @@index([name], map: "auth_group_name_a6ea08ec_like")
-}
-
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
-model auth_group_permissions {
-  id              BigInt          @id @default(autoincrement())
-  group_id        Int
-  permission_id   Int
-  auth_permission auth_permission @relation(fields: [permission_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_group_permissio_permission_id_84c5c92e_fk_auth_perm")
-  auth_group      auth_group      @relation(fields: [group_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_group_permissions_group_id_b120cbf9_fk_auth_group_id")
-
-  @@unique([group_id, permission_id], map: "auth_group_permissions_group_id_permission_id_0cd325b0_uniq")
-  @@index([group_id], map: "auth_group_permissions_group_id_b120cbf9")
-  @@index([permission_id], map: "auth_group_permissions_permission_id_84c5c92e")
-}
-
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
-model auth_permission {
-  id                         Int                          @id @default(autoincrement())
-  name                       String                       @db.VarChar(255)
-  content_type_id            Int
-  codename                   String                       @db.VarChar(100)
-  auth_group_permissions     auth_group_permissions[]
-  django_content_type        django_content_type          @relation(fields: [content_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_permission_content_type_id_2f476e4b_fk_django_co")
-  auth_user_user_permissions auth_user_user_permissions[]
-
-  @@unique([content_type_id, codename], map: "auth_permission_content_type_id_codename_01ab375a_uniq")
-  @@index([content_type_id], map: "auth_permission_content_type_id_2f476e4b")
-}
-
-model auth_user {
-  id                         Int                          @id @default(autoincrement())
-  password                   String                       @db.VarChar(128)
-  last_login                 DateTime?                    @db.Timestamptz(6)
-  is_superuser               Boolean
-  username                   String                       @unique @db.VarChar(150)
-  first_name                 String                       @db.VarChar(150)
-  last_name                  String                       @db.VarChar(150)
-  email                      String                       @db.VarChar(254)
-  is_staff                   Boolean
-  is_active                  Boolean
-  date_joined                DateTime                     @db.Timestamptz(6)
-  auth_user_groups           auth_user_groups[]
-  auth_user_user_permissions auth_user_user_permissions[]
-  django_admin_log           django_admin_log[]
-
-  @@index([username], map: "auth_user_username_6821ab7c_like")
-}
-
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
-model auth_user_groups {
-  id         BigInt     @id @default(autoincrement())
-  user_id    Int
-  group_id   Int
-  auth_group auth_group @relation(fields: [group_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_user_groups_group_id_97559544_fk_auth_group_id")
-  auth_user  auth_user  @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_user_groups_user_id_6a12ed8b_fk_auth_user_id")
-
-  @@unique([user_id, group_id], map: "auth_user_groups_user_id_group_id_94350c0c_uniq")
-  @@index([group_id], map: "auth_user_groups_group_id_97559544")
-  @@index([user_id], map: "auth_user_groups_user_id_6a12ed8b")
-}
-
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
-model auth_user_user_permissions {
-  id              BigInt          @id @default(autoincrement())
-  user_id         Int
-  permission_id   Int
-  auth_permission auth_permission @relation(fields: [permission_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_user_user_permi_permission_id_1fbb5f2c_fk_auth_perm")
-  auth_user       auth_user       @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "auth_user_user_permissions_user_id_a95ead1b_fk_auth_user_id")
-
-  @@unique([user_id, permission_id], map: "auth_user_user_permissions_user_id_permission_id_14a6b632_uniq")
-  @@index([permission_id], map: "auth_user_user_permissions_permission_id_1fbb5f2c")
-  @@index([user_id], map: "auth_user_user_permissions_user_id_a95ead1b")
-}
-
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
-/// This model has constraints using non-default deferring rules and requires additional setup for migrations. Visit https://pris.ly/d/constraint-deferring for more info.
-model django_admin_log {
-  id                  Int                  @id @default(autoincrement())
-  action_time         DateTime             @db.Timestamptz(6)
-  object_id           String?
-  object_repr         String               @db.VarChar(200)
-  action_flag         Int                  @db.SmallInt
-  change_message      String
-  content_type_id     Int?
-  user_id             Int
-  django_content_type django_content_type? @relation(fields: [content_type_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "django_admin_log_content_type_id_c4bce8eb_fk_django_co")
-  auth_user           auth_user            @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "django_admin_log_user_id_c564eba6_fk_auth_user_id")
-
-  @@index([content_type_id], map: "django_admin_log_content_type_id_c4bce8eb")
-  @@index([user_id], map: "django_admin_log_user_id_c564eba6")
-}
-
-model django_content_type {
-  id               Int                @id @default(autoincrement())
-  app_label        String             @db.VarChar(100)
-  model            String             @db.VarChar(100)
-  auth_permission  auth_permission[]
-  django_admin_log django_admin_log[]
-
-  @@unique([app_label, model], map: "django_content_type_app_label_model_76bd3d3b_uniq")
-}
-
-model django_migrations {
-  id      BigInt   @id @default(autoincrement())
-  app     String   @db.VarChar(255)
-  name    String   @db.VarChar(255)
-  applied DateTime @db.Timestamptz(6)
-}
-
-model django_session {
-  session_key  String   @id @db.VarChar(40)
-  session_data String
-  expire_date  DateTime @db.Timestamptz(6)
-
-  @@index([expire_date], map: "django_session_expire_date_a5c62663")
-  @@index([session_key], map: "django_session_session_key_c0390e0f_like")
+  @@index([job_group], map: "ix_scheduler_job_executions_job_group")
+  @@index([job_name], map: "ix_scheduler_job_executions_job_name")
+  @@index([status], map: "ix_scheduler_job_executions_status")
 }
 
 enum billing_cycle_status_enum {

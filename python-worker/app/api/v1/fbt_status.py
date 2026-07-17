@@ -8,10 +8,6 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from app.recommandations.frequently_bought_together import (
-    FrequentlyBoughtTogetherService,
-)
-from app.recommandations.fp_growth_engine import FPGrowthEngine
 from app.core.redis_client import get_redis_client
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
@@ -47,6 +43,12 @@ async def get_fbt_status(shop_id: str):
     """
     try:
         logger.info(f"🔍 Checking FBT status for shop {shop_id}")
+
+        # Lazy imports — these modules may not be implemented yet
+        from app.recommandations.frequently_bought_together import (
+            FrequentlyBoughtTogetherService,
+        )
+        from app.recommandations.fp_growth_engine import FPGrowthEngine
 
         # Initialize services
         fbt_service = FrequentlyBoughtTogetherService()
@@ -117,6 +119,10 @@ async def trigger_fbt_training(shop_id: str):
     try:
         logger.info(f"🧠 Manually triggering FBT training for shop {shop_id}")
 
+        from app.recommandations.frequently_bought_together import (
+            FrequentlyBoughtTogetherService,
+        )
+
         fbt_service = FrequentlyBoughtTogetherService()
         result = await fbt_service.train_fp_growth_model(shop_id)
 
@@ -140,6 +146,10 @@ async def test_fbt_recommendations(shop_id: str, product_id: str = "100502782282
     try:
         logger.info(
             f"🧪 Testing FBT recommendations for shop {shop_id}, product {product_id}"
+        )
+
+        from app.recommandations.frequently_bought_together import (
+            FrequentlyBoughtTogetherService,
         )
 
         fbt_service = FrequentlyBoughtTogetherService()
@@ -170,6 +180,10 @@ async def get_fbt_health():
         redis_status = "connected" if redis_client else "disconnected"
 
         # Check FBT service availability
+        from app.recommandations.frequently_bought_together import (
+            FrequentlyBoughtTogetherService,
+        )
+
         fbt_service = FrequentlyBoughtTogetherService()
         service_status = "available"
 

@@ -14,19 +14,18 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
 import { Resource } from "@opentelemetry/resources";
 import { SEMRESATTRS_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-
-// KafkaJS instrumentation for trace propagation across Kafka messages
-import { KafkajsInstrumentation } from "@opentelemetry/instrumentation-kafkajs";
-
+// KafkaJS instrumentation — CJS module, default import
+import kafkajsPkg from "@opentelemetry/instrumentation-kafkajs";
+// Pino instrumentation to capture Remix/node logging through OTel
+// The Remix app uses pino for structured logging, not winston — CJS module, default import
+import pinoPkg from "@opentelemetry/instrumentation-pino";
 // OTel Logging SDK
-import { LoggerProvider } from "@opentelemetry/sdk-logs";
+import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
-import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { logs } from "@opentelemetry/api-logs";
 
-// Pino instrumentation to capture Remix/node logging through OTel
-// The Remix app uses pino for structured logging, not winston
-import { PinoInstrumentor } from "@opentelemetry/instrumentation-pino";
+const { KafkaJsInstrumentation } = kafkajsPkg;
+const { PinoInstrumentation } = pinoPkg;
 
 const serviceName = process.env.OTEL_SERVICE_NAME || "remix-app";
 const otlpEndpoint =
@@ -39,7 +38,7 @@ const openObserveEmail = process.env.OPENOBSERVE_EMAIL;
 const openObservePassword = process.env.OPENOBSERVE_PASSWORD;
 if (openObserveEmail && openObservePassword) {
   const encoded = Buffer.from(
-    `${openObserveEmail}:${openObservePassword}`
+    `${openObserveEmail}:${openObservePassword}`,
   ).toString("base64");
   otlpHeaders["Authorization"] = `Basic ${encoded}`;
 }
@@ -62,7 +61,7 @@ try {
   });
 
   loggerProvider.addLogRecordProcessor(
-    new BatchLogRecordProcessor(otlpLogExporter)
+    new BatchLogRecordProcessor(otlpLogExporter),
   );
 
   logs.setGlobalLoggerProvider(loggerProvider);
@@ -85,7 +84,7 @@ try {
         "@opentelemetry/instrumentation-dns": { enabled: false },
       }),
       // KafkaJS instrumentation for trace context propagation across Kafka
-      new KafkajsInstrumentation({
+      new KafkaJsInstrumentation({
         consumerHook: (span, topic, partition, _message) => {
           span.setAttribute("messaging.kafka.topic", topic);
           span.setAttribute("messaging.kafka.partition", partition);
@@ -96,7 +95,7 @@ try {
         },
       }),
       // Pino instrumentation captures Remix logs via OTel
-      new PinoInstrumentor({
+      new PinoInstrumentation({
         enabled: true,
       }),
     ],
@@ -119,7 +118,7 @@ try {
 } catch (err) {
   console.warn(
     "OpenTelemetry initialization failed, continuing without tracing:",
-    err
+    err,
   );
 }
 

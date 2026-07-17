@@ -36,6 +36,9 @@ class TfrsConfig:
     # Feature settings
     max_description_length: int = 200
     text_embedding_dim: int = 128
+    image_embedding_dim: int = 128  # Vertex AI multimodal embedding dim
+    tag_embedding_dim: int = 16
+    collection_embedding_dim: int = 16
 
     # Model storage
     model_base_path: str = "models/tfrs"
@@ -77,3 +80,8 @@ class TfrsConfig:
     min_products_for_training: int = 10
     min_users_for_training: int = 3
     min_interactions_for_training: int = 20
+
+    # Co-purchase signal
+    max_co_purchase_examples: int = (
+        50000  # Max co-purchase pairs to include in training
+    )

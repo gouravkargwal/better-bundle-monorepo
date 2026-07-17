@@ -22,8 +22,6 @@ from sqlalchemy import (
     Numeric,
     Text,
     Integer,
-    Index,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
@@ -108,12 +106,11 @@ class ShopSubscription(BaseModel, ShopMixin):
     # Partial unique enforced at DB level (must be created via raw SQL / alembic):
     #   CREATE UNIQUE INDEX ix_shop_subscription_one_active_per_shop
     #       ON shop_subscriptions(shop_id) WHERE status != 'CANCELLED';
-    __table_args__ = (
-        Index("ix_shop_subscriptions_status", "status"),
-        Index("ix_shop_subscriptions_shop_id", "shop_id"),
-        Index("ix_shop_subscriptions_is_active", "is_active"),
-        Index("ix_shop_subscriptions_shopify_subscription_id", "shopify_subscription_id"),
-    )
+    #
+    # Note: status, shop_id, is_active, and shopify_subscription_id already get
+    # indexes from their Column(index=True) declarations above — do not redeclare
+    # them here with the same auto-generated names, or CREATE TABLE fails with
+    # DuplicateTableError on the second copy and the whole table creation rolls back.
 
     # ===== COMPUTED PROPERTIES =====
 

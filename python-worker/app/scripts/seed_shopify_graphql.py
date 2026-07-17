@@ -624,11 +624,38 @@ class ShopifyGraphQLSeeder:
                         product["id"], product_data["media"]["edges"]
                     )
 
+                variant_prices = {
+                    v["id"]: float(v["price"]) for v in product["variants"]["nodes"]
+                }
+
+                # Image urls from the generator's media edges, for mirroring into
+                # ProductData.images (the staged-upload call above puts the actual
+                # files on Shopify; this is just the metadata we already have).
+                images = [
+                    {
+                        "url": edge["node"]["image"]["url"],
+                        "altText": edge["node"]["image"].get("altText", ""),
+                    }
+                    for edge in product_data.get("media", {}).get("edges", [])
+                    if edge["node"].get("image")
+                ]
+
                 self.created_products[f"product_{i}"] = {
                     "id": product["id"],
                     "handle": product["handle"],
                     "title": product["title"],
                     "variants": variant_ids,
+                    "variant_prices": variant_prices,
+                    # Retained for mirroring into ProductData (product_type, vendor,
+                    # tags, price, inventory, images) without re-running the
+                    # RNG-based generator, which would produce different values.
+                    "product_type": product_data.get("productType", ""),
+                    "vendor": product_data.get("vendor", ""),
+                    "tags": product_data.get("tags", []),
+                    "description": product_data.get("description", ""),
+                    "total_inventory": product_data.get("totalInventory", 0),
+                    "price": next(iter(variant_prices.values()), 0.0),
+                    "images": images,
                 }
                 created_product_ids.append(product["id"])
                 print(f"  ✅ Product: {product['title']} ({product['id']})")
@@ -705,6 +732,9 @@ class ShopifyGraphQLSeeder:
                         "displayName",
                         f"{customer_data['firstName']} {customer_data['lastName']}",
                     ),
+                    "first_name": customer_data["firstName"],
+                    "last_name": customer_data["lastName"],
+                    "tags": customer_data.get("tags", []),
                 }
                 print(f"  ✅ Customer: {customer['displayName']}")
 
@@ -854,17 +884,34 @@ class ShopifyGraphQLSeeder:
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
+        # Group products by category so each customer's orders lean toward one
+        # category (real affinity signal for TFRS) instead of picking uniformly
+        # at random across the whole catalog.
+        products_by_category: Dict[str, List[Dict[str, Any]]] = {}
+        for product in product_list:
+            category = product.get("product_type") or "uncategorized"
+            products_by_category.setdefault(category, []).append(product)
+        category_names = list(products_by_category.keys())
+
         # Create orders (40 orders for comprehensive ML training)
         for i in range(1, 41):
             try:
-                # Pick random customer and products
-                customer_id = random.choice(customer_ids)
-                selected_products = random.sample(
-                    product_list, min(2, len(product_list))
-                )
+                # Round-robin customers so every customer gets at least one order,
+                # each biased toward their assigned preferred category.
+                customer_index = (i - 1) % len(customer_ids)
+                customer_id = customer_ids[customer_index]
+                preferred_category = category_names[customer_index % len(category_names)]
+
+                affinity_pool = products_by_category.get(preferred_category, product_list)
+                num_items = min(random.randint(1, 3), len(product_list))
+                if random.random() < 0.8 and len(affinity_pool) >= num_items:
+                    selected_products = random.sample(affinity_pool, num_items)
+                else:
+                    selected_products = random.sample(product_list, num_items)
 
                 # Create line items using product variants
                 line_items = []
+                order_line_items: List[Dict[str, Any]] = []
                 for product in selected_products:
                     if product.get("variants"):
                         variant_id = product["variants"][0]  # Use first variant
@@ -873,6 +920,16 @@ class ShopifyGraphQLSeeder:
                             {
                                 "variantId": variant_id,
                                 "quantity": quantity,
+                            }
+                        )
+                        order_line_items.append(
+                            {
+                                "product_id": product["id"],
+                                "variant_id": variant_id,
+                                "quantity": quantity,
+                                "price": product.get("variant_prices", {}).get(
+                                    variant_id, product.get("price", 0.0)
+                                ),
                             }
                         )
 
@@ -963,6 +1020,8 @@ class ShopifyGraphQLSeeder:
                     "name": order["name"],
                     "totalPrice": order["totalPrice"],
                     "financialStatus": order["displayFinancialStatus"],
+                    "customer_id": customer_id,
+                    "line_items": order_line_items,
                 }
                 print(
                     f"  ✅ Order: {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']})"

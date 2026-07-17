@@ -31,12 +31,18 @@ export class OverviewService {
       shop.setup_guide_visited,
     );
 
+    // Get recommendation analytics
+    const recommendationAnalytics = await this.getRecommendationAnalytics(
+      shop.id,
+    );
+
     return {
       shop,
       billingPlan,
       overviewData,
       performanceData,
       setupStatus,
+      recommendationAnalytics,
     };
   }
 
@@ -487,9 +493,7 @@ export class OverviewService {
     }
   }
 
-  private async checkTfrsReadiness(
-    shopId: string,
-  ): Promise<{
+  private async checkTfrsReadiness(shopId: string): Promise<{
     ready: boolean;
     productssynced: number;
     usersTracked: number;
@@ -593,6 +597,50 @@ export class OverviewService {
         setupGuideVisited: false,
         isSetupComplete: false,
       };
+    }
+  }
+
+  private async getRecommendationAnalytics(shopId: string) {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+      const [revenueResult, clickResult, impressionResult] = await Promise.all([
+        prisma.user_interactions.aggregate({
+          _sum: { attributed_revenue: true },
+          where: {
+            shop_id: shopId,
+            attributed_revenue: { gt: 0 },
+            created_at: { gte: thirtyDaysAgo },
+          },
+        }),
+        prisma.user_interactions.count({
+          where: {
+            shop_id: shopId,
+            interaction_type: "recommendation_clicked",
+            created_at: { gte: thirtyDaysAgo },
+          },
+        }),
+        prisma.user_interactions.count({
+          where: {
+            shop_id: shopId,
+            interaction_type: "recommendation_viewed",
+            created_at: { gte: thirtyDaysAgo },
+          },
+        }),
+      ]);
+
+      return {
+        totalRevenue: Number(revenueResult._sum.attributed_revenue || 0),
+        totalClicks: clickResult,
+        totalImpressions: impressionResult,
+        ctr:
+          impressionResult > 0
+            ? Math.round((clickResult / impressionResult) * 10000) / 100
+            : 0,
+      };
+    } catch (error) {
+      logger.warn({ error }, "Failed to fetch recommendation analytics");
+      return { totalRevenue: 0, totalClicks: 0, totalImpressions: 0, ctr: 0 };
     }
   }
 }
