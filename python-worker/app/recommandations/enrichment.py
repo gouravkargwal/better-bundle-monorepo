@@ -6,12 +6,11 @@ from app.core.database.models.shop import Shop
 from app.core.database.models.product_data import ProductData
 from sqlalchemy import select, and_
 
-
 logger = get_logger(__name__)
 
 
 class ProductEnrichment:
-    """Service to enrich Gorse item IDs with Shopify product data"""
+    """Service to enrich recommendation item IDs with Shopify product data"""
 
     def __init__(self):
         pass
@@ -116,11 +115,11 @@ class ProductEnrichment:
         source: str = "unknown",
     ) -> List[Dict[str, Any]]:
         """
-        Enrich Gorse item IDs with Shopify product data
+        Enrich recommendation item IDs with Shopify product data
 
         Args:
             shop_id: Shop ID
-            item_ids: List of Gorse item IDs (which are Shopify product IDs)
+            item_ids: List of product IDs to enrich
             context: Recommendation context
             source: Recommendation source
 
@@ -146,70 +145,27 @@ class ProductEnrichment:
                     else (shop.shop_domain if shop else None)
                 )
 
-                # Strip prefixes from Gorse item IDs to match database format
-                # Gorse uses: shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-                # Database uses: 7903465537675
-                # Only include items from the current shop for multi-tenancy
+                # Clean item IDs — TFRS returns plain product IDs (no prefix)
+                # Handle both string IDs and dict items with "Id"/"id" keys
                 clean_item_ids = []
                 for item_id in item_ids:
-                    # Handle both string item IDs and dictionary items
                     if isinstance(item_id, dict):
-                        # Extract the actual item ID from the dictionary
                         actual_item_id = item_id.get(
                             "Id", item_id.get("id", str(item_id))
                         )
                     else:
                         actual_item_id = item_id
 
-                    # Skip empty or invalid item IDs
-                    if not actual_item_id or actual_item_id.strip() == "":
+                    if not actual_item_id or str(actual_item_id).strip() == "":
                         logger.debug(f"🚫 Skipping empty item ID: {item_id}")
                         continue
 
-                    # Skip non-product IDs (like "collection", "category", etc.)
-                    if actual_item_id.lower() in [
-                        "collection",
-                        "category",
-                        "tag",
-                        "vendor",
-                        "type",
-                    ]:
-                        logger.debug(f"🚫 Skipping non-product ID: {actual_item_id}")
-                        continue
+                    # Sanitize: extract numeric product ID if it's a GraphQL ID
+                    clean_id = str(actual_item_id).strip()
+                    if clean_id.startswith("gid://shopify/"):
+                        clean_id = clean_id.split("/")[-1]
 
-                    if actual_item_id.startswith("shop_"):
-                        # Extract shop ID and product ID
-                        parts = actual_item_id.split("_")
-                        if len(parts) >= 3:
-                            gorse_shop_id = parts[
-                                1
-                            ]  # shop_cmff7mzru0000v39c3jkk4anm_7903465537675
-                            product_id = parts[2]  # 7903465537675
-
-                            # Only include if it's from the current shop and product_id is not empty and numeric
-                            if (
-                                gorse_shop_id == shop_id
-                                and product_id
-                                and product_id.strip()
-                                and product_id.isdigit()  # Ensure it's a numeric product ID
-                            ):
-                                clean_item_ids.append(product_id)
-                            else:
-                                logger.debug(
-                                    f"🚫 Skipping product from different shop or invalid product_id | gorse_shop={gorse_shop_id} | current_shop={shop_id} | product={product_id}"
-                                )
-                        else:
-                            logger.warning(
-                                f"⚠️ Invalid Gorse item ID format: {actual_item_id}"
-                            )
-                    else:
-                        # Assume it's already a clean product ID, but check it's not empty and numeric
-                        if actual_item_id.strip() and actual_item_id.isdigit():
-                            clean_item_ids.append(actual_item_id)
-                        else:
-                            logger.debug(
-                                f"🚫 Skipping non-numeric product ID: {actual_item_id}"
-                            )
+                    clean_item_ids.append(clean_id)
 
                 # Fetch products from database using cleaned IDs
                 products_result = await session.execute(
@@ -243,16 +199,9 @@ class ProductEnrichment:
                         actual_item_id = item_id
 
                     # Find the corresponding clean_id for this item_id
-                    clean_id = None
-                    if actual_item_id.startswith("shop_"):
-                        parts = actual_item_id.split("_")
-                        if len(parts) >= 3:
-                            gorse_shop_id = parts[1]
-                            product_id = parts[2]
-                            if gorse_shop_id == shop_id:
-                                clean_id = product_id
-                    else:
-                        clean_id = actual_item_id
+                    clean_id = str(actual_item_id).strip()
+                    if clean_id.startswith("gid://shopify/"):
+                        clean_id = clean_id.split("/")[-1]
 
                     if clean_id and clean_id in product_map:
                         product = product_map[clean_id]
@@ -408,27 +357,15 @@ class ProductEnrichment:
 
     def _get_recommendation_reason(self, context: str, source: str) -> str:
         """Get contextual recommendation reason based on context and source"""
-
-        # More specific reasons based on ML source
-        if "item_neighbors" in source:
-            return "Similar products"
-        elif "user_recommendations" in source:
-            return "Recommended for you"
-        elif "session_recommendations" in source:
-            return "Based on your browsing"
-        elif "popular" in source:
-            return "Popular choice"
-        elif "latest" in source:
-            return "New arrival"
-        elif "fallback" in source:
-            return "Trending now"
-        else:
-            # Context-based fallback reasons
-            context_reasons = {
-                "product_page": "Customers also bought",
-                "homepage": "Featured product",
-                "cart": "Perfect addition",
-                "profile": "Just for you",
-                "checkout": "Don't miss out",
-            }
-            return context_reasons.get(context, "Recommended for you")
+        context_reasons = {
+            "product_page": "Customers also bought",
+            "homepage": "Featured product",
+            "cart": "Perfect addition",
+            "profile": "Just for you",
+            "checkout": "Don't miss out",
+            "post_purchase": "Complete your order",
+            "collection_page": "You might also like",
+            "order_status": "Complete your look",
+            "order_history": "Based on your orders",
+        }
+        return context_reasons.get(context, "Recommended for you")

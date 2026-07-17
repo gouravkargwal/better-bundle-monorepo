@@ -93,12 +93,6 @@ class ShopifySettings(BaseSettings):
 class MLSettings(BaseSettings):
     """Machine Learning configuration settings"""
 
-    # Gorse Integration
-    ENABLE_GORSE_SYNC: bool = Field(default=False, env="ENABLE_GORSE_SYNC")
-    GORSE_BASE_URL: str = Field(..., env="GORSE_BASE_URL")
-    GORSE_API_KEY: str = Field(default="", env="GORSE_API_KEY")
-    GORSE_MASTER_KEY: str = Field(default="", env="GORSE_MASTER_KEY")
-
     # Training Configuration
     MIN_ORDERS_FOR_TRAINING: int = Field(default=1, env="MIN_ORDERS_FOR_TRAINING")
     MIN_PRODUCTS_FOR_TRAINING: int = Field(default=20, env="MIN_PRODUCTS_FOR_TRAINING")
@@ -110,6 +104,12 @@ class MLSettings(BaseSettings):
     PRICE_TIER_LOW_MAX: float = Field(default=20.0, env="PRICE_TIER_LOW_MAX")
     PRICE_TIER_HIGH_MIN: float = Field(default=100.0, env="PRICE_TIER_HIGH_MIN")
     TIME_DECAY_LAMBDA: float = Field(default=0.07, env="TIME_DECAY_LAMBDA")
+
+    # TFRS Configuration
+    TFRS_MODEL_PATH: str = Field(default="models/tfrs", env="TFRS_MODEL_PATH")
+    TFRS_TRAINING_INTERVAL_MINUTES: int = Field(
+        default=360, env="TFRS_TRAINING_INTERVAL_MINUTES"
+    )
 
 
 class WorkerSettings(BaseSettings):
@@ -161,11 +161,11 @@ class LoggingSettings(BaseSettings):
 
     # OpenObserve settings (replaces Grafana/Loki)
     OPENOBSERVE_ENABLED: bool = Field(default=False, env="OPENOBSERVE_ENABLED")
-    OPENOBSERVE_URL: str = Field(default="http://openobserve:5080", env="OPENOBSERVE_URL")
-    OPENOBSERVE_EMAIL: str = Field(default="", env="OPENOBSERVE_EMAIL")
-    OPENOBSERVE_PASSWORD: str = Field(
-        default="", env="OPENOBSERVE_PASSWORD"
+    OPENOBSERVE_URL: str = Field(
+        default="http://openobserve:5080", env="OPENOBSERVE_URL"
     )
+    OPENOBSERVE_EMAIL: str = Field(default="", env="OPENOBSERVE_EMAIL")
+    OPENOBSERVE_PASSWORD: str = Field(default="", env="OPENOBSERVE_PASSWORD")
 
     # Comprehensive Logging Configuration
     LOGGING: dict = Field(
@@ -319,8 +319,8 @@ class Settings(BaseSettings):
         return self.redis.BEHAVIORAL_EVENTS_STREAM
 
     @property
-    def GORSE_SYNC_STREAM(self) -> str:
-        return self.redis.GORSE_SYNC_STREAM
+    def TFRS_MODEL_PATH(self) -> str:
+        return self.ml.TFRS_MODEL_PATH
 
     # Worker Configuration (Direct access for backward compatibility)
     @property

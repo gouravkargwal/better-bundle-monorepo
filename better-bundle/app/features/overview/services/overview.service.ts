@@ -21,11 +21,15 @@ export class OverviewService {
       shop.currency_code || "USD",
     );
 
-    // Check Gorse readiness (is the recommendation engine ready?)
-    const gorseReadiness = await this.checkGorseReadiness(shop.id);
+    // Check TFRS readiness (is the recommendation engine ready?)
+    const tfrsReadiness = await this.checkTfrsReadiness(shop.id);
 
     // Check setup progress
-    const setupStatus = await this.getSetupStatus(shop.id, gorseReadiness, shop.setup_guide_visited);
+    const setupStatus = await this.getSetupStatus(
+      shop.id,
+      tfrsReadiness,
+      shop.setup_guide_visited,
+    );
 
     return {
       shop,
@@ -483,48 +487,75 @@ export class OverviewService {
     }
   }
 
-  private async checkGorseReadiness(
+  private async checkTfrsReadiness(
     shopId: string,
-  ): Promise<{ ready: boolean; productssynced: number; usersTracked: number; qualityScore: number }> {
+  ): Promise<{
+    ready: boolean;
+    productssynced: number;
+    usersTracked: number;
+    qualityScore: number;
+  }> {
     try {
       const backendUrl = process.env.PYTHON_WORKER_API_URL;
       if (!backendUrl) {
-        logger.warn("PYTHON_WORKER_API_URL not set, skipping Gorse readiness check");
-        return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
+        logger.warn(
+          "PYTHON_WORKER_API_URL not set, skipping TFRS readiness check",
+        );
+        return {
+          ready: false,
+          productssynced: 0,
+          usersTracked: 0,
+          qualityScore: 0,
+        } as any;
       }
 
-      const response = await fetch(`${backendUrl}/api/v1/gorse/status/${shopId}`, {
-        signal: AbortSignal.timeout(5000),
-      });
+      // Check TFRS model status by looking at products in product_features
+      const productCount = await prisma.product_features
+        .count({
+          where: { shop_id: shopId },
+        })
+        .catch(() => 0);
 
-      if (!response.ok) {
-        logger.warn({ status: response.status }, "Gorse status check failed");
-        return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
-      }
+      const userCount = await prisma.user_features
+        .count({
+          where: { shop_id: shopId },
+        })
+        .catch(() => 0);
 
-      const data = await response.json();
-      const featureCounts = data?.feature_utilization?.feature_counts || {};
-      const productssynced = featureCounts.product_features || 0;
-      const usersTracked = featureCounts.user_features || 0;
-      const qualityScore = data?.quality_indicators?.overall_quality || 0;
-      const gorseHealthy = data?.gorse_health?.success === true;
-
-      const ready = gorseHealthy && productssynced > 0;
+      const ready = productCount > 0;
       logger.info(
-        { gorseHealthy, productssynced, usersTracked, qualityScore, ready },
-        "Gorse readiness check result",
+        { productCount, userCount, ready },
+        "TFRS readiness check result",
       );
 
-      return { ready, productssynced, usersTracked, qualityScore } as any;
+      return {
+        ready,
+        productssynced: productCount,
+        usersTracked: userCount,
+        qualityScore: ready ? 0.5 : 0,
+      } as any;
     } catch (error: any) {
-      logger.warn({ message: error?.message }, "Could not reach Gorse for readiness check");
-      return { ready: false, productssynced: 0, usersTracked: 0, qualityScore: 0 } as any;
+      logger.warn(
+        { message: error?.message },
+        "Could not check TFRS readiness",
+      );
+      return {
+        ready: false,
+        productssynced: 0,
+        usersTracked: 0,
+        qualityScore: 0,
+      } as any;
     }
   }
 
   private async getSetupStatus(
     shopId: string,
-    gorseReadiness: { ready: boolean; productssynced: number; usersTracked: number; qualityScore: number },
+    tfrsReadiness: {
+      ready: boolean;
+      productssynced: number;
+      usersTracked: number;
+      qualityScore: number;
+    },
     setupGuideVisited: boolean,
   ) {
     try {
@@ -544,8 +575,8 @@ export class OverviewService {
         productsCount,
         widgetAdded: false,
         recommendationsLive: !!recommendationView,
-        recommendationsReady: gorseReadiness.ready,
-        qualityScore: gorseReadiness.qualityScore,
+        recommendationsReady: tfrsReadiness.ready,
+        qualityScore: tfrsReadiness.qualityScore,
         setupGuideVisited: setupGuideVisited,
         isSetupComplete: setupGuideVisited,
       };

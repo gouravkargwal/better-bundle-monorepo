@@ -45,6 +45,6 @@ class RecommendationResponse(BaseModel):
     success: bool
     recommendations: List[Dict[str, Any]]
     count: int
-    source: str  # "gorse", "fallback", "database"
+    source: str  # "tfrs", "popular", "database"
     context: str
     timestamp: datetime

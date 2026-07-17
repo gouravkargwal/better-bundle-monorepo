@@ -83,11 +83,11 @@ KAFKA_BROKERS=localhost:9092
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
 
 # ===========================================
-# GORSE RECOMMENDATION ENGINE
+# TFRS + VERTEX AI (replaces Gorse)
 # ===========================================
-GORSE_BASE_URL=http://localhost:8088
-GORSE_API_KEY=secure_random_key_123
-GORSE_LOG_LEVEL=debug
+TFRS_MODEL_PATH=models/tfrs
+VERTEX_AI_API_KEY=
+VERTEX_AI_PROJECT_ID=
 
 # ===========================================
 # SHOPIFY APP CONFIGURATION (Development)
@@ -129,7 +129,6 @@ os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
 os.environ.setdefault("REDIS_PASSWORD", "")
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-os.environ.setdefault("GORSE_BASE_URL", "http://localhost:8088")
 os.environ.setdefault("OPENOBSERVE_URL", "http://localhost:5080")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("LOG_LEVEL", "debug")
@@ -149,7 +148,7 @@ def main():
     print(f"Database URL: {os.environ.get('DATABASE_URL')}")
     print(f"Redis Host: {os.environ.get('REDIS_HOST')}:{os.environ.get('REDIS_PORT')}")
     print(f"Kafka Bootstrap Servers: {os.environ.get('KAFKA_BOOTSTRAP_SERVERS')}")
-    print(f"Gorse API URL: {os.environ.get('GORSE_BASE_URL')}")
+    print(f"TFRS Model Path: {os.environ.get('TFRS_MODEL_PATH')}")
     print("=" * 60)
 
     # Setup logging configuration

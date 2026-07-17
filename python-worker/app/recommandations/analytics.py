@@ -34,7 +34,7 @@ class RecommendationAnalytics:
         Args:
             shop_id: Shop ID
             context: Recommendation context
-            source: Recommendation source (gorse, cache, fallback, etc.)
+            source: Recommendation source (tfrs, popular, cache, etc.)
             count: Number of recommendations returned
             user_id: User ID (if available)
             product_ids: Product IDs (if available)

@@ -1,6 +1,8 @@
 """
 Recommendation API endpoints
 Handles all recommendation requests from Shopify extension with context-based routing
+Primary engine: TFRS (TensorFlow Recommenders + Vertex AI embeddings)
+Fallback: FP-Growth, frequently bought together, popular items
 """
 
 import asyncio
@@ -11,21 +13,18 @@ from dataclasses import dataclass
 from app.shared.helpers import now_utc
 
 from app.core.logging import get_logger
-from app.shared.gorse_api_client import GorseApiClient
 from app.core.database.session import get_transaction_context
-from app.core.config.settings import settings
 from app.recommandations.models import RecommendationRequest, RecommendationResponse
-from app.recommandations.category_detection import CategoryDetectionService
 from app.recommandations.cache import RecommendationCacheService
-from app.recommandations.hybrid import HybridRecommendationService
 from app.recommandations.analytics import RecommendationAnalytics
 from app.recommandations.enrichment import ProductEnrichment
 from app.recommandations.exclusion_service import ProductExclusionService
 from app.recommandations.session_service import SessionDataService
 from app.recommandations.recommendation_executor import RecommendationExecutor
-from app.recommandations.smart_selection_service import SmartSelectionService
 from app.recommandations.shop_lookup_service import ShopLookupService
 from app.recommandations.client_id_resolver import ClientIdResolver
+from app.recommandations.tfrs.serving import TfrsServing
+from app.recommandations.tfrs.llm_enricher import LLMEnricher
 
 logger = get_logger(__name__)
 
@@ -33,7 +32,6 @@ router = APIRouter(prefix="/api/v1/recommendations", tags=["recommendations"])
 
 
 # --- Custom Exceptions for Core Logic ---
-# These allow the core logic to be decoupled from FastAPI's HTTPException
 class RecommendationLogicError(Exception):
     """Base exception for recommendation logic errors."""
 
@@ -53,42 +51,35 @@ class ShopNotFoundError(RecommendationLogicError):
 
 
 # --- Service Dependencies Container ---
-# Using a dataclass to group services makes passing them around cleaner.
 @dataclass
 class RecommendationServices:
     shop_lookup: ShopLookupService
-    category: CategoryDetectionService
     client_id_resolver: ClientIdResolver
     exclusion: ProductExclusionService
     cache: RecommendationCacheService
     session: SessionDataService
-    hybrid: HybridRecommendationService
-    smart_selection: SmartSelectionService
     executor: RecommendationExecutor
     enrichment: ProductEnrichment
     analytics: RecommendationAnalytics
+    tfrs: TfrsServing
+    llm: LLMEnricher
 
 
 # --- Initialize Services ---
-# In a real application, you might use a dependency injection framework.
-# For this example, we'll instantiate them here and bundle them.
-gorse_client = GorseApiClient(
-    base_url=settings.ml.GORSE_BASE_URL, api_key=settings.ml.GORSE_API_KEY
-)
-recommendation_executor = RecommendationExecutor(gorse_client)
+tfrs_serving = TfrsServing()
+recommendation_executor = RecommendationExecutor(tfrs_serving=tfrs_serving)
 
 services = RecommendationServices(
     shop_lookup=ShopLookupService(),
-    category=CategoryDetectionService(),
     client_id_resolver=ClientIdResolver(),
     exclusion=ProductExclusionService(),
     cache=RecommendationCacheService(),
     session=SessionDataService(),
-    hybrid=HybridRecommendationService(),
-    smart_selection=SmartSelectionService(recommendation_executor),
     executor=recommendation_executor,
     enrichment=ProductEnrichment(),
     analytics=RecommendationAnalytics(),
+    tfrs=tfrs_serving,
+    llm=LLMEnricher(),
 )
 
 
@@ -377,7 +368,7 @@ async def fetch_recommendations_logic(
                         "primary_product": primary_product,
                     }
 
-                # If FBT failed or returned no items, fallback to normal Gorse
+                # If TFRS failed or returned no items, fallback to popular
                 if not result.get("success") or not result.get("items"):
                     # Ensure session-based fallback can use cart contents
                     fallback_metadata = dict(request.metadata or {})

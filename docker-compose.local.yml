@@ -97,39 +97,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ==================== GORSE ====================
-  gorse:
-    image: zhenghaoz/gorse-in-one:latest
-    container_name: betterbundle-gorse-dev
-    restart: unless-stopped
-    ports:
-      - "8086:8086"
-      - "8088:8088"
-    env_file:
-      - .env.dev
-    command:
-      - -c
-      - /etc/gorse/config.toml
-      - --log-path
-      - /var/log/gorse/master.log
-      - --cache-path
-      - /var/lib/gorse/master_cache.data
-    volumes:
-      - ./config.toml:/etc/gorse/config.toml
-      - gorse_logs:/var/log/gorse
-      - gorse_cache:/var/lib/gorse
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service=gorse,env=dev"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   # ==================== LOGGING & OBSERVABILITY ====================
 
   # OpenObserve - Logs, Metrics, Traces, Dashboards (replaces Loki + Promtail + Grafana)
@@ -199,6 +166,5 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
-  gorse_logs:
-  gorse_cache:
   openobserve_data:
+  tfrs_models:

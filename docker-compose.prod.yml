@@ -26,8 +26,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      gorse:
-        condition: service_started
       python-worker:
         condition: service_healthy
     restart: unless-stopped
@@ -210,51 +208,6 @@ services:
     labels:
       service: "kafka"
 
-  # ==================== RECOMMENDATION ENGINE ====================
-  gorse:
-    image: zhenghaoz/gorse-in-one:latest
-    container_name: betterbundle-gorse
-    env_file:
-      - .env.prod
-    ports:
-      - "127.0.0.1:8086:8086"
-      - "127.0.0.1:8088:8088"
-    command:
-      - -c
-      - /etc/gorse/config.toml
-      - --log-path
-      - /var/log/gorse/master.log
-      - --cache-path
-      - /var/lib/gorse/master
-    volumes:
-      - ./config.toml:/etc/gorse/config.toml:ro
-      - gorse_logs:/var/log/gorse
-      - gorse_cache:/var/lib/gorse
-    networks:
-      - backend
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 768M
-        reservations:
-          cpus: "0.5"
-          memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service,container"
-    labels:
-      service: "gorse"
-
   # ==================== PYTHON WORKER ====================
   python-worker:
     build:
@@ -274,8 +227,6 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
-      gorse:
-        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -477,8 +428,7 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
-  gorse_logs:
-  gorse_cache:
   openobserve_data:
+  tfrs_models:
   npm_data:
   npm_letsencrypt:
