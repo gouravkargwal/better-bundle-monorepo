@@ -75,7 +75,6 @@ export class OverviewService {
       select: {
         id: true,
         subscription_plan_id: true,
-        pricing_tier_id: true,
         status: true,
         started_at: true,
         expires_at: true,
@@ -89,151 +88,43 @@ export class OverviewService {
   }
 
   private async getOverviewMetrics(shopId: string, currencyCode: string) {
-    // First, check if shop is in trial or paid phase
-    const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopId,
-        is_active: true,
-      },
-      select: {
-        status: true,
-        id: true,
-      },
-    });
-
-    const isTrialPhase =
-      shopSubscription?.status === "TRIAL" ||
-      shopSubscription?.status === "TRIAL_COMPLETED";
-
-    // Get attributed revenue based on phase
-    let attributedRevenue;
-    let attributedOrders;
-
-    if (isTrialPhase) {
-      // TRIAL PHASE: Show trial commission data (tracked but not charged)
-      attributedRevenue = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_phase: "TRIAL",
-          status: {
-            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
+    // Revenue influenced by recommendations — sourced directly from
+    // purchase_attributions (total_revenue is a summable Decimal; do not use
+    // attributed_revenue, which is a JSON per-extension breakdown).
+    const [attributedRevenue, attributedOrders, totalOrders, activePlan] =
+      await Promise.all([
+        prisma.purchase_attributions.aggregate({
+          where: { shop_id: shopId },
+          _sum: { total_revenue: true },
+        }),
+        prisma.purchase_attributions.count({ where: { shop_id: shopId } }),
+        prisma.order_data.count({ where: { shop_id: shopId } }),
+        prisma.shop_subscriptions.findFirst({
+          where: { shop_id: shopId, is_active: true },
+          include: {
+            subscription_plans: {
+              select: {
+                name: true,
+                plan_type: true,
+                description: true,
+                monthly_price: true,
+              },
+            },
           },
-        },
-        _sum: {
-          attributed_revenue: true,
-        },
-      });
-
-      attributedOrders = await prisma.commission_records.count({
-        where: {
-          shop_id: shopId,
-          billing_phase: "TRIAL",
-          status: {
-            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-          },
-        },
-      });
-    } else {
-      // PAID PHASE: Get both attributed revenue AND commission charged separately
-      const paidCommissionsData = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_phase: "PAID",
-          status: {
-            in: ["RECORDED", "INVOICED"],
-          },
-        },
-        _sum: {
-          attributed_revenue: true, // Actual revenue generated
-          commission_charged: true, // Actual commission charged to Shopify
-        },
-      });
-
-      attributedRevenue = {
-        _sum: {
-          attributed_revenue: paidCommissionsData._sum.attributed_revenue,
-        },
-      } as any;
-
-      attributedOrders = await prisma.commission_records.count({
-        where: {
-          shop_id: shopId,
-          billing_phase: "PAID",
-          status: {
-            in: ["RECORDED", "INVOICED"],
-          },
-        },
-      });
-    }
-
-    // Get total orders count for conversion rate calculation
-    const totalOrders = await prisma.order_data.count({
-      where: {
-        shop_id: shopId,
-      },
-    });
+        }),
+      ]);
 
     // Calculate conversion rate
     const conversionRate =
       totalOrders > 0 ? (attributedOrders / totalOrders) * 100 : 0;
 
-    // Get active subscription plan details
-    const activePlan = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopId,
-        is_active: true,
-      },
-      include: {
-        subscription_plans: {
-          select: {
-            name: true,
-            plan_type: true,
-            description: true,
-          },
-        },
-        pricing_tiers: {
-          select: {
-            commission_rate: true,
-            trial_threshold_amount: true,
-            currency: true,
-          },
-        },
-      },
-    });
-
-    // ✅ Get commission charged separately for PAID phase
-    let commissionCharged = 0;
-    if (!isTrialPhase) {
-      const paidCommissions = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_phase: "PAID",
-          status: {
-            in: ["RECORDED", "INVOICED"],
-          },
-        },
-        _sum: {
-          commission_charged: true,
-        },
-      });
-      commissionCharged = Number(paidCommissions._sum.commission_charged || 0);
-    }
-
     return {
-      totalRevenue: (attributedRevenue._sum as any).attributed_revenue || 0,
-      commissionCharged, // Actual commission charged to Shopify (PAID phase only)
+      totalRevenue: Number(attributedRevenue._sum.total_revenue || 0),
       currency: currencyCode,
       conversionRate: Math.round(conversionRate * 100) / 100, // Round to 2 decimal places
       revenueChange: null, // TODO: Calculate period-over-period change
       conversionRateChange: null, // TODO: Calculate period-over-period change
-      // Phase information
-      isTrialPhase,
-      phaseLabel: isTrialPhase ? "Trial Revenue" : "Total Revenue",
-      phaseDescription: isTrialPhase
-        ? shopSubscription?.status === "TRIAL_COMPLETED"
-          ? "Trial completed - commission tracked (not charged yet)"
-          : "Commission tracked during trial (not charged yet)"
-        : "Commission charged to Shopify",
+      phaseLabel: "Revenue Influenced by Recommendations",
       // Additional data for future use
       totalOrders,
       attributedOrders,
@@ -242,10 +133,10 @@ export class OverviewService {
             name: activePlan.subscription_plans?.name || "Unknown Plan",
             type: activePlan.subscription_plans?.plan_type || "UNKNOWN",
             description: activePlan.subscription_plans?.description,
-            commissionRate: activePlan.pricing_tiers?.commission_rate || 0,
-            thresholdAmount:
-              activePlan.pricing_tiers?.trial_threshold_amount || 0,
-            currency: activePlan.pricing_tiers?.currency || currencyCode,
+            monthlyPrice: Number(
+              activePlan.subscription_plans?.monthly_price || 0,
+            ),
+            currency: currencyCode,
             status: activePlan.status,
             startDate: activePlan.started_at,
             isActive: activePlan.is_active,
@@ -256,56 +147,25 @@ export class OverviewService {
 
   private async getPerformanceData(shopId: string, currencyCode: string) {
     try {
-      // First, check if shop is in trial or paid phase
-      const shopSubscription = await prisma.shop_subscriptions.findFirst({
-        where: {
-          shop_id: shopId,
-          is_active: true,
-        },
-        select: {
-          status: true,
-          id: true,
-        },
-      });
-
-      const isTrialPhase =
-        shopSubscription?.status === "TRIAL" ||
-        shopSubscription?.status === "TRIAL_COMPLETED";
-
-      // Filter commission records based on phase
-      const statusFilter = isTrialPhase
-        ? ["TRIAL_PENDING", "TRIAL_COMPLETED"]
-        : ["RECORDED", "INVOICED"];
-
-      // Get commission records with purchase attribution data
-      const commissionRecords = await prisma.commission_records.findMany({
-        where: {
-          shop_id: shopId,
-          status: {
-            in: statusFilter,
-          },
-        },
+      // Query purchase_attributions directly — it already has everything
+      // needed (total_revenue, contributing_extensions), no join required.
+      const attributions = await prisma.purchase_attributions.findMany({
+        where: { shop_id: shopId },
         select: {
           id: true,
-          attributed_revenue: true,
+          total_revenue: true,
           order_id: true,
           created_at: true,
-          commission_metadata: true,
-          purchase_attributions: {
-            select: {
-              contributing_extensions: true,
-              metadata: true,
-            },
-          },
+          contributing_extensions: true,
         },
         orderBy: {
-          attributed_revenue: "desc",
+          total_revenue: "desc",
         },
         take: 10,
       });
 
-      // If no commission records, return empty data
-      if (commissionRecords.length === 0) {
+      // If no attributions, return empty data
+      if (attributions.length === 0) {
         return {
           topBundles: [],
           revenueByExtension: [],
@@ -318,7 +178,7 @@ export class OverviewService {
 
       // Group by order_id to create "bundles" and get order details
       const orderStats = new Map();
-      const orderIds = [...new Set(commissionRecords.map((r) => r.order_id))];
+      const orderIds = [...new Set(attributions.map((r) => r.order_id))];
 
       // Get order details for better naming
       const orderDetails = await prisma.order_data.findMany({
@@ -338,7 +198,7 @@ export class OverviewService {
         orderDetailsMap.set(order.order_id, order);
       });
 
-      commissionRecords.forEach((record) => {
+      attributions.forEach((record) => {
         const orderId = record.order_id;
         if (!orderStats.has(orderId)) {
           const orderDetail = orderDetailsMap.get(orderId);
@@ -355,7 +215,7 @@ export class OverviewService {
           });
         }
         const stats = orderStats.get(orderId);
-        stats.revenue += Number(record.attributed_revenue) || 0;
+        stats.revenue += Number(record.total_revenue) || 0;
         stats.orders += 1;
       });
 
@@ -374,15 +234,14 @@ export class OverviewService {
       // Get revenue by extension (where recommendations were shown)
       const extensionStats = new Map();
 
-      commissionRecords.forEach((record) => {
-        if (record.purchase_attributions?.contributing_extensions) {
+      attributions.forEach((record) => {
+        if (record.contributing_extensions) {
           try {
-            const extensions = record.purchase_attributions
-              .contributing_extensions as any;
+            const extensions = record.contributing_extensions as any;
             if (Array.isArray(extensions)) {
               extensions.forEach((ext: any) => {
                 const extensionName =
-                  ext.extension_name || ext.name || "Unknown Extension";
+                  ext.extension_type || ext.extension_name || ext.name || "Unknown Extension";
                 if (!extensionStats.has(extensionName)) {
                   extensionStats.set(extensionName, {
                     type: extensionName,
@@ -391,7 +250,7 @@ export class OverviewService {
                   });
                 }
                 const stats = extensionStats.get(extensionName);
-                stats.revenue += Number(record.attributed_revenue) || 0;
+                stats.revenue += Number(record.total_revenue) || 0;
               });
             }
           } catch (error) {
@@ -420,7 +279,7 @@ export class OverviewService {
         1,
       );
 
-      const currentMonthRevenue = await prisma.commission_records.aggregate({
+      const currentMonthRevenue = await prisma.purchase_attributions.aggregate({
         where: {
           shop_id: shopId,
           created_at: {
@@ -430,16 +289,13 @@ export class OverviewService {
               1,
             ),
           },
-          status: {
-            in: statusFilter,
-          },
         },
         _sum: {
-          attributed_revenue: true,
+          total_revenue: true,
         },
       });
 
-      const lastMonthRevenue = await prisma.commission_records.aggregate({
+      const lastMonthRevenue = await prisma.purchase_attributions.aggregate({
         where: {
           shop_id: shopId,
           created_at: {
@@ -450,19 +306,16 @@ export class OverviewService {
               1,
             ),
           },
-          status: {
-            in: statusFilter,
-          },
         },
         _sum: {
-          attributed_revenue: true,
+          total_revenue: true,
         },
       });
 
       const currentRevenue =
-        Number(currentMonthRevenue._sum.attributed_revenue) || 0;
+        Number(currentMonthRevenue._sum.total_revenue) || 0;
       const previousRevenue =
-        Number(lastMonthRevenue._sum.attributed_revenue) || 0;
+        Number(lastMonthRevenue._sum.total_revenue) || 0;
       const monthlyGrowth =
         previousRevenue > 0
           ? ((currentRevenue - previousRevenue) / previousRevenue) * 100

@@ -4,17 +4,15 @@ import { getCurrencySymbol } from "../../../utils/currency";
 interface ROIValueProofSectionProps {
   totalRevenueGenerated: number;
   currency: string;
-  commissionRate: number;
+  monthlyPrice: number;
   isTrialPhase: boolean;
-  commissionCharged?: number; // Actual commission charged (PAID phase only)
 }
 
 export function ROIValueProofSection({
   totalRevenueGenerated,
   currency,
-  commissionRate,
+  monthlyPrice,
   isTrialPhase,
-  commissionCharged,
 }: ROIValueProofSectionProps) {
   const formatCurrencyValue = (amount: number, currencyCode: string) => {
     const symbol = getCurrencySymbol(currencyCode);
@@ -22,26 +20,13 @@ export function ROIValueProofSection({
     return `${symbol}${numericAmount.toFixed(2)}`;
   };
 
-  // ✅ FIX: Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
-  const commissionPaid = isTrialPhase
-    ? totalRevenueGenerated * commissionRate // Trial: calculate expected commission
-    : (commissionCharged ?? totalRevenueGenerated * commissionRate); // Paid: use actual charged amount
-
-  const netProfit = totalRevenueGenerated - commissionPaid;
-
-  // Calculate percentage kept (more intuitive than ROI)
-  const percentageKept =
-    totalRevenueGenerated > 0 ? (netProfit / totalRevenueGenerated) * 100 : 0;
+  const amountPaid = isTrialPhase ? 0 : monthlyPrice;
+  const netProfit = totalRevenueGenerated - amountPaid;
 
   // Don't show ROI section if there's no revenue data
   if (totalRevenueGenerated === 0) {
     return null;
   }
-
-  // Calculate competitor comparison (assuming $99/month flat rate)
-  const competitorMonthlyRate = 99;
-  const competitorAnnualRate = competitorMonthlyRate * 12;
-  const savingsVsCompetitor = competitorAnnualRate - commissionPaid;
 
   return (
     <Card>
@@ -53,7 +38,7 @@ export function ROIValueProofSection({
               💡 Your Investment vs Returns
             </Text>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Transparent commission model - you only pay when you earn
+              One flat monthly price — no surprises
             </Text>
           </div>
 
@@ -93,7 +78,7 @@ export function ROIValueProofSection({
                 </div>
                 <div>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Commission Paid
+                    Monthly Plan
                   </Text>
                   <Text
                     as="p"
@@ -103,7 +88,7 @@ export function ROIValueProofSection({
                   >
                     {isTrialPhase
                       ? "Trial (Not charged)"
-                      : formatCurrencyValue(commissionPaid, currency)}
+                      : `${formatCurrencyValue(monthlyPrice, currency)}/mo`}
                   </Text>
                 </div>
                 <div>
@@ -116,31 +101,14 @@ export function ROIValueProofSection({
                     fontWeight="bold"
                     tone="success"
                   >
-                    {isTrialPhase
-                      ? formatCurrencyValue(totalRevenueGenerated, currency)
-                      : formatCurrencyValue(netProfit, currency)}
+                    {formatCurrencyValue(netProfit, currency)}
                   </Text>
                 </div>
-                {!isTrialPhase && (
-                  <div>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      You Keep
-                    </Text>
-                    <Text
-                      as="p"
-                      variant="headingMd"
-                      fontWeight="bold"
-                      tone="success"
-                    >
-                      {`${percentageKept.toFixed(1)}%`}
-                    </Text>
-                  </div>
-                )}
               </div>
             </BlockStack>
           </div>
 
-          {/* Commission Transparency */}
+          {/* Pricing Transparency */}
           <div
             style={{
               padding: "16px",
@@ -152,102 +120,20 @@ export function ROIValueProofSection({
             <BlockStack gap="200">
               <InlineStack align="space-between" blockAlign="center">
                 <Text as="h4" variant="headingMd" fontWeight="semibold">
-                  🔍 Commission Transparency
+                  🔍 Simple, Transparent Pricing
                 </Text>
                 <Badge tone="success" size="large">
-                  {`${(commissionRate * 100).toFixed(1)}% Commission Rate`}
+                  {`${formatCurrencyValue(monthlyPrice, currency)}/mo flat`}
                 </Badge>
               </InlineStack>
 
               <Text as="p" variant="bodyMd">
-                We only charge a small commission on revenue directly attributed
-                to our AI recommendations. No upfront costs, no monthly fees -
-                you only pay when you earn.
+                One flat monthly price, no matter how much revenue our AI
+                recommendations drive for you. No commission, no usage caps,
+                no surprises.
               </Text>
             </BlockStack>
           </div>
-
-          {/* Competitor Comparison */}
-          {!isTrialPhase && (
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#FEF3C7",
-                borderRadius: "10px",
-                border: "1px solid #FDE68A",
-              }}
-            >
-              <BlockStack gap="200">
-                <Text as="h4" variant="headingMd" fontWeight="semibold">
-                  🏆 vs Flat-Rate Competitors
-                </Text>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                    gap: "16px",
-                  }}
-                >
-                  <div>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Competitor Annual Cost
-                    </Text>
-                    <Text
-                      as="p"
-                      variant="headingMd"
-                      fontWeight="bold"
-                      tone="critical"
-                    >
-                      {formatCurrencyValue(competitorAnnualRate, currency)}
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      ($99/month flat rate)
-                    </Text>
-                  </div>
-                  <div>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Better Bundle Cost
-                    </Text>
-                    <Text
-                      as="p"
-                      variant="headingMd"
-                      fontWeight="bold"
-                      tone="success"
-                    >
-                      {formatCurrencyValue(commissionPaid, currency)}
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      (Commission only)
-                    </Text>
-                  </div>
-                  <div>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      You Save
-                    </Text>
-                    <Text
-                      as="p"
-                      variant="headingMd"
-                      fontWeight="bold"
-                      tone="success"
-                    >
-                      {formatCurrencyValue(savingsVsCompetitor, currency)}
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      (
-                      {competitorAnnualRate > 0
-                        ? `${(
-                            (savingsVsCompetitor / competitorAnnualRate) *
-                            100
-                          ).toFixed(1)}% less`
-                        : "0% less"}
-                      )
-                    </Text>
-                  </div>
-                </div>
-              </BlockStack>
-            </div>
-          )}
 
           {/* Value Proposition */}
           <div
@@ -260,7 +146,7 @@ export function ROIValueProofSection({
           >
             <BlockStack gap="200">
               <Text as="h4" variant="headingMd" fontWeight="semibold">
-                ✨ Why Better Bundle Pays for Itself
+                ✨ Why BetterBundle Pays for Itself
               </Text>
               <div
                 style={{
@@ -271,10 +157,10 @@ export function ROIValueProofSection({
               >
                 <div>
                   <Text as="p" variant="bodyMd" fontWeight="medium">
-                    🎯 Performance-Based Pricing
+                    💵 Predictable Pricing
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Only pay when our AI generates revenue for you
+                    One flat monthly price — never scales with your sales
                   </Text>
                 </div>
                 <div>
@@ -282,7 +168,7 @@ export function ROIValueProofSection({
                     📈 Proven ROI
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Average stores see 3-5x return on commission investment
+                    Average stores see 3-5x return on their subscription cost
                   </Text>
                 </div>
                 <div>
@@ -298,7 +184,7 @@ export function ROIValueProofSection({
                     💡 Transparent Costs
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Clear commission structure with no hidden fees
+                    No hidden fees, no usage caps, no commission math
                   </Text>
                 </div>
               </div>

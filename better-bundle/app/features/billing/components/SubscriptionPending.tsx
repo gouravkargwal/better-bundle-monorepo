@@ -39,7 +39,6 @@ export function SubscriptionPending({
     }
   };
 
-  // ✅ NEW: Cancel subscription handler
   const handleCancelSubscription = async () => {
     if (
       !confirm(
@@ -76,7 +75,6 @@ export function SubscriptionPending({
 
   return (
     <BlockStack gap="500">
-      {/* ✅ Cancel Message Banner */}
       {cancelMessage && (
         <Banner
           tone={cancelMessage.includes("cancelled") ? "success" : "critical"}
@@ -85,7 +83,6 @@ export function SubscriptionPending({
         </Banner>
       )}
 
-      {/* Status Header */}
       <Card>
         <BlockStack gap="300">
           <InlineStack align="space-between" blockAlign="center">
@@ -94,8 +91,8 @@ export function SubscriptionPending({
                 🕒 Action Required
               </Text>
               <Text as="p" tone="subdued">
-                Complete the approval process in Shopify to activate your
-                usage-based billing
+                Complete the approval process in Shopify to start your free
+                trial
               </Text>
             </BlockStack>
             <Badge tone="warning" size="large">
@@ -105,11 +102,9 @@ export function SubscriptionPending({
         </BlockStack>
       </Card>
 
-      {/* Main Action Card */}
       <Card>
         <div style={{ padding: "24px" }}>
           <BlockStack gap="400">
-            {/* Status Banner */}
             <div
               style={{
                 padding: "20px",
@@ -142,8 +137,8 @@ export function SubscriptionPending({
                       </Text>
                     </div>
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      Your usage-based subscription is waiting for approval by a
-                      store owner or admin
+                      Your subscription is waiting for approval by a store
+                      owner or admin
                     </Text>
                   </BlockStack>
                   <Badge tone="attention" size="large">
@@ -153,7 +148,6 @@ export function SubscriptionPending({
               </BlockStack>
             </div>
 
-            {/* Plan Details */}
             <div
               style={{
                 padding: "20px",
@@ -166,50 +160,14 @@ export function SubscriptionPending({
                 <InlineStack align="space-between" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Usage-Based Billing Plan
+                      BetterBundle Plan
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
-                      {(subscriptionData.commissionRate * 100).toFixed(1)}% of Attributed Revenue
+                      {formatCurrency(subscriptionData.monthlyPrice)}/mo
                     </Text>
                   </BlockStack>
                   <Badge tone="info">Ready for Approval</Badge>
                 </InlineStack>
-
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "8px",
-                    border: "1px solid #E2E8F0",
-                  }}
-                >
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Monthly Cap:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {formatCurrency(subscriptionData.spendingLimit)}
-                      </Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Billing Cycle:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        Every 30 Days
-                      </Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Rate:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {(subscriptionData.commissionRate * 100).toFixed(1)}% of revenue
-                      </Text>
-                    </InlineStack>
-                  </BlockStack>
-                </div>
 
                 <div
                   style={{
@@ -220,16 +178,13 @@ export function SubscriptionPending({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You'll only pay for what you use, up to{" "}
-                    {formatCurrency(subscriptionData.spendingLimit)} per month.
-                    No charges until your customers make purchases through
-                    Better Bundle.
+                    💡 Free trial, then {formatCurrency(subscriptionData.monthlyPrice)}
+                    /mo — 50% off your first month.
                   </Text>
                 </div>
               </BlockStack>
             </div>
 
-            {/* Action Buttons */}
             {subscriptionData.confirmationUrl ? (
               <BlockStack gap="300">
                 <Button
@@ -242,7 +197,6 @@ export function SubscriptionPending({
                   Open Shopify Approval Page
                 </Button>
 
-                {/* ✅ NEW: Cancel Button */}
                 <Button
                   size="large"
                   onClick={handleCancelSubscription}
@@ -274,7 +228,6 @@ export function SubscriptionPending({
         </div>
       </Card>
 
-      {/* Help & Info Cards */}
       <div
         style={{
           display: "grid",
@@ -282,7 +235,6 @@ export function SubscriptionPending({
           gap: "24px",
         }}
       >
-        {/* What Happens Next */}
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
@@ -305,25 +257,19 @@ export function SubscriptionPending({
                   <strong>1.</strong> Click "Open Shopify Approval Page" above
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>2.</strong> Review your usage-based billing details
+                  <strong>2.</strong> Review your subscription details
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>3.</strong> Click "Approve charge" in Shopify
+                  <strong>3.</strong> Click "Approve" in Shopify
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>4.</strong> Your subscription will activate
-                  automatically
-                </Text>
-                <Text as="p" variant="bodySm">
-                  <strong>5.</strong> Better Bundle services will resume
-                  immediately
+                  <strong>4.</strong> Your free trial starts immediately
                 </Text>
               </BlockStack>
             </BlockStack>
           </div>
         </Card>
 
-        {/* Need Help */}
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
@@ -343,17 +289,12 @@ export function SubscriptionPending({
               </div>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Who can approve?</strong> Only store owners and admins
-                  with billing permissions can approve subscriptions.
+                  <strong>Who can approve?</strong> Only store owners and
+                  admins with billing permissions can approve subscriptions.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>Already approved?</strong> The page will refresh
                   automatically once approved.
-                </Text>
-                <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Wrong spending cap?</strong> Use the "Cancel This
-                  Subscription" button above and start the setup process again
-                  with your desired monthly cap amount.
                 </Text>
               </BlockStack>
             </BlockStack>

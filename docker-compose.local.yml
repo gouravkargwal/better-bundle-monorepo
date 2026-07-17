@@ -1,7 +1,7 @@
 services:
   # ==================== DATABASE ====================
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: betterbundle-postgres-dev
     env_file:
       - .env.dev
@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-config/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
     restart: unless-stopped
     logging:
       driver: json-file

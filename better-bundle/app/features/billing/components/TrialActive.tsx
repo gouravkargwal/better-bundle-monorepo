@@ -1,20 +1,29 @@
+import { useState } from "react";
 import {
   Card,
   BlockStack,
   InlineStack,
   Text,
   Badge,
-  ProgressBar,
+  Button,
+  Banner,
 } from "@shopify/polaris";
-import { CheckCircleIcon } from "@shopify/polaris-icons";
 import type { TrialData } from "../types/billing.types";
 
 interface TrialActiveProps {
   trialData: TrialData | undefined;
   shopCurrency: string;
+  onSetupBilling: () => Promise<{ success: boolean; error?: string }>;
 }
 
-export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
+export function TrialActive({
+  trialData,
+  shopCurrency,
+  onSetupBilling,
+}: TrialActiveProps) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -22,7 +31,6 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
     }).format(amount);
   };
 
-  // Add null check for trialData
   if (!trialData) {
     return (
       <div style={{ padding: "24px", textAlign: "center" }}>
@@ -31,28 +39,37 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
     );
   }
 
-  const trialProgress = trialData.progress;
-  const remainingAmount =
-    trialData.thresholdAmount - trialData.accumulatedRevenue;
-  const hasReachedThreshold = trialProgress >= 100;
+  const handleSetupBilling = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await onSetupBilling();
+      if (!result.success) {
+        setError(result.error || "Failed to start trial");
+      }
+    } catch (err) {
+      setError("An unexpected error occurred");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <BlockStack gap="500">
-      {/* Status Header */}
       <Card>
         <BlockStack gap="300">
           <InlineStack align="space-between" blockAlign="center">
             <BlockStack gap="100">
               <Text variant="headingMd" as="h3">
-                🚀 Free Trial Active
+                🚀 Start Your Free Trial
               </Text>
               <Text as="p" tone="subdued">
-                Drive sales with Better Bundle - completely free until you reach
-                your threshold
+                Try BetterBundle free for {trialData.trialDays} days — no
+                charge until your trial ends.
               </Text>
             </BlockStack>
             <Badge tone="success" size="large">
-              Active
+              Available
             </Badge>
           </InlineStack>
         </BlockStack>
@@ -65,73 +82,63 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
           gap: "var(--p-space-400)",
         }}
       >
-        {/* Main Progress Card */}
         <Card>
           <BlockStack gap="400">
-            {/* Header */}
-            <InlineStack align="space-between" blockAlign="center">
-              <Text as="h2" variant="headingMd" fontWeight="semibold">
-                Trial Progress
-              </Text>
-              <Badge tone="success" icon={CheckCircleIcon}>
-                Active
-              </Badge>
-            </InlineStack>
-
-            {/* Progress Section */}
+            <Text as="h2" variant="headingMd" fontWeight="semibold">
+              Plan Details
+            </Text>
             <div
               style={{
                 padding: "20px",
-                backgroundColor: hasReachedThreshold ? "#FEF3C7" : "#F0FDF4",
+                backgroundColor: "#F0FDF4",
                 borderRadius: "12px",
-                border: `2px solid ${hasReachedThreshold ? "#F59E0B" : "#22C55E"}`,
+                border: "2px solid #22C55E",
               }}
             >
-              <BlockStack gap="400">
-                {/* Revenue Stats */}
+              <BlockStack gap="300">
                 <InlineStack align="space-between" blockAlign="end">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Attributed Revenue
+                      Free trial length
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
-                      {formatCurrency(trialData.accumulatedRevenue)}
+                      {trialData.trialDays} days
                     </Text>
                   </BlockStack>
                   <BlockStack gap="100" align="end">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Trial Threshold
+                      After trial
                     </Text>
                     <Text as="p" variant="headingMd" fontWeight="semibold">
-                      {formatCurrency(trialData.thresholdAmount)}
+                      {formatCurrency(trialData.monthlyPrice)}/mo
                     </Text>
                   </BlockStack>
                 </InlineStack>
-
-                {/* Progress Bar */}
-                <BlockStack gap="200">
-                  <ProgressBar
-                    progress={Math.min(trialProgress, 100)}
-                    tone={hasReachedThreshold ? "primary" : "success"}
-                    size="medium"
-                  />
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" fontWeight="medium">
-                      {Math.min(trialProgress, 100).toFixed(1)}% Complete
-                    </Text>
-                    {!hasReachedThreshold && (
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        {formatCurrency(remainingAmount)} to go
-                      </Text>
-                    )}
-                  </InlineStack>
-                </BlockStack>
               </BlockStack>
             </div>
+
+            {error && (
+              <Banner tone="critical">
+                <Text as="p">{error}</Text>
+              </Banner>
+            )}
+
+            <Button
+              variant="primary"
+              size="large"
+              onClick={handleSetupBilling}
+              loading={isLoading}
+              fullWidth
+            >
+              Start Free Trial
+            </Button>
+            <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+              You'll be redirected to Shopify to approve your subscription —
+              no charge until your {trialData.trialDays}-day trial ends.
+            </Text>
           </BlockStack>
         </Card>
 
-        {/* What's Next Card */}
         <Card>
           <BlockStack gap="300">
             <Text as="h3" variant="headingMd" fontWeight="semibold">
@@ -141,20 +148,20 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">1.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Continue using all features completely free
+                  Approve billing setup in Shopify to start your trial
                 </Text>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">2.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  When you reach {formatCurrency(trialData.thresholdAmount)},
-                  set up billing
+                  Use all features free for {trialData.trialDays} days
                 </Text>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">3.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pay only {(trialData.commissionRate * 100).toFixed(1)}% of attributed revenue - only when you make sales
+                  After your trial, pay {formatCurrency(trialData.monthlyPrice)}
+                  /mo — 50% off your first month
                 </Text>
               </div>
             </BlockStack>

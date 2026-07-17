@@ -6,7 +6,7 @@ Trains the two-tower model for a specific shop using:
 - User features (LTV, frequency, churn risk)
 - Purchase attributions and interactions (training labels)
 
-Saves trained model to disk for serving.
+Saves trained model to disk for serving (legacy + shared volume for BentoML).
 """
 
 import logging
@@ -129,10 +129,39 @@ class TfrsTrainer:
             verbose=1,
         )
 
-        # 6. Save model
+        # 6. Save model (legacy filesystem path)
         model_path = self._get_model_path(shop_id)
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         tf.saved_model.save(model, model_path)
+
+        # 7. Copy to shared volume for TFRS inference service
+        shared_model_path = os.path.join(
+            os.getenv("MODEL_BASE_PATH", "/models"), shop_id
+        )
+        try:
+            os.makedirs(shared_model_path, exist_ok=True)
+            tf.saved_model.save(model, shared_model_path)
+            logger.info(
+                f"✅ Model copied to shared volume for TFRS serving: {shared_model_path}"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Shared volume save failed (non-fatal): {e}")
+
+        # 8. Upload to OCI Object Storage for persistence across restarts
+        try:
+            from tfrs_serving.oci_registry import OciModelRegistry
+
+            registry = OciModelRegistry(
+                bucket_name=os.getenv("OCI_BUCKET", "betterbundle-tfrs-models"),
+                use_instance_principal=os.getenv(
+                    "OCI_USE_INSTANCE_PRINCIPAL", "true"
+                ).lower()
+                == "true",
+            )
+            version = registry.upload_model(shop_id, shared_model_path)
+            logger.info(f"✅ Model uploaded to OCI Object Storage: version {version}")
+        except Exception as e:
+            logger.warning(f"⚠️ OCI upload failed (non-fatal): {e}")
 
         training_time = time.time() - start_time
         logger.info(

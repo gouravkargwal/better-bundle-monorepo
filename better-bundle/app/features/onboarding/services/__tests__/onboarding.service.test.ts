@@ -7,7 +7,6 @@ const { mockPrisma, mockPublishDataJobEvent } = vi.hoisted(() => {
   return {
     mockPrisma: {
       subscription_plans: { findFirst: vi.fn() },
-      pricing_tiers: { findFirst: vi.fn() },
       shops: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
       shop_subscriptions: { findFirst: vi.fn(), create: vi.fn() },
       $transaction: vi.fn(),
@@ -115,21 +114,11 @@ function defaultShopData() {
 function defaultPlan() {
   return {
     id: "plan-1",
-    name: "Default Plan",
+    name: "BetterBundle Flat",
     is_active: true,
     is_default: true,
-  };
-}
-
-function defaultPricingTier() {
-  return {
-    id: "tier-1",
-    subscription_plan_id: "plan-1",
-    currency: "USD",
-    is_active: true,
-    is_default: true,
-    trial_threshold_amount: 75,
-    commission_rate: 0.03,
+    monthly_price: 99.0,
+    trial_days: 14,
   };
 }
 
@@ -167,40 +156,25 @@ describe("OnboardingService", () => {
   // ─── getOnboardingData ─────────────────────────────────────────────────
 
   describe("getOnboardingData", () => {
-    it("returns pricing tier config for shop currency", async () => {
+    it("returns flat plan info for shop currency", async () => {
       const admin = mockAdmin();
       mockPrisma.subscription_plans.findFirst.mockResolvedValue(defaultPlan());
-      mockPrisma.pricing_tiers.findFirst.mockResolvedValue(
-        defaultPricingTier(),
-      );
 
       const result = await service.getOnboardingData(
         "test-store.myshopify.com",
         admin,
       );
 
-      expect(result.pricingTier).toEqual({
+      expect(result.planInfo).toEqual({
         symbol: "$",
-        threshold_amount: 75,
+        monthlyPrice: 99.0,
+        trialDays: 14,
       });
     });
 
     it("throws when no default subscription plan exists", async () => {
       const admin = mockAdmin();
       mockPrisma.subscription_plans.findFirst.mockResolvedValue(null);
-
-      await expect(
-        service.getOnboardingData("test-store.myshopify.com", admin),
-      ).rejects.toThrow("Failed to get onboarding data");
-    });
-
-    it("throws when no pricing tier found for currency", async () => {
-      const admin = mockAdmin({
-        ...defaultShopData(),
-        currencyCode: "XYZ",
-      });
-      mockPrisma.subscription_plans.findFirst.mockResolvedValue(defaultPlan());
-      mockPrisma.pricing_tiers.findFirst.mockResolvedValue(null);
 
       await expect(
         service.getOnboardingData("test-store.myshopify.com", admin),
@@ -251,16 +225,12 @@ describe("OnboardingService", () => {
           create: vi.fn().mockResolvedValue({
             id: "sub-1",
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
             is_active: true,
           }),
         },
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
@@ -286,14 +256,14 @@ describe("OnboardingService", () => {
         }),
       );
 
-      // Verify trial subscription was created
+      // Verify trial subscription was created with a time-based expiry
       expect(mockTx.shop_subscriptions.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
             is_active: true,
+            expires_at: expect.any(Date),
           }),
         }),
       );
@@ -346,7 +316,6 @@ describe("OnboardingService", () => {
           create: vi.fn(),
         },
         subscription_plans: { findFirst: vi.fn() },
-        pricing_tiers: { findFirst: vi.fn() },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
       mockPrisma.shops.findUnique.mockResolvedValue({
@@ -381,7 +350,6 @@ describe("OnboardingService", () => {
           create: vi.fn(),
         },
         subscription_plans: { findFirst: vi.fn() },
-        pricing_tiers: { findFirst: vi.fn() },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
       mockPrisma.shops.findUnique.mockResolvedValue({
@@ -410,15 +378,11 @@ describe("OnboardingService", () => {
           create: vi.fn().mockResolvedValue({
             id: "sub-1",
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
           }),
         },
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
@@ -450,38 +414,6 @@ describe("OnboardingService", () => {
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(null), // No plan!
         },
-        pricing_tiers: { findFirst: vi.fn() },
-      };
-      mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
-
-      await expect(
-        service.completeOnboarding(session, admin),
-      ).rejects.toThrow("Failed to complete onboarding");
-    });
-
-    it("throws when no pricing tier for shop currency during trial activation", async () => {
-      const admin = mockAdmin();
-      const session = defaultSession();
-
-      const mockTx = {
-        shops: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          upsert: vi.fn().mockResolvedValue({
-            ...defaultShopRecord(),
-            currency_code: "EUR",
-          }),
-          update: vi.fn(),
-        },
-        shop_subscriptions: {
-          findFirst: vi.fn().mockResolvedValue(null),
-          create: vi.fn(),
-        },
-        subscription_plans: {
-          findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(null), // No tier for EUR!
-        },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
 
@@ -512,15 +444,11 @@ describe("OnboardingService", () => {
           create: vi.fn().mockResolvedValue({
             id: "sub-1",
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
           }),
         },
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
@@ -567,15 +495,11 @@ describe("OnboardingService", () => {
           create: vi.fn().mockResolvedValue({
             id: "sub-1",
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
           }),
         },
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
@@ -610,15 +534,11 @@ describe("OnboardingService", () => {
           create: vi.fn().mockResolvedValue({
             id: "sub-1",
             shop_id: "shop-uuid-1",
-            subscription_type: "TRIAL",
             status: "TRIAL",
           }),
         },
         subscription_plans: {
           findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-        },
-        pricing_tiers: {
-          findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));

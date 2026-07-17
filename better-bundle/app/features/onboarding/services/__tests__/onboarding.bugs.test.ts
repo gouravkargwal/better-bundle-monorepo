@@ -11,7 +11,6 @@ const { mockPrisma, mockPublishDataJobEvent } = vi.hoisted(() => {
   return {
     mockPrisma: {
       subscription_plans: { findFirst: vi.fn() },
-      pricing_tiers: { findFirst: vi.fn() },
       shops: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
       shop_subscriptions: { findFirst: vi.fn(), create: vi.fn() },
       $transaction: vi.fn(),
@@ -52,18 +51,13 @@ function defaultShopData() {
 }
 
 function defaultPlan() {
-  return { id: "plan-1", name: "Default Plan", is_active: true, is_default: true };
-}
-
-function defaultPricingTier() {
   return {
-    id: "tier-1",
-    subscription_plan_id: "plan-1",
-    currency: "USD",
+    id: "plan-1",
+    name: "BetterBundle Flat",
     is_active: true,
     is_default: true,
-    trial_threshold_amount: 75,
-    commission_rate: 0.03,
+    monthly_price: 99.0,
+    trial_days: 14,
   };
 }
 
@@ -123,16 +117,12 @@ function setupFullOnboardingMocks(shopRecordOverrides: any = {}) {
       create: vi.fn().mockResolvedValue({
         id: "sub-1",
         shop_id: shopRecord.id,
-        subscription_type: "TRIAL",
         status: "TRIAL",
         is_active: true,
       }),
     },
     subscription_plans: {
       findFirst: vi.fn().mockResolvedValue(defaultPlan()),
-    },
-    pricing_tiers: {
-      findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
     },
   };
   mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
@@ -178,22 +168,19 @@ describe("OnboardingService — BUG TESTS", () => {
     });
   });
 
-  // ─── BUG 4: Missing user_chosen_cap_amount in trial subscription ──────
+  // ─── Trial subscription uses a time-based expiry ──────────────────────
 
-  describe("BUG 4: Trial subscription should set user_chosen_cap_amount", () => {
-    it("should set user_chosen_cap_amount from pricing tier threshold", async () => {
+  describe("Trial subscription sets a time-based expires_at", () => {
+    it("should set expires_at based on the plan's trial_days, not a revenue cap", async () => {
       const admin = mockAdminWebPixelSuccess();
       const session = defaultSession();
       const mockTx = setupFullOnboardingMocks();
 
       await service.completeOnboarding(session, admin);
 
-      // BUG: Current code creates subscription WITHOUT user_chosen_cap_amount
-      // Later, activateSubscription reads this field and falls back to $1000
-      // FIXED: Should set user_chosen_cap_amount = pricingTier.trial_threshold_amount
       expect(mockTx.shop_subscriptions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          user_chosen_cap_amount: 75, // From defaultPricingTier().trial_threshold_amount
+          expires_at: expect.any(Date),
         }),
       });
     });

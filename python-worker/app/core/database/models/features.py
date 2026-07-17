@@ -15,7 +15,8 @@ from sqlalchemy import (
     func,
 )
 
-from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP, ARRAY
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin, CustomerMixin, ProductMixin
 
@@ -68,6 +69,10 @@ class ProductFeatures(BaseModel, ShopMixin, ProductMixin):
     """Product features model for product analytics"""
 
     __tablename__ = "product_features"
+
+    # Vertex AI text embedding vector (768d for text-embedding-004)
+    # Used for semantic product similarity and TFRS cold-start
+    embedding = Column(Vector(768), nullable=True)
 
     interaction_volume_score = Column(Float, nullable=False)
     purchase_velocity_score = Column(Float, nullable=False)

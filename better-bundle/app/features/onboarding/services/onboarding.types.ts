@@ -1,8 +1,9 @@
 // features/onboarding/services/onboarding.types.ts
 export interface OnboardingData {
-  pricingTier: {
+  planInfo: {
     symbol: string;
-    threshold_amount: number;
+    monthlyPrice: number;
+    trialDays: number;
   } | null;
 }
 

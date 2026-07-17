@@ -207,38 +207,6 @@ model order_data {
   @@index([updated_at], map: "ix_order_data_updated_at")
 }
 
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model pricing_tiers {
-  subscription_plan_id   String             @db.VarChar(255)
-  currency               String             @db.VarChar(3)
-  trial_threshold_amount Decimal            @db.Decimal(10, 2)
-  commission_rate        Decimal            @db.Decimal(5, 4)
-  is_active              Boolean
-  is_default             Boolean
-  minimum_charge         Decimal?           @db.Decimal(10, 2)
-  proration_enabled      Boolean
-  tier_metadata          String?            @db.VarChar(1000)
-  effective_from         DateTime           @db.Timestamptz(6)
-  effective_to           DateTime?          @db.Timestamptz(6)
-  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at             DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at             DateTime           @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  subscription_plans     subscription_plans @relation(fields: [subscription_plan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@unique([subscription_plan_id, currency, is_default], map: "ix_pricing_tier_unique_default")
-  @@index([effective_from, effective_to], map: "ix_pricing_tier_effective")
-  @@index([subscription_plan_id, currency], map: "ix_pricing_tier_plan_currency")
-  @@index([currency], map: "ix_pricing_tiers_currency")
-  @@index([effective_from], map: "ix_pricing_tiers_effective_from")
-  @@index([effective_to], map: "ix_pricing_tiers_effective_to")
-  @@index([is_active], map: "ix_pricing_tiers_is_active")
-  @@index([is_default], map: "ix_pricing_tiers_is_default")
-  @@index([subscription_plan_id], map: "ix_pricing_tiers_subscription_plan_id")
-  @@index([is_active], map: "ix_pricing_tier_active")
-  @@index([currency], map: "ix_pricing_tier_currency")
-  @@index([is_default], map: "ix_pricing_tier_default")
-}
-
 model product_data {
   product_id       String   @db.VarChar
   title            String   @db.VarChar(500)
@@ -277,42 +245,6 @@ model product_data {
   @@index([status], map: "ix_product_data_status")
   @@index([total_inventory], map: "ix_product_data_total_inventory")
   @@index([vendor], map: "ix_product_data_vendor")
-}
-
-model product_features {
-  interaction_volume_score Float
-  purchase_velocity_score  Float
-  engagement_quality_score Float
-  price_tier               String   @db.VarChar(20)
-  revenue_potential_score  Float
-  conversion_efficiency    Float
-  days_since_last_purchase Int?
-  activity_recency_score   Float
-  trending_momentum        Float
-  product_lifecycle_stage  String   @db.VarChar(100)
-  inventory_health_score   Float
-  product_category         String?  @db.VarChar(100)
-  last_computed_at         DateTime @db.Timestamptz(6)
-  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at               DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_id                  String   @db.VarChar
-  product_id               String?  @db.VarChar
-  shops                    shops    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@unique([shop_id, product_id], map: "ix_product_features_shop_id_product_id")
-  @@index([product_id], map: "ix_product_features_product_id")
-  @@index([shop_id], map: "ix_product_features_shop_id")
-  @@index([shop_id, activity_recency_score], map: "ix_product_features_shop_id_activity_recency_score")
-  @@index([shop_id, conversion_efficiency], map: "ix_product_features_shop_id_conversion_efficiency")
-  @@index([shop_id, engagement_quality_score], map: "ix_product_features_shop_id_engagement_quality_score")
-  @@index([shop_id, interaction_volume_score], map: "ix_product_features_shop_id_interaction_volume_score")
-  @@index([shop_id, inventory_health_score], map: "ix_product_features_shop_id_inventory_health_score")
-  @@index([shop_id, price_tier], map: "ix_product_features_shop_id_price_tier")
-  @@index([shop_id, product_lifecycle_stage], map: "ix_product_features_shop_id_product_lifecycle_stage")
-  @@index([shop_id, purchase_velocity_score], map: "ix_product_features_shop_id_purchase_velocity_score")
-  @@index([shop_id, revenue_potential_score], map: "ix_product_features_shop_id_revenue_potential_score")
-  @@index([shop_id, trending_momentum], map: "ix_product_features_shop_id_trending_momentum")
 }
 
 model product_pair_features {
@@ -593,7 +525,6 @@ model shops {
   interaction_features    interaction_features[]
   order_data              order_data[]
   product_data            product_data[]
-  product_features        product_features[]
   product_pair_features   product_pair_features[]
   purchase_attributions   purchase_attributions[]
   raw_collections         raw_collections[]
@@ -602,6 +533,7 @@ model shops {
   raw_products            raw_products[]
   search_product_features search_product_features[]
   session_features        session_features[]
+  shop_subscriptions      shop_subscriptions[]
   user_features           user_features[]
   user_identity_links     user_identity_links[]
   user_interactions       user_interactions[]
@@ -615,19 +547,20 @@ model shops {
 }
 
 model subscription_plans {
-  name                    String                      @unique(map: "ix_subscription_plans_name") @db.VarChar(100)
-  description             String?
-  plan_type               subscription_plan_type_enum
-  is_active               Boolean
-  is_default              Boolean
-  default_commission_rate String?                     @db.VarChar(10)
-  plan_metadata           String?
-  effective_from          DateTime                    @db.Timestamptz(6)
-  effective_to            DateTime?                   @db.Timestamptz(6)
-  id                      String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at              DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  pricing_tiers           pricing_tiers[]
+  name               String                      @unique(map: "ix_subscription_plans_name") @db.VarChar(100)
+  description        String?
+  plan_type          subscription_plan_type_enum
+  is_active          Boolean
+  is_default         Boolean
+  monthly_price      Decimal                     @db.Decimal(10, 2)
+  trial_days         Int
+  plan_metadata      String?
+  effective_from     DateTime                    @db.Timestamptz(6)
+  effective_to       DateTime?                   @db.Timestamptz(6)
+  id                 String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at         DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at         DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions shop_subscriptions[]
 
   @@index([effective_from, effective_to], map: "ix_subscription_plan_effective")
   @@index([name], map: "ix_subscription_plan_name")
@@ -777,6 +710,37 @@ model scheduler_job_executions {
   @@index([job_group], map: "ix_scheduler_job_executions_job_group")
   @@index([job_name], map: "ix_scheduler_job_executions_job_name")
   @@index([status], map: "ix_scheduler_job_executions_status")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model shop_subscriptions {
+  status                     subscription_status_enum
+  subscription_plan_id       String                   @db.VarChar(255)
+  trial_duration_days        Int?
+  auto_renew                 Boolean
+  shopify_subscription_id    String?                  @db.VarChar(255)
+  shopify_line_item_id       String?                  @db.VarChar(255)
+  shopify_status             String?                  @db.VarChar(50)
+  confirmation_url           String?
+  started_at                 DateTime                 @db.Timestamptz(6)
+  completed_at               DateTime?                @db.Timestamptz(6)
+  cancelled_at               DateTime?                @db.Timestamptz(6)
+  expires_at                 DateTime?                @db.Timestamptz(6)
+  is_active                  Boolean
+  shop_subscription_metadata Json?
+  id                         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at                 DateTime                 @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id                    String                   @db.VarChar
+  shops                      shops                    @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  subscription_plans         subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
+
+  @@index([is_active], map: "ix_shop_subscriptions_is_active")
+  @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
+  @@index([shopify_subscription_id], map: "ix_shop_subscriptions_shopify_subscription_id")
+  @@index([started_at], map: "ix_shop_subscriptions_started_at")
+  @@index([status], map: "ix_shop_subscriptions_status")
+  @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
 }
 
 enum billing_cycle_status_enum {

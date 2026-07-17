@@ -7,7 +7,7 @@ with recommendations across different extensions.
 
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -35,8 +35,6 @@ from ..models.attribution_models import (
     InteractionType,
     AttributionMetrics,
 )
-from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
-from app.core.database.models.enums import BillingPhase
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +66,6 @@ class AttributionEngine:
         ✅ SCENARIO 9: Configurable Attribution Windows
         """
         self.session = session
-        self.commission_service = CommissionServiceV2(session)
         # ✅ INDUSTRY STANDARD: Configurable attribution windows
         self.attribution_windows = {
             "quick": timedelta(hours=24),  # Fast purchases (food, essentials)
@@ -162,14 +159,7 @@ class AttributionEngine:
                 result = await self._handle_timing_adjustment(
                     context, timing_analysis, all_interactions
                 )
-                attribution_id = await self._store_attribution_result(
-                    result
-                )  # ✅ Store rejected
-                # ✅ FIX: Create commission for timing-adjusted attributions too
-                if attribution_id:
-                    await self._create_commission_for_attribution(
-                        attribution_id=attribution_id, shop_id=context.shop_id
-                    )
+                await self._store_attribution_result(result)  # ✅ Store rejected
                 return result
 
             if not all_interactions:
@@ -231,7 +221,7 @@ class AttributionEngine:
 
             # 5. Store attribution result
             logger.info(f"💾 Storing attribution result for order {context.order_id}")
-            attribution_id = await self._store_attribution_result(result)
+            await self._store_attribution_result(result)
             logger.info(
                 f"✅ Attribution calculation completed for order {context.order_id}"
             )
@@ -239,15 +229,6 @@ class AttributionEngine:
                 f"💰 Final attribution for order {context.order_id}: "
                 f"${result.total_attributed_revenue} across {len(result.attribution_breakdown)} items"
             )
-
-            # ========================================
-            # 🆕 NEW: Step 6 - CREATE COMMISSION RECORD
-            # ========================================
-            # Store returns created attribution id (or existing one)
-            if attribution_id:
-                await self._create_commission_for_attribution(
-                    attribution_id=attribution_id, shop_id=context.shop_id
-                )
 
             return result
 
@@ -257,148 +238,105 @@ class AttributionEngine:
             )
             return self._create_error_attribution(context, str(e))
 
-    async def _create_commission_for_attribution(
-        self, attribution_id: str, shop_id: str
-    ) -> None:
+    async def calculate_attribution_from_purchase_event(
+        self, purchase_event: PurchaseEvent
+    ) -> AttributionResult:
         """
-        Create commission record for a purchase attribution.
-        This is called automatically after attribution is created.
+        Build an AttributionContext from a raw PurchaseEvent and calculate attribution.
 
-        Args:
-            attribution_id: Purchase attribution ID
-            shop_id: Shop ID
+        Handles the post-purchase timing adjustment: if Apollo interactions occurred
+        after the order was first created (post-purchase upsell additions), attribution
+        uses the order's updated_at instead of created_at.
         """
-        try:
-            logger.info(f"💰 Creating commission for attribution {attribution_id}")
+        purchase_time = purchase_event.created_at
 
-            # Create commission record (handles both trial and paid phases)
-            commission = await self.commission_service.create_commission_record(
-                purchase_attribution_id=attribution_id, shop_id=shop_id
+        if purchase_event.updated_at:
+            has_post_purchase_interactions = await self._has_post_purchase_interactions(
+                purchase_event.shop_id,
+                purchase_event.customer_id,
+                purchase_event.created_at,
+                purchase_event.updated_at,
             )
 
-            if not commission:
-                logger.error(
-                    f"❌ Failed to create commission for attribution {attribution_id}"
-                )
-                return
-
-            # Check if this is a newly created commission or existing one
-            # by checking if it was created very recently (within last 5 seconds)
-            from app.shared.helpers import now_utc
-
-            # Ensure both datetimes are timezone-aware for comparison
-            now = now_utc()
-            created_at = commission.created_at
-
-            # If created_at is timezone-naive, assume it's UTC
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-
-            time_diff = (now - created_at).total_seconds()
-
-            if time_diff < 5:  # Newly created
+            if has_post_purchase_interactions:
                 logger.info(
-                    f"✅ Commission created: ${commission.commission_earned} "
-                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
+                    f"✅ Order {purchase_event.order_id} HAS post-purchase interactions, "
+                    f"using updated_at ({purchase_event.updated_at}) for attribution"
                 )
-            else:  # Existing commission
-                logger.info(
-                    f"✅ Commission found existing: ${commission.commission_earned} "
-                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
-                )
+                purchase_time = purchase_event.updated_at
 
-            # Check if we need to handle trial threshold or cap limits
-            await self._handle_post_commission_checks(commission, shop_id)
+        context = AttributionContext(
+            shop_id=purchase_event.shop_id,
+            customer_id=purchase_event.customer_id,
+            session_id=purchase_event.session_id,
+            order_id=purchase_event.order_id,
+            purchase_amount=purchase_event.total_amount,
+            purchase_products=purchase_event.products,
+            purchase_time=purchase_time,
+            order_metafields=getattr(purchase_event, "order_metafields", None),
+        )
 
-        except Exception as e:
-            logger.error(f"❌ Error creating commission: {e}")
-            # Don't fail the entire attribution if commission creation fails
-            # Commission can be created later via reconciliation
+        return await self.calculate_attribution(context)
 
-    async def _handle_post_commission_checks(self, commission, shop_id: str) -> None:
-        """
-        Handle checks after commission is created:
-        - Trial threshold check
-        - Cap limit check
-        - Warnings
+    async def _has_post_purchase_interactions(
+        self,
+        shop_id: str,
+        customer_id: str,
+        order_created_at: datetime,
+        order_updated_at: datetime,
+    ) -> bool:
+        """Check if there are Apollo post-purchase interactions after order creation.
 
-        Design Principle:
-        - Always use billing cycle as source of truth for cap amount
-        - Commission.capped_amount is only for historical reference/reporting
-        - Check against the cycle's current_cap_amount (supports mid-cycle increases)
+        This checks for recommendation clicks/add-to-cart events that occurred after
+        the initial order was created, indicating post-purchase additions.
 
-        Args:
-            commission: Created commission record
-            shop_id: Shop ID
+        Returns True if there are interactions after order_created_at.
         """
         try:
+            from sqlalchemy import func
+            from app.domains.analytics.models.interaction import (
+                InteractionType as AnalyticsInteractionType,
+            )
 
-            if commission.billing_phase == BillingPhase.TRIAL:
-                # Check if trial threshold reached
-                logger.info(
-                    f"✅ Trial commission created: ${commission.commission_earned}"
+            post_purchase_interaction_types = [
+                AnalyticsInteractionType.RECOMMENDATION_CLICKED.value,
+                AnalyticsInteractionType.RECOMMENDATION_ADD_TO_CART.value,
+                AnalyticsInteractionType.RECOMMENDATION_VIEWED.value,
+            ]
+
+            query = select(func.count(UserInteraction.id)).where(
+                and_(
+                    UserInteraction.shop_id == shop_id,
+                    UserInteraction.customer_id == customer_id,
+                    UserInteraction.interaction_type.in_(
+                        post_purchase_interaction_types
+                    ),
+                    UserInteraction.extension_type == "apollo",
+                    UserInteraction.created_at > order_created_at,
+                    UserInteraction.created_at <= order_updated_at,
                 )
+            )
 
-            elif commission.billing_phase == BillingPhase.PAID:
-                # ✅ DESIGN: Always fetch cap from billing cycle (single source of truth)
-                # Use commission.billing_cycle_id to get the cycle directly
-                from ..repositories.billing_repository_v2 import BillingRepositoryV2
-                from app.repository.BillingCycleRepository import BillingCycleRepository
-
+            if self.session:
+                result = await self.session.execute(query)
+            else:
                 async with get_session_context() as session:
-                    billing_cycle_repo = BillingCycleRepository(session)
+                    result = await session.execute(query)
 
-                    # Get the billing cycle this commission belongs to
-                    if not commission.billing_cycle_id:
-                        logger.warning(
-                            f"⚠️ Commission {commission.id} has no billing_cycle_id"
-                        )
-                        return
+            interaction_count = result.scalar() or 0
 
-                    billing_cycle = await billing_cycle_repo.get_by_id(
-                        commission.billing_cycle_id
-                    )
-
-                    if not billing_cycle:
-                        logger.warning(
-                            f"⚠️ Billing cycle {commission.billing_cycle_id} not found "
-                            f"for commission {commission.id}"
-                        )
-                        return
-
-                    # Use cycle's current_cap_amount (source of truth, supports mid-cycle updates)
-                    cap_amount = billing_cycle.current_cap_amount
-
-                    # Check usage percentage against current cap
-                    usage_percentage = commission.cycle_usage_after / cap_amount * 100
-
-                    # Warning at 75%
-                    if usage_percentage >= 75 and usage_percentage < 90:
-                        logger.warning(
-                            f"⚠️ Usage at {usage_percentage:.1f}% of cap for shop {shop_id} "
-                            f"(${commission.cycle_usage_after} / ${cap_amount})"
-                        )
-                        # TODO: Send notification to merchant
-
-                    # Urgent warning at 90%
-                    elif usage_percentage >= 90 and usage_percentage < 100:
-                        logger.warning(
-                            f"🚨 Usage at {usage_percentage:.1f}% of cap for shop {shop_id}! "
-                            f"Approaching limit (${commission.cycle_usage_after} / ${cap_amount})"
-                        )
-                        # TODO: Send urgent notification to merchant
-
-                    # Cap reached - log warning (suspension handled by billing service)
-                    elif usage_percentage >= 100:
-                        logger.error(
-                            f"🛑 Cap reached for shop {shop_id}! "
-                            f"${commission.cycle_usage_after} >= ${cap_amount}"
-                        )
-                        # Note: Service suspension will be handled by the billing service
-                        # when it processes the commission with CAPPED status
+            if interaction_count > 0:
+                logger.info(
+                    f"✅ Found {interaction_count} post-purchase Apollo interactions "
+                    f"between {order_created_at} and {order_updated_at}"
+                )
+                return True
+            return False
 
         except Exception as e:
-            logger.error(f"❌ Error in post-commission checks: {e}")
+            logger.error(f"❌ Error checking for post-purchase interactions: {e}")
+            # Default to False (use created_at) if check fails
+            return False
 
     async def _get_relevant_interactions(
         self, context: AttributionContext, attribution_window: timedelta = None

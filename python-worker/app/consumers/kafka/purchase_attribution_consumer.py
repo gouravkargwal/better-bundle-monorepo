@@ -18,7 +18,7 @@ from app.core.database.models import (
     UserSession,
     UserInteraction,
 )
-from app.domains.billing.services.billing_service_v2 import BillingServiceV2
+from app.domains.billing.services.attribution_engine import AttributionEngine
 from app.domains.billing.models import PurchaseEvent
 from app.core.logging import get_logger
 from app.repository.ShopRepository import ShopRepository
@@ -288,8 +288,10 @@ class PurchaseAttributionKafkaConsumer:
                 )
 
                 # Process attribution
-                billing = BillingServiceV2(session)
-                await billing.process_purchase_attribution(purchase_event)
+                attribution_engine = AttributionEngine(session)
+                await attribution_engine.calculate_attribution_from_purchase_event(
+                    purchase_event
+                )
 
                 # ✅ Link attribution back to UserInteraction records for analytics
                 # This lets us track which recommendations actually drove revenue

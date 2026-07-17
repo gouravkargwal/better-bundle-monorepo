@@ -17,8 +17,6 @@ from app.consumers.kafka.purchase_attribution_consumer import (
     PurchaseAttributionKafkaConsumer,
 )
 from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
-from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
-from app.consumers.kafka.shopify_usage_consumer import ShopifyUsageKafkaConsumer
 
 logger = get_logger(__name__)
 
@@ -52,8 +50,6 @@ class KafkaConsumerManager:
                 "feature_computation": FeatureComputationKafkaConsumer(),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
                 "customer_linking": CustomerLinkingKafkaConsumer(),
-                "billing": BillingKafkaConsumer(),
-                "shopify_usage": ShopifyUsageKafkaConsumer(),
             }
 
             # Initialize each consumer in parallel to reduce overall startup time
@@ -95,20 +91,6 @@ class KafkaConsumerManager:
                     asyncio.create_task(self._run_consumer(name, consumer))
                 except Exception as e:
                     logger.error(f"❌ Failed to start {name} consumer: {e}")
-
-            # Start the stuck-RECORDING commission reconciler as a background loop
-            shopify_usage_consumer = self.consumers.get("shopify_usage")
-            if shopify_usage_consumer and hasattr(
-                shopify_usage_consumer, "start_reconciler"
-            ):
-                asyncio.create_task(
-                    shopify_usage_consumer.start_reconciler(interval_seconds=300)
-                )
-                logger.info("✅ Started RECORDING commission reconciler (5-min interval)")
-            else:
-                logger.warning(
-                    "⚠️ shopify_usage consumer does not have start_reconciler — reconciler not started"
-                )
 
             self._running = True
 

@@ -7,16 +7,17 @@ import { Form } from "@remix-run/react";
 interface OnboardingHeroProps {
   isLoading: boolean;
   error?: OnboardingError;
-  pricingTier?: {
+  planInfo?: {
     symbol: string;
-    threshold_amount: number;
+    monthlyPrice: number;
+    trialDays: number;
   } | null;
 }
 
 export function OnboardingHero({
   isLoading,
   error,
-  pricingTier,
+  planInfo,
 }: OnboardingHeroProps) {
   return (
     <div
@@ -114,9 +115,9 @@ export function OnboardingHero({
               variant="bodyLg"
               style={{ color: "rgba(255,255,255,0.9)" }}
             >
-              {pricingTier && pricingTier.symbol
-                ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()} Free Credits`
-                : "$200 Free Credits"}
+              {planInfo && planInfo.symbol
+                ? `${planInfo.trialDays}-Day Free Trial`
+                : "14-Day Free Trial"}
             </Text>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -155,7 +156,7 @@ export function OnboardingHero({
           </div>
         </div>
 
-        {/* Pay-As-Performance Highlight */}
+        {/* Flat Subscription Pricing Highlight */}
         <div
           style={{
             marginBottom: "24px",
@@ -193,7 +194,7 @@ export function OnboardingHero({
               </Text>
             </div>
             <Text as="h3" variant="headingLg" fontWeight="bold">
-              Pay-As-Performance Model
+              Simple Flat Pricing
             </Text>
           </div>
 
@@ -206,7 +207,11 @@ export function OnboardingHero({
               marginBottom: "20px",
             }}
           >
-            Only pay when you see results • No upfront costs • Risk-free trial
+            {planInfo && planInfo.symbol
+              ? `One flat fee of ${planInfo.symbol}${Math.round(
+                  planInfo.monthlyPrice,
+                ).toLocaleString()}/mo after your ${planInfo.trialDays}-day free trial • No hidden costs`
+              : "One flat monthly fee after your free trial • No hidden costs"}
           </Text>
 
           <Badge
@@ -219,7 +224,7 @@ export function OnboardingHero({
               fontWeight: "600",
             }}
           >
-            🎯 Guaranteed Results
+            🔒 Predictable Pricing
           </Badge>
         </div>
 

@@ -5,34 +5,12 @@ import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 import logger from "app/utils/logger";
 
 export async function action({ request }: ActionFunctionArgs) {
-  const { shop, payload, admin } = await authenticate.webhook(request);
+  const { shop, payload } = await authenticate.webhook(request);
 
   try {
     const appSub = payload.app_subscription;
     const subscriptionId = appSub?.admin_graphql_api_id || appSub?.id;
     const status = appSub?.status;
-    const lineItems = appSub?.line_items || [];
-
-    // Try multiple paths to extract capped amount from webhook payload
-    let currentCappedAmount =
-      lineItems[0]?.plan?.pricing_details?.capped_amount?.amount ||
-      lineItems[0]?.plan?.pricing_details?.capped_amount ||
-      lineItems[0]?.capped_amount?.amount ||
-      lineItems[0]?.capped_amount;
-
-    // Log webhook payload structure for debugging
-    if (!currentCappedAmount && lineItems.length > 0) {
-      logger.info(
-        {
-          shop,
-          subscriptionId,
-          status,
-          lineItemsStructure: JSON.stringify(lineItems[0], null, 2),
-          fullPayload: JSON.stringify(payload, null, 2),
-        },
-        "Webhook received but capped amount not found in expected location",
-      );
-    }
 
     if (!subscriptionId || !status) {
       logger.error({ payload }, "No subscription data in update webhook");
@@ -53,24 +31,15 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: true });
     }
 
-    // ✅ Handle business logic only - No status syncing
     switch (status) {
       case "ACTIVE":
-        await handleActiveSubscription(
-          shopRecord,
-          subscriptionId,
-          currentCappedAmount,
-          admin,
-        );
+        await handleActiveSubscription(shopRecord, subscriptionId);
         break;
       case "DECLINED":
         await handleDeclinedSubscription(shopRecord, subscriptionId);
         break;
       case "CANCELLED":
         await handleCancelledSubscription(shopRecord, subscriptionId);
-        break;
-      case "APPROACHING_CAPPED_AMOUNT":
-        await handleCapApproach(shopRecord, subscriptionId);
         break;
       default:
         logger.info({ status }, "Subscription status change logged");
@@ -92,79 +61,13 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-// ✅ Business logic handlers - Handle subscription activation
 async function handleActiveSubscription(
   shopRecord: any,
   subscriptionId: string,
-  currentCappedAmount?: number,
-  admin?: any,
 ) {
   try {
-    // If capped amount not in webhook, fetch from Shopify GraphQL API
-    if (!currentCappedAmount && admin) {
-      try {
-        // Use GraphQL to fetch current subscription details
-        const query = `
-          query($id: ID!) {
-            node(id: $id) {
-              ... on AppSubscription {
-                lineItems {
-                  plan {
-                    pricingDetails {
-                      ... on AppUsagePricing {
-                        cappedAmount {
-                          amount
-                          currencyCode
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
-
-        const response = await admin.graphql(query, {
-          variables: { id: subscriptionId },
-        });
-        const data = await response.json();
-
-        if (
-          data.data?.node?.lineItems?.[0]?.plan?.pricingDetails?.cappedAmount
-            ?.amount
-        ) {
-          currentCappedAmount = Number(
-            data.data.node.lineItems[0].plan.pricingDetails.cappedAmount.amount,
-          );
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              subscriptionId,
-              fetchedCapAmount: currentCappedAmount,
-            },
-            "Fetched capped amount from Shopify GraphQL API",
-          );
-        }
-      } catch (fetchError) {
-        logger.warn(
-          {
-            error: fetchError,
-            shop: shopRecord.shop_domain,
-            subscriptionId,
-          },
-          "Failed to fetch capped amount from GraphQL, will use existing database value",
-        );
-      }
-    }
-
-    // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id, is_active: true },
-      include: {
-        pricing_tiers: true,
-        billing_cycles: true,
-      },
     });
 
     if (!shopSubscription) {
@@ -175,8 +78,7 @@ async function handleActiveSubscription(
       return;
     }
 
-    // Update shop_subscriptions table with Shopify subscription info
-    // ✅ When Shopify subscription becomes ACTIVE, convert from TRIAL to PAID
+    // When Shopify subscription becomes ACTIVE, convert from TRIAL to ACTIVE
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
@@ -187,116 +89,6 @@ async function handleActiveSubscription(
         updated_at: new Date(),
       },
     });
-
-    // ✅ CREATE BILLING CYCLE if it doesn't exist
-    // Check if there's already an active billing cycle
-    const activeCycle = shopSubscription.billing_cycles?.find(
-      (cycle: any) => cycle.status === "ACTIVE",
-    );
-
-    if (!activeCycle) {
-      // Determine cap amount: use current capped amount from Shopify, or user_chosen_cap_amount, or default
-      const capAmount =
-        currentCappedAmount || shopSubscription.user_chosen_cap_amount || 1000;
-
-      logger.info(
-        {
-          shop: shopRecord.shop_domain,
-          capAmount,
-          source: currentCappedAmount
-            ? "shopify"
-            : shopSubscription.user_chosen_cap_amount
-              ? "user_chosen"
-              : "default",
-        },
-        "Creating billing cycle for activated subscription",
-      );
-
-      // Create first billing cycle
-      await prisma.billing_cycles.create({
-        data: {
-          shop_subscription_id: shopSubscription.id,
-          cycle_number: 1,
-          start_date: new Date(),
-          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          initial_cap_amount: capAmount,
-          current_cap_amount: capAmount,
-          usage_amount: 0,
-          commission_count: 0,
-          status: "ACTIVE",
-          activated_at: new Date(),
-        },
-      });
-
-      logger.info(
-        {
-          shop: shopRecord.shop_domain,
-          capAmount,
-        },
-        "Billing cycle created successfully",
-      );
-    } else {
-      // ✅ Update billing cycle cap if it changed in Shopify (e.g., after merchant approval)
-      if (currentCappedAmount) {
-        // Convert to numbers for proper comparison (Prisma Decimal vs Shopify number)
-        const newCapAmount = Number(currentCappedAmount);
-        const currentCapAmount = Number(activeCycle.current_cap_amount);
-
-        if (
-          !isNaN(newCapAmount) &&
-          !isNaN(currentCapAmount) &&
-          newCapAmount !== currentCapAmount
-        ) {
-          const oldCapAmount = activeCycle.current_cap_amount;
-
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              oldCapAmount,
-              newCapAmount,
-            },
-            "Updating billing cycle cap amount from Shopify webhook",
-          );
-
-          await prisma.billing_cycles.update({
-            where: { id: activeCycle.id },
-            data: {
-              current_cap_amount: newCapAmount,
-              updated_at: new Date(),
-            },
-          });
-
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              oldCapAmount,
-              newCapAmount,
-            },
-            "Billing cycle cap updated successfully",
-          );
-        } else {
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              currentCap: activeCycle.current_cap_amount,
-              shopifyCap: currentCappedAmount,
-            },
-            "Active billing cycle already exists, cap amount unchanged",
-          );
-        }
-      } else {
-        logger.info(
-          {
-            shop: shopRecord.shop_domain,
-            cycleId: activeCycle.id,
-          },
-          "Active billing cycle already exists, no cap amount in webhook",
-        );
-      }
-    }
 
     // Reactivate shop if suspended
     await prisma.shops.update({
@@ -310,14 +102,12 @@ async function handleActiveSubscription(
       },
     });
 
-    // Invalidate suspension cache
     await invalidateSuspensionCache(shopRecord.id);
 
     logger.info(
       {
         shop: shopRecord.shop_domain,
         subscriptionId,
-        currentCappedAmount,
         shopSubscriptionId: shopSubscription.id,
       },
       "Subscription activated and shop reactivated",
@@ -333,7 +123,6 @@ async function handleDeclinedSubscription(
   subscriptionId: string,
 ) {
   try {
-    // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id, is_active: true },
     });
@@ -348,14 +137,13 @@ async function handleDeclinedSubscription(
 
     // DECLINED means the merchant rejected the approval in Shopify.
     // Reset to TRIAL status so they can set up billing again.
-    // Keep is_active=true so the app works while they retry.
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         shopify_subscription_id: null,
         shopify_line_item_id: null,
         shopify_status: "DECLINED",
-        status: "TRIAL",  // Reset to trial so they can set up billing again
+        status: "TRIAL",
         confirmation_url: null,
         cancelled_at: null,
         updated_at: new Date(),
@@ -381,7 +169,6 @@ async function handleCancelledSubscription(
   subscriptionId: string,
 ) {
   try {
-    // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id, is_active: true },
     });
@@ -394,7 +181,6 @@ async function handleCancelledSubscription(
       return;
     }
 
-    // Update shop_subscriptions table
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
@@ -429,21 +215,6 @@ async function handleCancelledSubscription(
     );
   } catch (error) {
     logger.error({ error }, "Error handling cancelled subscription");
-    throw error;
-  }
-}
-
-async function handleCapApproach(shopRecord: any, subscriptionId: string) {
-  try {
-    // Handle cap approach - could send notifications, etc.
-    logger.info(
-      { shop: shopRecord.shop_domain, subscriptionId },
-      "Subscription approaching capped amount",
-    );
-
-    // TODO: Add cap approach logic (notifications, warnings, etc.)
-  } catch (error) {
-    logger.error({ error }, "Error handling cap approach");
     throw error;
   }
 }

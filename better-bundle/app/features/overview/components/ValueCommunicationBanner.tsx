@@ -7,8 +7,7 @@ interface ValueCommunicationBannerProps {
   subscriptionStatus: string;
   totalRevenueGenerated: number;
   currency: string;
-  commissionRate: number;
-  commissionCharged?: number; // Actual commission charged (PAID phase only)
+  monthlyPrice: number;
   isTrialPhase?: boolean;
 }
 
@@ -16,16 +15,10 @@ export function ValueCommunicationBanner({
   subscriptionStatus,
   totalRevenueGenerated,
   currency,
-  commissionRate,
-  commissionCharged,
+  monthlyPrice,
   isTrialPhase = false,
 }: ValueCommunicationBannerProps) {
-  // ✅ FIX: Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
-  const commissionPaid = isTrialPhase
-    ? totalRevenueGenerated * commissionRate // Trial: calculate expected commission
-    : (commissionCharged ?? totalRevenueGenerated * commissionRate); // Paid: use actual charged amount
-
-  const netProfit = totalRevenueGenerated - commissionPaid;
+  const netProfit = totalRevenueGenerated - (isTrialPhase ? 0 : monthlyPrice);
   const navigation = useNavigate();
   const getBannerContent = () => {
     switch (subscriptionStatus) {
@@ -35,7 +28,7 @@ export function ValueCommunicationBanner({
           subtitle: `You've generated ${formatCurrency(totalRevenueGenerated, currency)} during your trial`,
           ctaText: "View Dashboard",
           ctaAction: () => navigation("/app/dashboard"),
-          description: "Commission tracked but not charged yet",
+          description: "Free during your trial — no charges yet",
           bgColor: "#FEF3C7",
           borderColor: "#F59E0B",
           textColor: "#92400E",
@@ -45,7 +38,7 @@ export function ValueCommunicationBanner({
           return {
             title: "💰 ROI Success",
             subtitle: `Net profit: ${formatCurrency(netProfit, currency)} from ${formatCurrency(totalRevenueGenerated, currency)} generated`,
-            description: `You paid only ${formatCurrency(commissionPaid, currency)} (${(commissionRate * 100).toFixed(1)}% commission) for ${formatCurrency(totalRevenueGenerated, currency)} in revenue`,
+            description: `You paid a flat ${formatCurrency(monthlyPrice, currency)}/mo for ${formatCurrency(totalRevenueGenerated, currency)} in revenue`,
             ctaText: "View Dashboard",
             ctaAction: () => navigation("/app/dashboard"),
             bgColor: "#D1FAE5",

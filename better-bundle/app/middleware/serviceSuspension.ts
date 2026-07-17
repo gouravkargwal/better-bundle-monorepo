@@ -87,13 +87,6 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
               shop_id: shopId,
               is_active: true,
             },
-            include: {
-              billing_cycles: {
-                where: { status: "ACTIVE" },
-                orderBy: { cycle_number: "desc" },
-                take: 1,
-              },
-            },
           }),
         ]);
 
@@ -117,7 +110,6 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
             reason: reason,
             requiresBillingSetup:
               reason === "trial_completed_subscription_required",
-            requiresCapIncrease: reason === "monthly_cap_reached",
             trialCompleted: shopSubscription.status !== "TRIAL",
             subscriptionActive: false,
             subscriptionPending: !!shopSubscription.confirmation_url,

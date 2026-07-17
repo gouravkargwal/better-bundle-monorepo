@@ -1,7 +1,7 @@
 services:
   # ==================== DATABASE ====================
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:pg17
     container_name: betterbundle-postgres-dev
     env_file:
       - .env.dev
@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres-config/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
     restart: unless-stopped
     logging:
       driver: json-file
@@ -118,6 +119,7 @@ services:
     volumes:
       - ./python-worker:/app
       - /app/__pycache__
+      - tfrs_models:/models
     depends_on:
       postgres:
         condition: service_healthy
@@ -243,6 +245,38 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+
+  # ==================== TFRS INFERENCE SERVICE ====================
+  tfrs-serving:
+    build:
+      context: ./tfrs-serving
+      dockerfile: Dockerfile
+    container_name: betterbundle-tfrs-serving-dev
+    ports:
+      - "5001:5000"
+    volumes:
+      - tfrs_models:/models
+      - ./tfrs-serving/service.py:/app/service.py
+      - ./tfrs-serving/startup.py:/app/startup.py
+    environment:
+      - PORT=5000
+      - MODEL_BASE_PATH=/models
+      - OCI_BUCKET=betterbundle-tfrs-models
+      - OCI_USE_INSTANCE_PRINCIPAL=true
+      - BENTOML_RELOAD=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-X", "POST", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=bentoml,env=dev"
 
 volumes:
   postgres_data:

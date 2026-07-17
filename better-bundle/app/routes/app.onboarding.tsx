@@ -71,11 +71,11 @@ export default function OnboardingRoute() {
   const loaderData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
-  // Handle loader error shape — when loader returns { error }, data won't have pricingTier
+  // Handle loader error shape — when loader returns { error }, data won't have planInfo
   const hasLoaderError = "error" in loaderData;
   const data = hasLoaderError
-    ? { pricingTier: null }
-    : (loaderData as { pricingTier: any });
+    ? { planInfo: null }
+    : (loaderData as { planInfo: any });
   const error = actionData ?? (hasLoaderError ? loaderData : undefined);
 
   return <OnboardingPage data={data} error={error} />;

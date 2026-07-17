@@ -10,21 +10,28 @@ import {
 } from "@shopify/polaris-icons";
 
 interface FeatureCardProps {
-  pricingTier?: {
+  planInfo?: {
     symbol: string;
-    threshold_amount: number;
+    monthlyPrice: number;
+    trialDays: number;
   } | null;
 }
 
-const FeatureCard = ({ pricingTier }: FeatureCardProps) => {
+const FeatureCard = ({ planInfo }: FeatureCardProps) => {
+  const trialDays = planInfo?.trialDays ?? 14;
+  const monthlyPriceDisplay =
+    planInfo && planInfo.symbol
+      ? `${planInfo.symbol}${Math.round(planInfo.monthlyPrice).toLocaleString()}/mo`
+      : "$99/mo";
+
   const features = [
     {
       icon: CreditCardIcon,
-      title: "Pay-As-Performance",
-      description: `Only pay when you see results! Start with ${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits, then pay only for actual revenue generated`,
+      title: "Simple, Flat Pricing",
+      description: `Try it free for ${trialDays} days, then just ${monthlyPriceDisplay} — no commission, no surprises`,
       color: "#F59E0B",
       badge: "Risk-free trial",
-      stats: `${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits included`,
+      stats: `${trialDays}-day free trial included`,
       highlight: "No upfront costs",
       gradient: "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
     },

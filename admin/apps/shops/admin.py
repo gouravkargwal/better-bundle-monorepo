@@ -574,7 +574,7 @@ class ShopAdmin(admin.ModelAdmin):
         """Gather all data about a shop into a single dict."""
         # Subscription
         subscription = ShopSubscription.objects.filter(shop=shop).select_related(
-            "pricing_tier", "subscription_plan"
+            "subscription_plan"
         ).first()
 
         # Billing cycles
@@ -637,10 +637,9 @@ class ShopAdmin(admin.ModelAdmin):
         if active_cycle:
             remaining_cap = float(active_cycle.current_cap_amount or 0) - float(active_cycle.usage_amount or 0)
 
-        commission_rate_display = None
-        if subscription and subscription.pricing_tier:
-            rate = float(subscription.pricing_tier.commission_rate or 0)
-            commission_rate_display = f"{rate * 100:.1f}%"
+        monthly_price_display = None
+        if subscription and subscription.subscription_plan:
+            monthly_price_display = f"${float(subscription.subscription_plan.monthly_price or 0):.2f}/mo"
 
         return {
             "subscription": subscription,
@@ -656,7 +655,7 @@ class ShopAdmin(admin.ModelAdmin):
             "attribution_count": attribution_count,
             "attribution_pct": attribution_pct,
             "remaining_cap": remaining_cap,
-            "commission_rate_display": commission_rate_display,
+            "monthly_price_display": monthly_price_display,
         }
 
 

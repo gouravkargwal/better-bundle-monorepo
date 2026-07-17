@@ -55,27 +55,11 @@ class ShopSubscription(BaseModel, ShopMixin):
         nullable=False,
         index=True,
     )
-    pricing_tier_id = Column(
-        String(255),
-        ForeignKey("pricing_tiers.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
 
     # ===== TRIAL FIELDS =====
-    trial_threshold_override = Column(Numeric(10, 2), nullable=True)
     trial_duration_days = Column(Integer, nullable=True)
-    # Running total of attributed revenue during trial (updated atomically).
-    # Single source of truth — avoids re-summing commission_records every check.
-    trial_revenue = Column(
-        Numeric(10, 2),
-        nullable=False,
-        default=Decimal("0.00"),
-        comment="Accumulated attributed revenue during trial phase",
-    )
 
     # ===== PAID SUBSCRIPTION FIELDS =====
-    user_chosen_cap_amount = Column(Numeric(10, 2), nullable=True)
     auto_renew = Column(Boolean, default=True, nullable=False)
 
     # ===== SHOPIFY INTEGRATION =====
@@ -99,8 +83,6 @@ class ShopSubscription(BaseModel, ShopMixin):
     subscription_plan = relationship(
         "SubscriptionPlan", back_populates="shop_subscriptions"
     )
-    pricing_tier = relationship("PricingTier", back_populates="shop_subscriptions")
-    billing_cycles = relationship("BillingCycle", back_populates="shop_subscription")
 
     # ===== TABLE ARGS =====
     # Partial unique enforced at DB level (must be created via raw SQL / alembic):
@@ -121,40 +103,3 @@ class ShopSubscription(BaseModel, ShopMixin):
     @property
     def is_paid(self) -> bool:
         return self.status == SubscriptionStatus.ACTIVE
-
-    @property
-    def effective_trial_threshold(self) -> Decimal:
-        if self.trial_threshold_override:
-            return self.trial_threshold_override
-        return (
-            self.pricing_tier.trial_threshold_amount
-            if self.pricing_tier
-            else Decimal("75.00")
-        )
-
-    @property
-    def trial_threshold_reached(self) -> bool:
-        return self.trial_revenue >= self.effective_trial_threshold
-
-    @property
-    def trial_progress_percentage(self) -> float:
-        threshold = self.effective_trial_threshold
-        if not threshold or threshold == 0:
-            return 0.0
-        return min(100.0, float((self.trial_revenue / threshold) * 100))
-
-    @property
-    def effective_commission_rate(self) -> Decimal:
-        return (
-            self.pricing_tier.commission_rate if self.pricing_tier else Decimal("0.03")
-        )
-
-    @property
-    def currency(self) -> str:
-        return self.pricing_tier.currency if self.pricing_tier else "USD"
-
-    @property
-    def effective_cap_amount(self) -> Decimal:
-        if self.status == SubscriptionStatus.ACTIVE and self.user_chosen_cap_amount:
-            return self.user_chosen_cap_amount
-        return self.effective_trial_threshold

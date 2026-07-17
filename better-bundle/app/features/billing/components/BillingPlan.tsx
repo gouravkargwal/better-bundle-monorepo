@@ -1,7 +1,6 @@
 import { Card, Text } from "@shopify/polaris";
-import type { BillingState, BillingSetupData } from "../types/billing.types";
+import type { BillingState } from "../types/billing.types";
 import { TrialActive } from "./TrialActive";
-import { TrialCompleted } from "./TrialCompleted";
 import { SubscriptionPending } from "./SubscriptionPending";
 import { SubscriptionActive } from "./SubscriptionActive";
 import { SubscriptionSuspended } from "./SubscriptionSuspended";
@@ -10,6 +9,22 @@ interface BillingPlanProps {
   shopId: string;
   shopCurrency: string;
   billingState: BillingState;
+}
+
+async function setupBilling() {
+  const response = await fetch("/api/billing/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  const result = await response.json();
+  if (result.success && result.confirmationUrl) {
+    window.top!.location.href = result.confirmationUrl;
+  } else {
+    console.error("No confirmation URL in response:", result);
+  }
+  return result;
 }
 
 export function BillingPlan({
@@ -35,32 +50,7 @@ export function BillingPlan({
           <TrialActive
             trialData={billingState.trialData}
             shopCurrency={shopCurrency}
-          />
-        );
-
-      case "trial_completed":
-        return (
-          <TrialCompleted
-            trialData={billingState.trialData!}
-            shopCurrency={shopCurrency}
-            onSetupBilling={async (setupData: BillingSetupData) => {
-              const response = await fetch("/api/billing/setup", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  monthlyCap: setupData.spendingLimit,
-                  currency: setupData.currency,
-                }),
-              });
-
-              const result = await response.json();
-              if (result.success && result.confirmationUrl) {
-                window.top!.location.href = result.confirmationUrl;
-              } else {
-                console.error("No confirmation URL in response:", result);
-              }
-              return result;
-            }}
+            onSetupBilling={setupBilling}
           />
         );
 
@@ -77,19 +67,6 @@ export function BillingPlan({
           <SubscriptionActive
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
-            onIncreaseCap={async (newLimit: number) => {
-              const response = await fetch("/api/billing/increase-cap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ spendingLimit: newLimit }),
-              });
-
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              }
-              return result;
-            }}
           />
         );
 

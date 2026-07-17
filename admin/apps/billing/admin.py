@@ -16,7 +16,6 @@ from datetime import timedelta
 from decimal import Decimal
 from .models import (
     SubscriptionPlan,
-    PricingTier,
     ShopSubscription,
     BillingCycle,
     BillingInvoice,
@@ -38,26 +37,6 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     search_fields = ["name", "description"]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["name"]
-
-
-@admin.register(PricingTier)
-class PricingTierAdmin(admin.ModelAdmin):
-    list_display = [
-        "subscription_plan",
-        "currency",
-        "commission_rate",
-        "trial_threshold_amount",
-        "is_active",
-        "is_default",
-        "effective_from",
-    ]
-    list_filter = ["currency", "is_active", "is_default", "subscription_plan"]
-    search_fields = ["subscription_plan__name", "currency"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    ordering = ["subscription_plan", "currency"]
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("subscription_plan")
 
 
 @admin.register(ShopSubscription)
@@ -89,7 +68,7 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
         qs = (
             super()
             .get_queryset(request)
-            .select_related("shop", "subscription_plan", "pricing_tier")
+            .select_related("shop", "subscription_plan")
         )
         # Show all subscriptions - admin can filter by status if needed
         return qs

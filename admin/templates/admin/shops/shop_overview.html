@@ -140,9 +140,7 @@
             </td>
           </tr>
           <tr><td class="label">Plan</td><td class="value">{{ o.subscription.subscription_plan.name }}</td></tr>
-          <tr><td class="label">Commission Rate</td><td class="value">{{ o.commission_rate_display|default:"—" }}</td></tr>
-          <tr><td class="label">Cap Amount</td><td class="value">${{ o.subscription.user_chosen_cap_amount|floatformat:2|default:"—" }}</td></tr>
-          <tr><td class="label">Trial Threshold</td><td class="value">${{ o.subscription.pricing_tier.trial_threshold_amount|floatformat:2 }}</td></tr>
+          <tr><td class="label">Monthly Price</td><td class="value">{{ o.monthly_price_display|default:"—" }}</td></tr>
           <tr><td class="label">Started</td><td class="value">{{ o.subscription.start_date|date:"M d, Y" }}</td></tr>
           {% if o.subscription.activated_at %}
           <tr><td class="label">Activated</td><td class="value">{{ o.subscription.activated_at|date:"M d, Y" }}</td></tr>

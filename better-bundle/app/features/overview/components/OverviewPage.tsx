@@ -16,6 +16,9 @@ interface OverviewPageProps {
 }
 
 export function OverviewPage({ data, error }: OverviewPageProps) {
+  const isTrialPhase = data?.overviewData?.activePlan?.status === "TRIAL";
+  const monthlyPrice = data?.overviewData?.activePlan?.monthlyPrice ?? 99;
+
   if (error) {
     return (
       <Page>
@@ -58,25 +61,22 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                 }
                 totalRevenueGenerated={data.overviewData.totalRevenue}
                 currency={data.overviewData.currency}
-                commissionRate={
-                  data.overviewData.activePlan?.commissionRate || 0.03
-                }
-                commissionCharged={data.overviewData.commissionCharged}
-                isTrialPhase={data.overviewData.isTrialPhase}
+                monthlyPrice={monthlyPrice}
+                isTrialPhase={isTrialPhase}
               />
 
               {/* Key Performance Metrics */}
-              <OverviewMetrics overviewData={data.overviewData} />
+              <OverviewMetrics
+                overviewData={data.overviewData}
+                isTrialPhase={isTrialPhase}
+              />
 
               {/* ROI & Value Proof Section */}
               <ROIValueProofSection
                 totalRevenueGenerated={data.overviewData.totalRevenue}
                 currency={data.overviewData.currency}
-                commissionRate={
-                  data.overviewData.activePlan?.commissionRate || 0.03
-                }
-                isTrialPhase={data.overviewData.isTrialPhase}
-                commissionCharged={data.overviewData.commissionCharged}
+                monthlyPrice={monthlyPrice}
+                isTrialPhase={isTrialPhase}
               />
 
               {/* Billing Status and Help Section */}
@@ -89,10 +89,8 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
               >
                 <BillingStatus
                   subscriptionStatus={data.overviewData.activePlan?.status}
-                  commissionRate={
-                    data.overviewData.activePlan?.commissionRate || 0.03
-                  }
-                  isTrialPhase={data.overviewData.isTrialPhase}
+                  monthlyPrice={monthlyPrice}
+                  isTrialPhase={isTrialPhase}
                   totalRevenueGenerated={data.overviewData.totalRevenue}
                   currency={data.overviewData.currency}
                 />

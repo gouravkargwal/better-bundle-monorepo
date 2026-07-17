@@ -3,7 +3,7 @@ import { Card, Text, BlockStack, Badge, InlineStack } from "@shopify/polaris";
 
 interface BillingStatusProps {
   subscriptionStatus?: string;
-  commissionRate?: number;
+  monthlyPrice?: number;
   isTrialPhase?: boolean;
   totalRevenueGenerated?: number;
   currency?: string;
@@ -11,7 +11,7 @@ interface BillingStatusProps {
 
 export function BillingStatus({
   subscriptionStatus = "ACTIVE",
-  commissionRate = 0.03,
+  monthlyPrice = 99,
   isTrialPhase = false,
   totalRevenueGenerated = 0,
   currency = "USD",
@@ -145,14 +145,14 @@ export function BillingStatus({
                   <Text as="p" variant="bodySm" tone="subdued">
                     {isTrialPhase
                       ? "Testing AI recommendations at no cost"
-                      : "Commission-based pricing model"}
+                      : "Flat monthly subscription"}
                   </Text>
                 </div>
                 {getStatusBadge(subscriptionStatus, isTrialPhase)}
               </InlineStack>
             </div>
 
-            {/* Commission Model Transparency */}
+            {/* Plan Transparency */}
             <div
               style={{
                 marginTop: "12px",
@@ -167,12 +167,12 @@ export function BillingStatus({
                 fontWeight="medium"
                 style={{ marginBottom: "8px" }}
               >
-                💰 Commission Model
+                💰 Plan
               </Text>
               <Text as="p" variant="bodySm" tone="subdued">
                 {isTrialPhase
-                  ? `No charges during trial • ${(commissionRate * 100).toFixed(1)}% commission after trial`
-                  : `${(commissionRate * 100).toFixed(1)}% commission on attributed revenue`}
+                  ? `Free trial • ${formatCurrencyValue(monthlyPrice, currency)}/mo after trial`
+                  : `${formatCurrencyValue(monthlyPrice, currency)}/mo`}
               </Text>
               {totalRevenueGenerated > 0 && (
                 <Text
@@ -181,7 +181,7 @@ export function BillingStatus({
                   tone="subdued"
                   style={{ marginTop: "4px" }}
                 >
-                  Total generated:{" "}
+                  Revenue influenced:{" "}
                   {formatCurrencyValue(totalRevenueGenerated, currency)}
                 </Text>
               )}

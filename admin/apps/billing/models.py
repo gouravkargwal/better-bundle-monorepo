@@ -43,38 +43,6 @@ class SubscriptionPlan(BaseModel):
         return self.name
 
 
-class PricingTier(BaseModel):
-    """
-    Pricing tier model
-    Matches python-worker/app/core/database/models/pricing_tier.py
-    """
-
-    subscription_plan = models.ForeignKey(
-        SubscriptionPlan, on_delete=models.CASCADE, related_name="pricing_tiers"
-    )
-    currency = models.CharField(max_length=3)
-    trial_threshold_amount = models.DecimalField(max_digits=10, decimal_places=2)
-    commission_rate = models.DecimalField(max_digits=5, decimal_places=4)
-    is_active = models.BooleanField(default=True)
-    is_default = models.BooleanField(default=False)
-    minimum_charge = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True
-    )
-    proration_enabled = models.BooleanField(default=False)
-    tier_metadata = models.TextField(null=True, blank=True)
-    effective_from = models.DateTimeField()
-    effective_to = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        db_table = "pricing_tiers"
-        ordering = ["subscription_plan", "currency"]
-        verbose_name = "Pricing Tier"
-        verbose_name_plural = "Pricing Tiers"
-
-    def __str__(self):
-        return f"{self.subscription_plan.name} - {self.currency}"
-
-
 class ShopSubscription(BaseModel):
     """
     Shop subscription model
@@ -94,9 +62,6 @@ class ShopSubscription(BaseModel):
     )
     subscription_plan = models.ForeignKey(
         SubscriptionPlan, on_delete=models.CASCADE, related_name="shop_subscriptions"
-    )
-    pricing_tier = models.ForeignKey(
-        PricingTier, on_delete=models.CASCADE, related_name="shop_subscriptions"
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="TRIAL")
     start_date = models.DateTimeField()

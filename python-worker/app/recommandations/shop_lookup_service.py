@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 from app.core.database.session import get_transaction_context
 from app.core.database.models.shop import Shop
 from app.core.database.models.customer_data import CustomerData
+from app.core.database.models.product_data import ProductData
 
 logger = get_logger(__name__)
 
@@ -75,4 +76,29 @@ class ShopLookupService:
                 return shop
         except Exception as e:
             logger.error(f"❌ Error validating shop {shop_domain}: {e}")
+            return None
+
+    async def get_product_category(
+        self, product_id: str, shop_id: str
+    ) -> Optional[str]:
+        """
+        Get the product_type (category) for a product.
+
+        Used for auto-detecting category context when not provided in the request.
+        This is a best-effort lookup; returns None if the product doesn't exist.
+        """
+        try:
+            async with get_transaction_context() as session:
+                result = await session.execute(
+                    select(ProductData.product_type).where(
+                        ProductData.product_id == product_id,
+                        ProductData.shop_id == shop_id,
+                    )
+                )
+                row = result.one_or_none()
+                return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.warning(
+                f"Failed to get category for product {product_id} in shop {shop_id}: {e}"
+            )
             return None

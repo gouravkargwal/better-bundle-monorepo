@@ -163,13 +163,13 @@ async def fetch_recommendations_logic(
     if not shop:
         raise ShopNotFoundError(f"Shop {request.shop_domain} not found")
 
-    # 3. Auto-detect Category
+    # 3. Auto-detect Category (best-effort, non-critical)
     category = request.category
     if not category and request.product_ids:
         detected_categories = set()
         for pid in request.product_ids[:10]:
             try:
-                cat = await services.category.get_product_category(pid, shop.id)
+                cat = await services.shop_lookup.get_product_category(pid, shop.id)
                 if cat:
                     detected_categories.add(cat)
             except Exception as e:
@@ -290,64 +290,22 @@ async def fetch_recommendations_logic(
     result = None
 
     if result is None:
-        if request.context == "product_page":
-            result = (
-                await services.smart_selection.get_smart_product_page_recommendation(
-                    shop_id=shop.id,
-                    product_ids=request.product_ids,
-                    user_id=effective_user_id,
-                    limit=request.limit,
-                )
-            )
-        elif request.context == "homepage":
-            result = await services.smart_selection.get_smart_homepage_recommendation(
-                shop_id=shop.id, user_id=effective_user_id, limit=request.limit
-            )
-        elif request.context == "collection_page":
-            result = (
-                await services.smart_selection.get_smart_collection_page_recommendation(
-                    shop_id=shop.id,
-                    collection_id=request.collection_id,
-                    category=category,
-                    user_id=effective_user_id,
-                    limit=request.limit,
-                )
-            )
-        elif request.context == "cart":
-            result = await services.smart_selection.get_smart_cart_page_recommendation(
-                shop_id=shop.id,
-                cart_items=request.product_ids,
-                user_id=effective_user_id,
-                limit=request.limit,
-            )
-        elif request.context == "checkout_page":
-            # Mercury checkout — TFRS handles it via the standard fallback chain
-            logger.info(
-                f"🎯 Mercury: Checkout recommendations via TFRS fallback chain for shop {shop_domain}"
-            )
-            result = await services.executor.execute_fallback_chain(
-                context="checkout_page",
-                shop_id=shop.id,
-                product_ids=request.product_ids,
-                user_id=effective_user_id,
-                session_id=request.session_id,
-                category=category,
-                limit=request.limit,
-                metadata=request.metadata,
-                exclude_items=final_exclude_items,
-            )
-        else:  # Default fallback for other contexts
-            result = await services.executor.execute_fallback_chain(
-                context=request.context,
-                shop_id=shop.id,
-                product_ids=request.product_ids,
-                user_id=effective_user_id,
-                session_id=request.session_id,
-                category=category,
-                limit=request.limit,
-                metadata=request.metadata,
-                exclude_items=final_exclude_items,
-            )
+        # All contexts route through the TFRS fallback chain
+        # TFRS is the primary engine; 'popular' is the emergency airbag
+        logger.info(
+            f"🎯 Fetching recommendations via TFRS fallback chain for shop {shop_domain}"
+        )
+        result = await services.executor.execute_fallback_chain(
+            context=request.context,
+            shop_id=shop.id,
+            product_ids=request.product_ids,
+            user_id=effective_user_id,
+            session_id=request.session_id,
+            category=category,
+            limit=request.limit,
+            metadata=request.metadata,
+            exclude_items=final_exclude_items,
+        )
 
     if not result["success"] or not result["items"]:
         logger.warning(

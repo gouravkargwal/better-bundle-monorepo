@@ -111,6 +111,14 @@ class MLSettings(BaseSettings):
         default=360, env="TFRS_TRAINING_INTERVAL_MINUTES"
     )
 
+    # OCI Object Storage (for model registry)
+    OCI_BUCKET: str = Field(default="betterbundle-tfrs-models", env="OCI_BUCKET")
+    OCI_NAMESPACE: Optional[str] = Field(default=None, env="OCI_NAMESPACE")
+    OCI_USE_INSTANCE_PRINCIPAL: bool = Field(
+        default=True, env="OCI_USE_INSTANCE_PRINCIPAL"
+    )
+    OCI_CONFIG_FILE: Optional[str] = Field(default=None, env="OCI_CONFIG_FILE")
+
 
 class WorkerSettings(BaseSettings):
     """Worker configuration settings"""

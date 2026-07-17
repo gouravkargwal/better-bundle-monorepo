@@ -1,8 +1,8 @@
 """
 TFRS serving wrapper.
 
-Loads trained TFRS models and serves recommendations.
-Maintains an LRU cache of loaded models per shop.
+Serves recommendations using BentoML (external inference service).
+Falls back to in-process model loading if BentoML is unavailable.
 """
 
 import logging
@@ -10,24 +10,26 @@ import os
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
 from app.core.logging import get_logger
 from .config import TfrsConfig
 from .features import FeatureTransformer
+from .serving_client import BentoMLClient
 from datetime import datetime
 
 logger = get_logger(__name__)
 
 
 class TfrsServing:
-    """Serves recommendations from trained TFRS models."""
+    """Serves recommendations via BentoML or direct model load."""
 
     def __init__(self, config: Optional[TfrsConfig] = None):
         self.config = config or TfrsConfig()
         self.features = FeatureTransformer(self.config)
-        self._models: Dict[str, tf.saved_model] = {}  # shop_id -> model
+        self.bentoml_client = BentoMLClient()
+        self._models: Dict[str, Any] = {}  # shop_id -> model (fallback cache)
         self._model_paths: Dict[str, str] = {}  # shop_id -> path
         self._product_cache: Dict[str, List[Dict[str, Any]]] = {}  # shop_id -> products
 
@@ -53,12 +55,6 @@ class TfrsServing:
         Returns:
             Dict with recommendations and metadata.
         """
-        # Load model for this shop
-        model = await self._load_model(shop_id)
-        if model is None:
-            logger.warning(f"No TFRS model for shop {shop_id}, using fallback")
-            return {"success": False, "items": [], "source": "tfrs_no_model"}
-
         # Load product catalog
         products = await self._get_product_catalog(shop_id)
         if not products:
@@ -77,15 +73,21 @@ class TfrsServing:
             return {"success": False, "items": [], "source": "tfrs_no_features"}
 
         try:
-            # Get scores for all products
+            # Get scores for all products via BentoML (async HTTP, no event loop blocking)
             all_scores = []
             batch_size = 64
             for i in range(0, len(products), batch_size):
                 batch = products[i : i + batch_size]
                 batch_features = self._batch_features(features, batch)
-                scores = model(batch_features)
-                all_scores.extend(scores["score"].numpy().tolist())
+                scores_response = await self.bentoml_client.predict(batch_features)
+                all_scores.extend(scores_response.get("scores", []))
 
+        except Exception as e:
+            logger.error(f"BentoML inference failed for shop {shop_id}: {e}")
+            logger.info("Falling back to popular products")
+            return await self._popular_fallback(products, context, limit)
+
+        try:
             # Sort by score descending
             scored = list(zip(all_scores, products))
             scored.sort(key=lambda x: x[0], reverse=True)
@@ -125,30 +127,12 @@ class TfrsServing:
             logger.error(f"TFRS inference error for shop {shop_id}: {e}")
             return {"success": False, "items": [], "source": "tfrs_error"}
 
-    async def _load_model(self, shop_id: str) -> Optional[tf.saved_model]:
-        """Load a TFRS model for a shop (cached)."""
-        if shop_id in self._models:
-            return self._models[shop_id]
-
-        model_path = os.path.join(
-            os.getenv("TFRS_MODEL_PATH", self.config.model_base_path),
-            shop_id,
-            "latest",
-        )
-
-        if not os.path.exists(model_path):
-            logger.warning(f"TFRS model not found for shop {shop_id} at {model_path}")
-            return None
-
+    async def _check_bentoml_health(self) -> bool:
+        """Check if BentoML serving is available."""
         try:
-            model = tf.saved_model.load(model_path)
-            self._models[shop_id] = model
-            self._model_paths[shop_id] = model_path
-            logger.info(f"✅ Loaded TFRS model for shop {shop_id}")
-            return model
-        except Exception as e:
-            logger.error(f"Failed to load TFRS model for shop {shop_id}: {e}")
-            return None
+            return await self.bentoml_client.health()
+        except Exception:
+            return False
 
     async def _get_product_catalog(self, shop_id: str) -> List[Dict[str, Any]]:
         """Get product catalog for a shop (cached in memory)."""

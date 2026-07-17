@@ -12,31 +12,31 @@ import { getCurrencySymbol } from "../../../utils/currency";
 interface OverviewMetricsProps {
   overviewData: {
     totalRevenue: number;
-    commissionCharged?: number; // Actual commission charged (PAID phase only)
     currency: string;
     conversionRate: number;
     revenueChange: number | null;
     conversionRateChange: number | null;
-    isTrialPhase: boolean;
     phaseLabel: string;
-    phaseDescription: string;
     totalOrders: number;
     attributedOrders: number;
     activePlan: {
       name: string;
       type: string;
       description?: string;
-      commissionRate: number;
-      thresholdAmount: number;
+      monthlyPrice: number;
       currency: string;
       status: string;
       startDate: Date;
       isActive: boolean;
     } | null;
   };
+  isTrialPhase: boolean;
 }
 
-export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
+export function OverviewMetrics({
+  overviewData,
+  isTrialPhase,
+}: OverviewMetricsProps) {
   const formatCurrencyValue = (amount: number, currencyCode: string) => {
     const symbol = getCurrencySymbol(currencyCode);
     const numericAmount = Math.abs(amount);
@@ -53,29 +53,8 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
-  // ✅ FIX: Use actual commission charged, not calculated from revenue
-  // For PAID phase: commissionCharged is the actual amount charged to Shopify
-  // For TRIAL phase: calculate from revenue since commissions aren't charged yet
-  const isTrialPhase = overviewData.isTrialPhase;
-  const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
-
-  // Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
-  const commissionPaid = isTrialPhase
-    ? overviewData.totalRevenue * commissionRate // Trial: calculate expected commission
-    : (overviewData.commissionCharged ??
-      overviewData.totalRevenue * commissionRate); // Paid: use actual charged amount
-
-  const netProfit = overviewData.totalRevenue - commissionPaid;
-
-  // Calculate percentage kept (more intuitive than ROI)
-  const percentageKept =
-    overviewData.totalRevenue > 0
-      ? (netProfit / overviewData.totalRevenue) * 100
-      : 0;
-
-  // ROI calculation (used to show "Exceptional ROI" for very high values)
-  const roiPercentage =
-    commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
+  const monthlyPrice = overviewData.activePlan?.monthlyPrice ?? 99;
+  const amountPaid = isTrialPhase ? 0 : monthlyPrice;
 
   return (
     <div
@@ -134,11 +113,9 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     minWidth: "44px",
                     minHeight: "44px",
                     padding: "10px",
-                    backgroundColor: overviewData.isTrialPhase
-                      ? "#F59E0B15"
-                      : "#10B98115",
+                    backgroundColor: isTrialPhase ? "#F59E0B15" : "#10B98115",
                     borderRadius: "14px",
-                    border: `2px solid ${overviewData.isTrialPhase ? "#F59E0B30" : "#10B98130"}`,
+                    border: `2px solid ${isTrialPhase ? "#F59E0B30" : "#10B98130"}`,
                   }}
                 >
                   <Icon source={CashDollarIcon} tone="base" />
@@ -146,7 +123,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               </InlineStack>
               <div
                 style={{
-                  color: overviewData.isTrialPhase ? "#F59E0B" : "#10B981",
+                  color: isTrialPhase ? "#F59E0B" : "#10B981",
                 }}
               >
                 <Text as="p" variant="heading2xl" fontWeight="bold">
@@ -160,7 +137,9 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               </div>
               <Text as="p" variant="bodySm" tone="subdued">
                 {overviewData.totalRevenue > 0
-                  ? overviewData.phaseDescription
+                  ? isTrialPhase
+                    ? "Revenue tracked during your free trial"
+                    : "Revenue influenced by recommendations"
                   : "AI recommendations are active and tracking revenue"}
               </Text>
               {overviewData.revenueChange !== null && (
@@ -230,9 +209,10 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               </InlineStack>
               <div style={{ color: "#8B5CF6" }}>
                 <Text as="p" variant="heading2xl" fontWeight="bold">
-                  {overviewData.totalRevenue > 0
-                    ? `You keep ${percentageKept.toFixed(1)}%`
-                    : "Commission-Based"}
+                  {isTrialPhase
+                    ? "Free Trial"
+                    : formatCurrencyValue(monthlyPrice, overviewData.currency) +
+                      "/mo"}
                 </Text>
               </div>
               <Text as="p" variant="bodySm" tone="subdued">
@@ -243,21 +223,25 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                       overviewData.totalRevenue,
                       overviewData.currency,
                     )}
-                    , paid only{" "}
-                    {formatCurrencyValue(commissionPaid, overviewData.currency)}
-                    {roiPercentage > 1000 && <> • Exceptional ROI</>}
+                    {!isTrialPhase && (
+                      <>
+                        , paid a flat{" "}
+                        {formatCurrencyValue(
+                          amountPaid,
+                          overviewData.currency,
+                        )}
+                      </>
+                    )}
                   </>
                 ) : (
-                  "No charges until revenue is generated"
+                  "No charges during your free trial"
                 )}
               </Text>
-              {overviewData.totalRevenue > 0 && (
-                <div style={{ marginTop: "8px" }}>
-                  <Badge tone="success" size="small">
-                    {(commissionRate * 100).toFixed(1)}% commission rate
-                  </Badge>
-                </div>
-              )}
+              <div style={{ marginTop: "8px" }}>
+                <Badge tone="success" size="small">
+                  Flat monthly price
+                </Badge>
+              </div>
             </BlockStack>
           </div>
         </Card>

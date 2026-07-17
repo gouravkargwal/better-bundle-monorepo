@@ -9,14 +9,11 @@ export class OnboardingService {
       // Get shop info from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
 
-      // Get pricing tier configuration
-      const pricingTier = await this.getPricingTierConfig(
-        shopDomain,
-        shopData.currencyCode,
-      );
+      // Get flat plan configuration
+      const planInfo = await this.getPlanInfo(shopData.currencyCode);
 
       return {
-        pricingTier,
+        planInfo,
       };
     } catch (error) {
       logger.error({ error }, "Error getting onboarding data");
@@ -82,9 +79,9 @@ export class OnboardingService {
     }
   }
 
-  private async getPricingTierConfig(shopDomain: string, currencyCode: string) {
+  private async getPlanInfo(currencyCode: string) {
     try {
-      // Get default subscription plan
+      // Get default subscription plan (single flat plan)
       const defaultPlan = await prisma.subscription_plans.findFirst({
         where: {
           is_active: true,
@@ -96,27 +93,14 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      // Get pricing tier for currency
-      const pricingTier = await prisma.pricing_tiers.findFirst({
-        where: {
-          subscription_plan_id: defaultPlan.id,
-          currency: currencyCode,
-          is_active: true,
-          is_default: true,
-        },
-      });
-
-      if (!pricingTier) {
-        throw new Error(`No pricing tier found for currency: ${currencyCode}`);
-      }
-
       return {
         symbol: getCurrencySymbol(currencyCode),
-        threshold_amount: Number(pricingTier.trial_threshold_amount),
+        monthlyPrice: Number(defaultPlan.monthly_price ?? 99),
+        trialDays: Number(defaultPlan.trial_days ?? 14),
       };
     } catch (error) {
-      logger.error({ error }, "Error getting pricing tier configuration");
-      throw new Error("Failed to get pricing tier configuration");
+      logger.error({ error }, "Error getting plan info");
+      throw new Error("Failed to get plan info");
     }
   }
 
@@ -202,7 +186,7 @@ export class OnboardingService {
       if (existing) {
         return existing;
       }
-      // Get default subscription plan
+      // Get default subscription plan (single flat plan)
       const defaultPlan = await tx.subscription_plans.findFirst({
         where: {
           is_active: true,
@@ -214,33 +198,22 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      // Get pricing tier for shop's currency
-      const pricingTier = await tx.pricing_tiers.findFirst({
-        where: {
-          subscription_plan_id: defaultPlan.id,
-          currency: shopRecord.currency_code,
-          is_active: true,
-          is_default: true,
-        },
-      });
+      const trialDays = Number(defaultPlan.trial_days ?? 14);
 
-      if (!pricingTier) {
-        throw new Error(
-          `No pricing tier found for currency: ${shopRecord.currency_code}`,
-        );
-      }
-
-      // Create shop subscription (TRIAL status)
+      // Create shop subscription (TRIAL status) — time-based trial, no
+      // pricing tier or spend cap; Shopify's own trialDays enforces the
+      // free period once billing is set up.
       const shopSubscription = await tx.shop_subscriptions.create({
         data: {
           shop_id: shopRecord.id,
           subscription_plan_id: defaultPlan.id,
-          pricing_tier_id: pricingTier.id,
           status: "TRIAL",
           started_at: new Date(),
+          expires_at: new Date(Date.now() + trialDays * 24 * 60 * 60 * 1000),
+          // Required by schema; commission model removed so no revenue threshold
+          trial_revenue: 0,
           is_active: true,
           auto_renew: true,
-          user_chosen_cap_amount: pricingTier.trial_threshold_amount,
         },
       });
 

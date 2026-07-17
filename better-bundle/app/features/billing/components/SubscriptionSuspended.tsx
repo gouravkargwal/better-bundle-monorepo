@@ -113,18 +113,10 @@ export function SubscriptionSuspended({
                   </InlineStack>
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Monthly Cap:
+                      Monthly Plan:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {formatCurrency(subscriptionData.spendingLimit)}
-                    </Text>
-                  </InlineStack>
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Last Usage:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {formatCurrency(subscriptionData.currentUsage)}
+                      {formatCurrency(subscriptionData.monthlyPrice)}/mo
                     </Text>
                   </InlineStack>
                 </BlockStack>
@@ -162,8 +154,8 @@ export function SubscriptionSuspended({
             >
               <Text as="p" variant="bodyMd">
                 <strong>Why was my subscription suspended?</strong> This usually
-                happens due to payment issues, reaching your spending cap, or
-                manual suspension. Contact support for assistance.
+                happens due to payment issues or manual suspension. Contact
+                support for assistance.
               </Text>
             </div>
           </BlockStack>

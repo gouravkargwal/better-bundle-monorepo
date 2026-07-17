@@ -6,7 +6,17 @@ Admin-controlled, rarely changes.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Boolean, Index, Enum as SQLEnum
+from decimal import Decimal
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Boolean,
+    Integer,
+    Numeric,
+    Index,
+    Enum as SQLEnum,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel
@@ -36,8 +46,9 @@ class SubscriptionPlan(BaseModel):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_default = Column(Boolean, default=False, nullable=False, index=True)
 
-    # Commission settings (defaults, can be overridden by pricing tiers)
-    default_commission_rate = Column(String(10), nullable=True)  # e.g., "0.03" for 3%
+    # Flat-fee plan settings
+    monthly_price = Column(Numeric(10, 2), nullable=False, default=Decimal("99.00"))
+    trial_days = Column(Integer, nullable=False, default=14)
 
     # Metadata
     plan_metadata = Column(Text, nullable=True)  # JSON string for additional config
@@ -48,9 +59,6 @@ class SubscriptionPlan(BaseModel):
     effective_to = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     # Relationships
-    pricing_tiers = relationship(
-        "PricingTier", back_populates="subscription_plan", cascade="all, delete-orphan"
-    )
     shop_subscriptions = relationship(
         "ShopSubscription", back_populates="subscription_plan"
     )

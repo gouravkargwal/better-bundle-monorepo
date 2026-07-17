@@ -25,12 +25,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         is_active: true,
       },
       include: {
-        pricing_tiers: true,
-        billing_cycles: {
-          where: { status: "ACTIVE" },
-          orderBy: { cycle_number: "desc" },
-          take: 1,
-        },
+        subscription_plans: true,
       },
       orderBy: { created_at: "desc" },
     });
@@ -47,7 +42,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Determine billing status from unified subscription status
     const statusMap: Record<string, string> = {
       TRIAL: "trial_active",
-      PENDING_APPROVAL: "subscription_pending",
       ACTIVE: "subscription_active",
       SUSPENDED: "subscription_suspended",
       CANCELLED: "subscription_cancelled",
@@ -57,26 +51,23 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const subscriptionStatus = shopSubscription.status as string;
     const billingStatus = statusMap[subscriptionStatus] || subscriptionStatus.toLowerCase();
 
-    const trialThreshold = Number(
-      shopSubscription.trial_threshold_override ||
-        shopSubscription.pricing_tiers?.trial_threshold_amount ||
-        75,
+    const monthlyPrice = Number(
+      shopSubscription.subscription_plans?.monthly_price ?? 99.0,
     );
-    const trialRevenue = Number(shopSubscription.trial_revenue || 0);
+    const trialDays = Number(shopSubscription.subscription_plans?.trial_days ?? 14);
 
     return json({
       shop_id: shopRecord.id,
       billing_status: billingStatus,
-      message: getStatusMessage(billingStatus, trialRevenue, trialThreshold),
+      message: getStatusMessage(billingStatus, monthlyPrice),
       trial_active: shopSubscription.status === "TRIAL",
-      trial_revenue: trialRevenue,
-      trial_threshold: trialThreshold,
+      trial_days: trialDays,
       subscription_id: shopSubscription.shopify_subscription_id,
       subscription_status: shopSubscription.shopify_status,
       subscription_confirmation_url: shopSubscription.confirmation_url,
       shop_active: shopRecord.is_active,
       currency: shopRecord.currency_code || "USD",
-      commission_rate: Number(shopSubscription.pricing_tiers?.commission_rate || 0.03),
+      monthly_price: monthlyPrice,
     });
   } catch (error) {
     logger.error({ error }, "Error getting billing status");
