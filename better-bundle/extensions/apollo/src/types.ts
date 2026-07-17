@@ -179,7 +179,7 @@ type InteractionType =
 interface UnifiedInteractionRequest {
   session_id: string;
   shop_domain: string;
-  extension_type: string; // Required: "apollo", "mercury", "venus", "atlas", "phoenix"
+  extension_type: string; // Required: "apollo", "mercury", "venus", "atlas"
   context: ExtensionContext;
   interaction_type: InteractionType;
   customer_id?: string;

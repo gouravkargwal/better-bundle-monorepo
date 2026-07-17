@@ -184,7 +184,7 @@ def build_system_health():
         "panel_log_volume", "area", "Log Volume by Service",
         'SELECT histogram(_timestamp) as "time", count(*) as "count" '
         'FROM "default" WHERE service IN '
-        "('remix-app', 'python-worker', 'django-admin', 'phoenix-extension') "
+        "('remix-app', 'python-worker', 'django-admin') "
         "GROUP BY time, service ORDER BY time",
         "default", "logs",
         [field_entry("Time", "time", "_timestamp", "histogram")],

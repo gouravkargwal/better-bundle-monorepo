@@ -312,7 +312,6 @@ class PurchaseAttributionKafkaConsumer:
                 UserInteraction.created_at >= cutoff_time,
                 UserInteraction.extension_type.in_(
                     [
-                        "phoenix",
                         "venus",
                         "apollo",
                     ]
@@ -358,7 +357,7 @@ class PurchaseAttributionKafkaConsumer:
             properties = product.get("properties", {})
             if isinstance(properties, dict) and properties:
                 extension = properties.get("_bb_rec_extension")
-                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
+                if extension and extension.lower() in ["venus", "apollo"]:
                     logger.debug(
                         f"✅ Found Phoenix tracking data in line item: {extension}"
                     )
@@ -373,7 +372,7 @@ class PurchaseAttributionKafkaConsumer:
                     and metafield.get("key") == "extension"
                 ):
                     extension_value = metafield.get("value", "").lower()
-                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                    if extension_value in ["apollo", "venus", "mercury"]:
                         logger.debug(
                             f"✅ Found tracking data in metafields: {extension_value}"
                         )
@@ -386,9 +385,7 @@ class PurchaseAttributionKafkaConsumer:
                 ):
                     products_value = metafield.get("value")
                     if products_value:
-                        logger.debug(
-                            f"✅ Found Mercury products array in metafields"
-                        )
+                        logger.debug(f"✅ Found Mercury products array in metafields")
                         return True
 
         return False

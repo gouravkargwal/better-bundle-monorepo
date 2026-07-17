@@ -4,8 +4,8 @@ const isDevelopment = process.env.NODE_ENV === "development";
 const isProduction = process.env.NODE_ENV === "production";
 const useOpenObserve = Boolean(process.env.OPENOBSERVE_URL) || isProduction;
 
-// Build pino-loki options
-const lokiOptions: Record<string, any> = {
+// Build OpenObserve transport options (Loki-compatible API)
+const openobserveOptions: Record<string, any> = {
   batching: true,
   interval: 5,
   host: process.env.OPENOBSERVE_URL || "http://openobserve:5080",
@@ -20,7 +20,7 @@ const lokiOptions: Record<string, any> = {
 const openObserveEmail = process.env.OPENOBSERVE_EMAIL;
 const openObservePassword = process.env.OPENOBSERVE_PASSWORD;
 if (openObserveEmail && openObservePassword) {
-  lokiOptions.basicAuth = {
+  openobserveOptions.basicAuth = {
     username: openObserveEmail,
     password: openObservePassword,
   };
@@ -38,7 +38,7 @@ const logger = pino(
   useOpenObserve
     ? pino.transport({
         target: "pino-loki",
-        options: lokiOptions,
+        options: openobserveOptions,
       })
     : pino.transport({
         target: "pino/file",

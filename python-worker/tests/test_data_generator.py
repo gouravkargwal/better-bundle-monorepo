@@ -17,7 +17,7 @@ class AttributionTestDataGenerator:
     """Generates realistic test data for attribution scenarios"""
 
     def __init__(self):
-        self.extensions = ["phoenix", "venus", "apollo", "atlas"]
+        self.extensions = ["venus", "apollo", "atlas"]
         self.interaction_types = [
             "recommendation_clicked",
             "recommendation_add_to_cart",
@@ -367,8 +367,8 @@ class AttributionTestDataGenerator:
             },
             "original_attribution": {
                 "total_revenue": float(order["total_price"]),
-                "attribution_weights": {"phoenix": 0.6, "venus": 0.3, "apollo": 0.1},
-                "contributing_extensions": ["phoenix", "venus", "apollo"],
+                "attribution_weights": {"venus": 0.6, "apollo": 0.4},
+                "contributing_extensions": ["venus", "apollo"],
                 "total_interactions": random.randint(5, 20),
             },
         }

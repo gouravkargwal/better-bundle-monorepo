@@ -64,7 +64,6 @@ class ExtensionType(str, Enum):
 
     APOLLO = "apollo"
     ATLAS = "atlas"
-    PHOENIX = "phoenix"
     VENUS = "venus"
     MERCURY = "mercury"  # Shopify Plus checkout extensions
 
@@ -142,11 +141,13 @@ class SubscriptionStatus(str, Enum):
     confirmation_url field to determine if billing setup has been initiated.
     """
 
-    TRIAL = "TRIAL"                        # Trial in progress (may have confirmation_url for pending approval)
-    ACTIVE = "ACTIVE"                      # Paid subscription active
-    SUSPENDED = "SUSPENDED"               # Cap reached or payment issue
-    CANCELLED = "CANCELLED"               # Cancelled by user/system
-    EXPIRED = "EXPIRED"                   # Naturally expired
+    TRIAL = (
+        "TRIAL"  # Trial in progress (may have confirmation_url for pending approval)
+    )
+    ACTIVE = "ACTIVE"  # Paid subscription active
+    SUSPENDED = "SUSPENDED"  # Cap reached or payment issue
+    CANCELLED = "CANCELLED"  # Cancelled by user/system
+    EXPIRED = "EXPIRED"  # Naturally expired
 
 
 class BillingCycleStatus(str, Enum):

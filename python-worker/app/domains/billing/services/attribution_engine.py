@@ -718,7 +718,7 @@ class AttributionEngine:
                 "recommendation_viewed",
                 "recommendation_add_to_cart",
             ]
-            and i["extension_type"] in ["phoenix", "venus", "apollo"]
+            and i["extension_type"] in ["venus", "apollo"]
         ]
 
         if not recommendation_interactions:
@@ -1492,7 +1492,6 @@ class AttributionEngine:
 
         # 3. Extension score (20% weight)
         extension_scores = {
-            "phoenix": 100,  # Cart recommendations are most influential
             "venus": 80,  # Customer account recommendations
             "apollo": 60,  # Post-purchase recommendations
             "atlas": 40,  # Web pixel (least influential)
@@ -1713,15 +1712,15 @@ class AttributionEngine:
         for product in context.purchase_products:
             properties = product.get("properties", {})
             if isinstance(properties, dict) and properties:
-                # Check for Phoenix tracking data
+                # Check for tracking data from line item properties
                 extension = properties.get("_bb_rec_extension")
                 session_id = properties.get("_bb_rec_session_id")
                 product_id = properties.get("_bb_rec_product_id") or product.get("id")
                 timestamp_str = properties.get("_bb_rec_timestamp")
                 position = properties.get("_bb_rec_position")
 
-                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
-                    # Create synthetic interaction from Phoenix line item data
+                if extension and extension.lower() in ["venus", "apollo"]:
+                    # Create synthetic interaction from line item data
                     synthetic_interaction = (
                         self._create_synthetic_interaction_from_line_item(
                             product, context, properties
@@ -1730,7 +1729,7 @@ class AttributionEngine:
                     if synthetic_interaction:
                         tracking_interactions.append(synthetic_interaction)
                         logger.info(
-                            f"✅ Extracted Phoenix tracking data for product {product_id}: "
+                            f"✅ Extracted tracking data for product {product_id}: "
                             f"extension={extension}, session={session_id}"
                         )
 
@@ -1956,7 +1955,6 @@ class AttributionEngine:
 
         extension = properties.get("_bb_rec_extension")
         if not extension or extension.lower() not in [
-            "phoenix",
             "venus",
             "apollo",
             "mercury",

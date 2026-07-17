@@ -197,14 +197,14 @@ class EventGenerator(BaseGenerator):
         )
         seq += 1
 
-        # Phoenix recommendations (product page recommendations)
+        # Product page recommendations
         events.append(
             self._create_event(
                 "recommendation_viewed",
                 client_id,
                 seq,
                 self._build_recommendation_data(
-                    "phoenix", "product_page", [1, 2, 3], product_variant_ids
+                    "venus", "product_page", [1, 2, 3], product_variant_ids
                 ),
                 self.past_date(5),
                 "mobile",
@@ -1627,10 +1627,10 @@ class EventGenerator(BaseGenerator):
             "checkout_started": "atlas",
             "checkout_completed": "atlas",
             "customer_linked": "atlas",
-            # Recommendation events (tracked by Phoenix)
-            "recommendation_viewed": "phoenix",
-            "recommendation_clicked": "phoenix",
-            "recommendation_add_to_cart": "phoenix",
+            # Recommendation events (tracked by Venus)
+            "recommendation_viewed": "venus",
+            "recommendation_clicked": "venus",
+            "recommendation_add_to_cart": "venus",
             # Post-purchase events (tracked by Apollo)
             "upsell_viewed": "apollo",
             "upsell_clicked": "apollo",
@@ -1696,7 +1696,7 @@ class EventGenerator(BaseGenerator):
             "extensionType": extension_type,
             "context": context,
             "recommendedProducts": recommended_products,
-            "recommendationEngine": "phoenix",
+            "recommendationEngine": "betterbundle",
             "algorithm": "collaborative_filtering",
             "confidence": 0.85,
         }

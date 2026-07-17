@@ -63,7 +63,7 @@ class AttributionScenarioTester:
     def create_mock_interactions(self, count: int = 5) -> List[Dict[str, Any]]:
         """Create mock interactions for testing"""
         interactions = []
-        extensions = ["phoenix", "venus", "apollo"]
+        extensions = ["venus", "apollo"]
         interaction_types = [
             "recommendation_clicked",
             "recommendation_add_to_cart",
@@ -94,22 +94,6 @@ class AttributionScenarioTester:
 
         # Create interactions with multiple recommendations for same product
         interactions = [
-            {
-                "id": "interaction_1",
-                "extension_type": "phoenix",
-                "interaction_type": "recommendation_clicked",
-                "product_id": "product_1",
-                "created_at": datetime.now() - timedelta(minutes=10),
-                "metadata": {"position": 1, "confidence": 0.8},
-            },
-            {
-                "id": "interaction_2",
-                "extension_type": "phoenix",
-                "interaction_type": "recommendation_add_to_cart",
-                "product_id": "product_1",
-                "created_at": datetime.now() - timedelta(minutes=5),
-                "metadata": {"position": 1, "confidence": 0.9},
-            },
             {
                 "id": "interaction_3",
                 "extension_type": "venus",
@@ -417,16 +401,7 @@ class AttributionScenarioTester:
         # Create large interaction dataset
         large_interactions = []
         for i in range(1000):
-            large_interactions.append(
-                {
-                    "id": f"interaction_{i}",
-                    "extension_type": "phoenix",
-                    "interaction_type": "recommendation_clicked",
-                    "product_id": f"product_{i % 10}",
-                    "created_at": datetime.now() - timedelta(minutes=i),
-                    "metadata": {"position": i % 5 + 1},
-                }
-            )
+            large_interactions.append()
 
         # Test deduplication performance
         start_time = time.time()

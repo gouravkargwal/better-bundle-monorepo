@@ -24,64 +24,11 @@ interface SetupSection {
   stepBadgeColor: string;
 }
 
-export function ExtensionSetupGuide({
-  shopDomain,
-}: ExtensionSetupGuideProps) {
+export function ExtensionSetupGuide({ shopDomain }: ExtensionSetupGuideProps) {
   const themeEditorUrl = `https://${shopDomain}/admin/themes/current/editor`;
   const checkoutSettingsUrl = `https://${shopDomain}/admin/settings/checkout`;
 
   const sections: SetupSection[] = [
-    {
-      title: "Storefront Recommendations",
-      badge: { text: "Theme Editor", tone: "info" },
-      description:
-        "Add AI-powered recommendation widgets to your store pages. Each block shows personalized product suggestions to your customers.",
-      steps: [
-        { step: "1", text: "Go to Online Store > Themes > Customize" },
-        {
-          step: "2",
-          text: "Navigate to the page you want (Homepage, Product, Collection, or Cart)",
-        },
-        {
-          step: "3",
-          text: 'Click "Add section" and search for "BetterBundle"',
-        },
-        {
-          step: "4",
-          text: "Customize the block settings (colors, product count, layout) and Save",
-        },
-      ],
-      blocks: [
-        {
-          icon: "\uD83C\uDFE0",
-          name: "Homepage",
-          description:
-            "Featured recommendations to help customers discover products",
-        },
-        {
-          icon: "\uD83D\uDCE6",
-          name: "Product Page",
-          description:
-            "Related products and frequently bought together suggestions",
-        },
-        {
-          icon: "\uD83D\uDCC2",
-          name: "Collection Page",
-          description:
-            "Recommendations relevant to the collection being browsed",
-        },
-        {
-          icon: "\uD83D\uDED2",
-          name: "Cart Page",
-          description: "Add-on product suggestions to increase order value",
-        },
-      ],
-      buttonLabel: "Open Theme Editor",
-      buttonUrl: themeEditorUrl,
-      stepsBgColor: "#F0FDFB",
-      stepsBorderColor: "#CCFBF1",
-      stepBadgeColor: "#667eea",
-    },
     {
       title: "Checkout Recommendations",
       badge: { text: "Theme Editor", tone: "info" },
@@ -240,8 +187,7 @@ export function ExtensionSetupGuide({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(200px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
                   gap: "10px",
                 }}
               >
@@ -258,11 +204,7 @@ export function ExtensionSetupGuide({
                     <InlineStack gap="200" blockAlign="center">
                       <span style={{ fontSize: "16px" }}>{block.icon}</span>
                       <BlockStack gap="050">
-                        <Text
-                          as="p"
-                          variant="bodySm"
-                          fontWeight="semibold"
-                        >
+                        <Text as="p" variant="bodySm" fontWeight="semibold">
                           {block.name}
                         </Text>
                         <Text as="p" variant="bodySm" tone="subdued">
@@ -313,8 +255,7 @@ export function ExtensionSetupGuide({
               fontSize: "2.5rem",
               lineHeight: "1.1",
               marginBottom: "12px",
-              background:
-                "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
+              background: "linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
               backgroundClip: "text",
@@ -384,7 +325,7 @@ export function ExtensionSetupGuide({
           alignItems: "stretch",
         }}
       >
-        {sections.slice(1).map((section) => renderSection(section, true))}
+        {sections.map((section) => renderSection(section, true))}
 
         {/* Analytics Pixel */}
         <div

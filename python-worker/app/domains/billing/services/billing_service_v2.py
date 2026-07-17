@@ -166,7 +166,9 @@ class BillingServiceV2:
 
     async def _log_trial_progress(self, shop_id: str, subscription_id: str) -> None:
         """Log trial progress — threshold check is handled in complete_trial_subscription."""
-        trial = await self.billing_repository.get_subscription_trial_by_id(subscription_id)
+        trial = await self.billing_repository.get_subscription_trial_by_id(
+            subscription_id
+        )
         if trial:
             logger.info(
                 f"📊 Trial progress for shop {shop_id}: "
@@ -356,7 +358,7 @@ class BillingServiceV2:
             properties = product.get("properties", {})
             if isinstance(properties, dict) and properties:
                 extension = properties.get("_bb_rec_extension")
-                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
+                if extension and extension.lower() in ["venus", "apollo"]:
                     return True
 
         # Check order metafields for Apollo/Mercury tracking
@@ -369,7 +371,7 @@ class BillingServiceV2:
                     and metafield.get("key") == "extension"
                 ):
                     extension_value = metafield.get("value", "").lower()
-                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                    if extension_value in ["apollo", "venus", "mercury"]:
                         return True
                 # Also check for Mercury products array (different structure)
                 if (
@@ -605,7 +607,10 @@ class BillingServiceV2:
 
     async def _check_trial_completion(self, shop_id: str, shop_subscription) -> None:
         """Check if trial threshold is reached using trial_revenue on the subscription row."""
-        if not shop_subscription or shop_subscription.status != SubscriptionStatus.TRIAL:
+        if (
+            not shop_subscription
+            or shop_subscription.status != SubscriptionStatus.TRIAL
+        ):
             return
 
         try:

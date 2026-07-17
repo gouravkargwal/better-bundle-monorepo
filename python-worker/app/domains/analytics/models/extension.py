@@ -15,7 +15,6 @@ class ExtensionType(str, Enum):
 
     VENUS = "venus"  # Customer account extensions
     ATLAS = "atlas"  # Web pixels (behavioral tracking)
-    PHOENIX = "phoenix"  # Checkout UI extensions
     APOLLO = "apollo"  # Post-purchase extensions
     MERCURY = "mercury"  # Shopify Plus checkout extensions
 
@@ -36,7 +35,6 @@ class ExtensionContext(str, Enum):
     SEARCH_PAGE = "search_page"
     CUSTOMER_ACCOUNT = "customer_account"
 
-    # Phoenix contexts (currently cart, future expansion)
     CART_DRAWER = "cart_drawer"
     # Future: HOMEPAGE, PRODUCT_PAGE, COLLECTION_PAGE
 

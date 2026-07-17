@@ -19,14 +19,14 @@ async def track_interaction(
     """
     Unified endpoint for tracking interactions across all extensions.
 
-    All extensions (Venus, Atlas, Phoenix, Apollo, Mercury) use this single endpoint
+    All extensions (Venus, Atlas, Apollo, Mercury) use this single endpoint
     with the same payload structure, differentiated by the extension_type field.
 
     Example payload:
     {
         "session_id": "uuid-123",
         "shop_domain": "example.myshopify.com",
-        "extension_type": "phoenix",
+        "extension_type": "venus",
         "interaction_type": "recommendation_clicked",
         "customer_id": "customer_123",
         "metadata": { "product_id": "prod_456", "context": "cart" }

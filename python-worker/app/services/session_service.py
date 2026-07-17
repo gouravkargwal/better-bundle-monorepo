@@ -178,7 +178,7 @@ class SessionService:
 
         Args:
             session_id: The session ID
-            extension_type: The extension type (string: "phoenix", "apollo", "venus", "atlas", "mercury", or "unknown")
+            extension_type: The extension type (string: "apollo", "venus", "atlas", "mercury", or "unknown")
 
         Returns:
             True if successful, False otherwise

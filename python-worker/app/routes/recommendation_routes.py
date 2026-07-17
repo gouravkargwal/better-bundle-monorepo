@@ -25,12 +25,12 @@ async def get_recommendations(
 
     Requires an existing session. If session doesn't exist, use /api/session/get-or-create-session first.
 
-    Used by: Venus, Atlas, Phoenix, Mercury
+    Used by: Venus, Atlas, Mercury
 
     Example payload:
     {
         "shop_domain": "example.myshopify.com",
-        "extension_type": "phoenix",
+        "extension_type": "venus",
         "session_id": "uuid-123",
         "context": "cart",
         "user_id": "customer_123",

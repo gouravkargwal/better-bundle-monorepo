@@ -1,5 +1,5 @@
 """
-Logging API endpoint for Phoenix extension
+Logging API endpoint for client-side logs
 Forwards logs from browser to Loki
 """
 
@@ -42,13 +42,13 @@ async def forward_to_openobserve(logs_data: Dict[str, Any]) -> bool:
         timestamp = logs_data.get("timestamp", datetime.utcnow().isoformat())
 
         # Extract service and env from the logs if available
-        service_name = "phoenix-extension"  # Default
+        service_name = "betterbundle-extension"  # Default
         env_name = "development"  # Default
 
         if logs and len(logs) > 0:
             # Try to extract service and env from the first log entry
             first_log = logs[0]
-            service_name = first_log.get("service", "phoenix-extension")
+            service_name = first_log.get("service", "betterbundle-extension")
             env_name = first_log.get("env", "development")
 
         # Transform to Loki-compatible format
@@ -89,8 +89,11 @@ async def forward_to_openobserve(logs_data: Dict[str, Any]) -> bool:
         auth = None
         if OPENOBSERVE_EMAIL and OPENOBSERVE_PASSWORD:
             import base64
+
             auth_str = f"{OPENOBSERVE_EMAIL}:{OPENOBSERVE_PASSWORD}"
-            headers["Authorization"] = f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+            headers["Authorization"] = (
+                f"Basic {base64.b64encode(auth_str.encode()).decode()}"
+            )
 
         # Send to OpenObserve
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -119,7 +122,7 @@ async def forward_to_openobserve(logs_data: Dict[str, Any]) -> bool:
 @router.post("/logs")
 async def receive_logs(request: Request):
     """
-    Receive logs from Phoenix extension and forward to OpenObserve
+    Receive logs from extensions and forward to OpenObserve
     """
     try:
         # Parse request body
@@ -153,7 +156,10 @@ async def receive_logs(request: Request):
         else:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "message": "Failed to forward logs to OpenObserve"},
+                content={
+                    "success": False,
+                    "message": "Failed to forward logs to OpenObserve",
+                },
             )
 
     except json.JSONDecodeError:

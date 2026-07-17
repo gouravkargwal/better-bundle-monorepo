@@ -2,7 +2,7 @@
 Unified Analytics Models for BetterBundle
 
 This module contains all the data models for the unified analytics system
-that tracks user interactions across all extensions (Venus, Atlas, Phoenix, Apollo).
+that tracks user interactions across all extensions (Venus, Atlas,  Apollo).
 """
 
 from .session import (

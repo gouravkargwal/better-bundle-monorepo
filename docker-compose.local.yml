@@ -15,7 +15,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=postgres,env=dev,logging=promtail"
+        labels: "service=postgres,env=dev"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -54,7 +54,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=kafka,env=dev,logging=promtail"
+        labels: "service=kafka,env=dev"
     healthcheck:
       test:
         [
@@ -67,8 +67,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
-
-
 
   # ==================== REDIS ====================
   redis:
@@ -92,7 +90,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=redis,env=dev,logging=promtail"
+        labels: "service=redis,env=dev"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -125,7 +123,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=gorse,env=dev,logging=promtail"
+        labels: "service=gorse,env=dev"
     depends_on:
       postgres:
         condition: service_healthy
@@ -149,7 +147,15 @@ services:
       - openobserve_data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5080/healthz"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:5080/healthz",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5

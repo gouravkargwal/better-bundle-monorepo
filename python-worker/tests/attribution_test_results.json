@@ -6,11 +6,7 @@
     "success": true
   },
   "test_scenario_7_cross_extension_attribution": {
-    "extensions": [
-      "phoenix",
-      "venus",
-      "apollo"
-    ],
+    "extensions": ["venus", "apollo"],
     "weights_sum": 1.0,
     "has_weights": true,
     "success": true
