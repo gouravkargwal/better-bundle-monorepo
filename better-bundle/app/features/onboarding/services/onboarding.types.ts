@@ -3,6 +3,8 @@ export interface OnboardingData {
   subscriptionPlan: {
     symbol: string;
     monthly_fee: number;
+    original_monthly_fee?: number;
+    discount_percentage?: number;
     trial_days: number;
     plan_name: string;
   } | null;

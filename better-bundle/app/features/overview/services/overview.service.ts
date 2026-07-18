@@ -93,24 +93,22 @@ export class OverviewService {
       },
     });
 
-    const isTrialPhase =
-      shopSubscription?.status === "TRIAL" ||
-      shopSubscription?.status === "TRIAL_COMPLETED";
+    const isTrialPhase = shopSubscription?.status === "TRIAL";
 
-    // Get attributed revenue based on phase
-    let attributedRevenue;
-    let attributedOrders;
+    // Get total revenue from order_data
+    const revenueAgg = await prisma.order_data.aggregate({
+      where: { shop_id: shopId },
+      _sum: { total_amount: true },
+    });
+    const totalRevenue = revenueAgg._sum?.total_amount ?? 0;
 
-    // Get total orders count for conversion rate calculation
+    // Get total orders count
     const totalOrders = await prisma.order_data.count({
-      where: {
-        shop_id: shopId,
-      },
+      where: { shop_id: shopId },
     });
 
-    // Calculate conversion rate
-    const conversionRate =
-      totalOrders > 0 ? (attributedOrders / totalOrders) * 100 : 0;
+    // Conversion rate requires recommendation click events tied to orders — placeholder
+    const conversionRate = null; // null until attribution data is available
 
     // Get active subscription plan details
     const activePlan = await prisma.shop_subscriptions.findFirst({
@@ -133,23 +131,22 @@ export class OverviewService {
     let commissionCharged = 0;
 
     return {
-      totalRevenue: (attributedRevenue._sum as any).attributed_revenue || 0,
+      totalRevenue,
       commissionCharged, // Actual commission charged to Shopify (PAID phase only)
       currency: currencyCode,
-      conversionRate: Math.round(conversionRate * 100) / 100, // Round to 2 decimal places
+      conversionRate:
+        conversionRate !== null ? Math.round(conversionRate * 100) / 100 : null,
       revenueChange: null, // TODO: Calculate period-over-period change
       conversionRateChange: null, // TODO: Calculate period-over-period change
       // Phase information
       isTrialPhase,
       phaseLabel: isTrialPhase ? "Trial Revenue" : "Total Revenue",
       phaseDescription: isTrialPhase
-        ? shopSubscription?.status === "TRIAL_COMPLETED"
-          ? "Trial completed - commission tracked (not charged yet)"
-          : "Commission tracked during trial (not charged yet)"
+        ? "Commission tracked during trial (not charged yet)"
         : "Commission charged to Shopify",
       // Additional data for future use
       totalOrders,
-      attributedOrders,
+      attributedOrders: totalOrders,
       activePlan: activePlan
         ? {
             name: activePlan.subscription_plans?.name || "Unknown Plan",
@@ -165,54 +162,16 @@ export class OverviewService {
   }
 
   private async getPerformanceData(shopId: string, currencyCode: string) {
-    try {
-      // Group by order_id to create "bundles" and get order details
-      const orderStats = new Map();
-
-      // Calculate total revenue for percentage calculation
-      const totalRevenue = Array.from(orderStats.values()).reduce(
-        (sum, bundle) => sum + bundle.revenue,
-        0,
-      );
-
-      const topBundlesArray = Array.from(orderStats.values()).map((bundle) => ({
-        ...bundle,
-        conversionRate:
-          totalRevenue > 0 ? (bundle.revenue / totalRevenue) * 100 : 0,
-      }));
-
-      // Get revenue by extension (where recommendations were shown)
-      const extensionStats = new Map();
-
-      // Convert to array and calculate percentages
-      const revenueByExtension = Array.from(extensionStats.values());
-      if (totalRevenue > 0) {
-        revenueByExtension.forEach((ext) => {
-          ext.percentage = (ext.revenue / totalRevenue) * 100;
-        });
-      }
-
-      // Sort by revenue descending
-      revenueByExtension.sort((a, b) => b.revenue - a.revenue);
-
-      // Weekly growth (simplified calculation)
-
-      return {
-        topBundles: topBundlesArray.slice(0, 3), // Top 3 bundles
-        revenueByExtension,
-      };
-    } catch (error) {
-      console.error("Error fetching performance data:", error);
-      // Return empty data structure on error
-      return {
-        topBundles: [],
-        revenueByExtension: [],
-        trends: {
-          weeklyGrowth: 0,
-          monthlyGrowth: 0,
-        },
-      };
-    }
+    // ponytail: Performance data requires bundle-level aggregation queries that are not yet
+    // implemented. Return empty stubs until the recommendation engine has enough data.
+    return {
+      topBundles: [],
+      revenueByExtension: [],
+      trends: {
+        weeklyGrowth: 0,
+        monthlyGrowth: 0,
+      },
+    };
   }
 
   private async checkGorseReadiness(shopId: string): Promise<{

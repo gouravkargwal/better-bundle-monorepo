@@ -14,7 +14,7 @@ interface OverviewMetricsProps {
     totalRevenue: number;
     commissionCharged?: number; // Actual commission charged (PAID phase only)
     currency: string;
-    conversionRate: number;
+    conversionRate: number | null;
     revenueChange: number | null;
     conversionRateChange: number | null;
     isTrialPhase: boolean;

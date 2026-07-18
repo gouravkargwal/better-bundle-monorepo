@@ -20,7 +20,7 @@ export interface OverviewMetrics {
   totalRevenue: number; // Actual attributed revenue generated
   commissionCharged?: number; // Actual commission charged to Shopify (PAID phase only)
   currency: string;
-  conversionRate: number;
+  conversionRate: number | null;
   revenueChange: number | null;
   conversionRateChange: number | null;
   isTrialPhase: boolean; // Whether shop is in trial phase
@@ -48,7 +48,7 @@ export interface PerformanceData {
     name: string;
     revenue: number;
     orders: number;
-    conversionRate: number;
+    conversionRate: number | null;
   }>;
   revenueByExtension: Array<{
     type: string;

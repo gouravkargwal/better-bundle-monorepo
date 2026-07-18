@@ -29,17 +29,28 @@ export class OnboardingService {
       // Get shop data from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
 
-      // Complete onboarding in transaction (without marking complete)
+      // Create shop + trial subscription
       const shop = await this.completeOnboardingTransaction(session, shopData);
 
-      // Activate web pixel
+      // Activate web pixel (non-critical, best-effort)
       await this.activateWebPixel(admin, session.shop);
 
-      // Trigger analysis using shop record from transaction (avoids extra DB query)
-      await this.triggerAnalysis(session.shop, shop.id, session.accessToken);
+      // Trigger historical data analysis (fire-and-forget via Kafka) — non-fatal
+      try {
+        await this.triggerAnalysis(session.shop, shop.id, session.accessToken);
+      } catch (analysisError) {
+        logger.error(
+          { error: analysisError, shop: session.shop },
+          "Triggering analysis failed after onboarding — continuing",
+        );
+        // ponytail: If Kafka is down, onboarding still succeeds.
+        // A background reconciliation job should retry failed analysis triggers.
+      }
 
-      // Mark onboarding completed AFTER Kafka succeeds
+      // Mark onboarding completed
       await this.markOnboardingCompleted(session.shop);
+
+      return shop;
     } catch (error) {
       logger.error({ error }, "Error completing onboarding");
       throw new Error("Failed to complete onboarding");
@@ -99,9 +110,18 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
+      const monthlyFee = Number(defaultPlan.monthly_fee) || 29;
+      const discountPct = Number(defaultPlan.discount_percentage) || 0;
+      const discountedFee =
+        discountPct > 0
+          ? Math.round(monthlyFee * (1 - discountPct / 100) * 100) / 100
+          : monthlyFee;
+
       return {
         symbol: getCurrencySymbol(currencyCode),
-        monthly_fee: Number(defaultPlan.monthly_fee) || 29,
+        monthly_fee: discountedFee,
+        original_monthly_fee: discountPct > 0 ? monthlyFee : undefined,
+        discount_percentage: discountPct > 0 ? discountPct : undefined,
         trial_days: Number(defaultPlan.trial_days) || 14,
         plan_name: defaultPlan.name || "Pro",
       };
@@ -147,6 +167,7 @@ export class OnboardingService {
           plan_type: shopData.plan.displayName,
           is_active: true,
           shopify_plus: shopData.plan.shopifyPlus || false,
+          setup_guide_visited: false,
           // For reinstalls, preserve onboarding status if it was completed
           ...(isReinstall && existingShop.onboarding_completed
             ? {}
@@ -162,10 +183,21 @@ export class OnboardingService {
           is_active: true,
           onboarding_completed: false,
           shopify_plus: shopData.plan.shopifyPlus || false,
+          setup_guide_visited: false,
         },
       });
-    } catch (error) {
-      logger.error({ error }, "Error creating or updating shop");
+    } catch (error: any) {
+      logger.error(
+        {
+          err: {
+            name: error?.name,
+            code: error?.code,
+            message: error?.message,
+            meta: error?.meta,
+          },
+        },
+        "Error creating or updating shop",
+      );
       throw new Error("Failed to create or update shop");
     }
   }
@@ -184,7 +216,7 @@ export class OnboardingService {
             { is_active: true },
             {
               status: {
-                in: ["TRIAL", "PENDING_APPROVAL", "ACTIVE", "SUSPENDED"] as any,
+                in: ["TRIAL", "ACTIVE", "SUSPENDED"] as any,
               },
             },
           ],

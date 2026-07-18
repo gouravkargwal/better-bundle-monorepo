@@ -4,9 +4,17 @@ import { authenticate } from "../shopify.server";
 import { Page, Layout, BlockStack } from "@shopify/polaris";
 import { ExtensionSetupGuide } from "../components/Extensions/ExtensionSetupGuide";
 import { TitleBar } from "@shopify/app-bridge-react";
+import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+
+  // Mark setup guide as visited (idempotent)
+  await prisma.shops.update({
+    where: { shop_domain: session.shop },
+    data: { setup_guide_visited: true },
+  });
+
   return json({ shopDomain: session.shop });
 };
 

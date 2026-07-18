@@ -3,21 +3,46 @@ import { TitleBar } from "@shopify/app-bridge-react";
 import { DateRangePicker } from "../../../components/UI/DateRangePicker";
 import { useDashboard } from "../hooks/useDashboard";
 import { Outlet, useLocation, useNavigate } from "@remix-run/react";
+import { useState, useCallback, useEffect } from "react";
+import { AnalysisModal } from "../../overview/components/AnalysisModal";
 
 interface DashboardPageProps {
   startDate: string;
   endDate: string;
   children?: React.ReactNode;
+  /** AI readiness from the loader */
+  recommendationsReady?: boolean;
 }
 
 export function DashboardPage({
   startDate,
   endDate,
   children,
+  recommendationsReady,
 }: DashboardPageProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { handleDateChange } = useDashboard(null);
+
+  const [modalDismissed, setModalDismissed] = useState(false);
+
+  useEffect(() => {
+    // Persist across page loads so the modal only shows once
+    if (typeof sessionStorage !== "undefined") {
+      setModalDismissed(
+        sessionStorage.getItem("bb_modal_dismissed") === "true",
+      );
+    }
+  }, []);
+
+  // recommendationsReady: false = show modal; true/undefined = skip modal
+  const aiReady = recommendationsReady !== false;
+  const showModal = !aiReady && !modalDismissed;
+
+  const handleModalComplete = useCallback(() => {
+    sessionStorage.setItem("bb_modal_dismissed", "true");
+    setModalDismissed(true);
+  }, []);
 
   // Determine current tab based on URL
   const getCurrentTab = () => {
@@ -79,6 +104,14 @@ export function DashboardPage({
 
   return (
     <Page>
+      {/* AI analysis modal overlay — shown until AI is ready */}
+      {showModal && (
+        <AnalysisModal
+          initiallyReady={aiReady}
+          onComplete={handleModalComplete}
+        />
+      )}
+
       <TitleBar title="Analytics Dashboard" />
       <BlockStack gap="300">
         {/* Hero Section */}
@@ -97,7 +130,6 @@ export function DashboardPage({
           }}
         >
           <div style={{ position: "relative", zIndex: 2 }}>
-            {/* Hero Badge */}
             <div style={{ marginBottom: "12px" }}>
               <div
                 style={{
@@ -115,7 +147,6 @@ export function DashboardPage({
               </div>
             </div>
 
-            {/* Main Headline */}
             <div
               style={{
                 fontSize: "2rem",
@@ -131,7 +162,6 @@ export function DashboardPage({
               Performance Analytics
             </div>
 
-            {/* Subheadline */}
             <div
               style={{
                 marginBottom: "12px",
@@ -151,7 +181,6 @@ export function DashboardPage({
               </div>
             </div>
 
-            {/* Enhanced Decorative elements */}
             <div
               style={{
                 position: "absolute",

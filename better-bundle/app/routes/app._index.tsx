@@ -6,12 +6,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, redirect } = await authenticate.admin(request);
   const isOnboarded = await getShopOnboardingCompleted(session.shop);
 
-  // ⬅️ DIRECT SERVER REDIRECT - INSTANT!
   if (isOnboarded) {
-    return redirect("/app/overview");
+    return redirect("/app/dashboard");
   }
 
   return redirect("/app/onboarding");
 };
-
-// ⬅️ NO COMPONENT NEEDED - PURE REDIRECT ROUTE

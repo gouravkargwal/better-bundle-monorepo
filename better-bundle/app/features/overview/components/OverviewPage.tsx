@@ -1,4 +1,5 @@
 // features/overview/components/OverviewPage.tsx
+import { useState, useCallback } from "react";
 import { Page, Layout, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { OverviewHero } from "./OverviewHero";
@@ -7,7 +8,7 @@ import { ValueCommunicationBanner } from "./ValueCommunicationBanner";
 import { ROIValueProofSection } from "./ROIValueProofSection";
 import { BillingStatus } from "./BillingStatus";
 import { HelpSection } from "./HelpSection";
-import { SetupProgressCard } from "./SetupProgressCard";
+import { AnalysisModal } from "./AnalysisModal";
 import type { OverviewData, OverviewError } from "../services/overview.types";
 
 interface OverviewPageProps {
@@ -16,6 +17,14 @@ interface OverviewPageProps {
 }
 
 export function OverviewPage({ data, error }: OverviewPageProps) {
+  const [modalDismissed, setModalDismissed] = useState(false);
+  const aiReady = data.setupStatus?.recommendationsReady === true;
+  const showModal = !aiReady && !modalDismissed;
+
+  const handleModalComplete = useCallback(() => {
+    setModalDismissed(true);
+  }, []);
+
   if (error) {
     return (
       <Page>
@@ -34,6 +43,14 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
 
   return (
     <Page>
+      {/* Modal overlay — shown until AI is ready */}
+      {showModal && (
+        <AnalysisModal
+          initiallyReady={aiReady}
+          onComplete={handleModalComplete}
+        />
+      )}
+
       <TitleBar title="Better Bundle Overview" />
       <BlockStack gap="300">
         <Layout>
@@ -45,11 +62,6 @@ export function OverviewPage({ data, error }: OverviewPageProps) {
                 totalRevenueGenerated={data.overviewData.totalRevenue}
                 currency={data.overviewData.currency}
               />
-
-              {/* Setup Progress — shows until user visits extension guide */}
-              {!data.setupStatus.isSetupComplete && (
-                <SetupProgressCard setupStatus={data.setupStatus} />
-              )}
 
               {/* Trial / Value Banner */}
               <ValueCommunicationBanner

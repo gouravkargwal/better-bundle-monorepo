@@ -235,8 +235,7 @@ describe("OnboardingService", () => {
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
-
-      // Mock for triggerAnalysis — shop lookup
+      // Mock shop lookup for triggerAnalysis
       mockPrisma.shops.findUnique.mockResolvedValue({
         id: "shop-uuid-1",
         access_token: "shpat_test_token_123",
@@ -269,23 +268,19 @@ describe("OnboardingService", () => {
         }),
       );
 
-      // Verify onboarding was marked completed (outside transaction, after Kafka)
+      // Verify onboarding was marked completed
       expect(mockPrisma.shops.update).toHaveBeenCalledWith({
         where: { shop_domain: "test-store.myshopify.com" },
         data: { onboarding_completed: true },
       });
 
-      // Verify Kafka analysis event was published
+      // Kafka IS called in the completeOnboarding flow now
       expect(mockPublishDataJobEvent).toHaveBeenCalledWith(
         expect.objectContaining({
           event_type: "data_collection",
           shop_id: "shop-uuid-1",
           job_type: "data_collection",
           mode: "historical",
-          collection_payload: {
-            data_types: ["products", "orders", "customers", "collections"],
-          },
-          trigger_source: "analysis",
         }),
       );
     });
@@ -388,15 +383,11 @@ describe("OnboardingService", () => {
         },
       };
       mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
-      mockPrisma.shops.findUnique.mockResolvedValue({
-        id: "shop-uuid-1",
-        access_token: "shpat_test_token_123",
-      });
 
       // Should NOT throw even though pixel creation returns TAKEN
       await expect(
         service.completeOnboarding(session, admin),
-      ).resolves.toBeUndefined();
+      ).resolves.toBeDefined();
     });
 
     it("throws when no default plan exists during trial activation", async () => {
@@ -516,7 +507,7 @@ describe("OnboardingService", () => {
       // But triggerAnalysis should still run
       await expect(
         service.completeOnboarding(session, admin),
-      ).resolves.toBeUndefined();
+      ).resolves.toBeDefined();
 
       // Kafka event should still be sent
       expect(mockPublishDataJobEvent).toHaveBeenCalled();

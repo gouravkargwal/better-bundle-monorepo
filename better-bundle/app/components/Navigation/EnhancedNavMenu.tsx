@@ -36,13 +36,6 @@ export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
   return (
     <NavMenu>
       <NavItem
-        to="/app/overview"
-        isActive={location.pathname === "/app/overview"}
-        prefetch="intent"
-      >
-        Overview
-      </NavItem>
-      <NavItem
         to="/app/dashboard"
         isActive={location.pathname === "/app/dashboard"}
         prefetch="intent"

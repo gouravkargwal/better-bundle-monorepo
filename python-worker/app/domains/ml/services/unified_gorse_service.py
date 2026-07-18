@@ -701,14 +701,14 @@ class UnifiedGorseService:
     def _track_product_label_stats(self, gorse_items: List[Dict[str, Any]]) -> None:
         """Track product label statistics for monitoring"""
         try:
-            # Labels is {"tags": [...], "embedding"?: [...]} - stats only cover tags.
-            total_labels = sum(len(i["Labels"]["tags"]) for i in gorse_items)
+            # Labels is a flat []string for Gorse compatibility (see item transformer).
+            total_labels = sum(len(i["Labels"]) for i in gorse_items)
             avg_labels = total_labels / len(gorse_items)
 
             # Analyze label distribution
             label_distribution = {}
             for item in gorse_items:
-                for label in item["Labels"]["tags"]:
+                for label in item["Labels"]:
                     label_type = label.split(":")[0]
                     label_distribution[label_type] = (
                         label_distribution.get(label_type, 0) + 1
