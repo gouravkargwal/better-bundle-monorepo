@@ -33,6 +33,10 @@ class GorseFeedbackTransformer:
             "product_impression": 0.1,
             "search_impression": 0.05,
             "basic_interest": 0.25,  # From optimized features
+            # Product similarity (co-purchase / co-view relationships)
+            "similar_to": 0.6,
+            # Exploration feedback for cold-start items
+            "new_item_discovery": 0.05,
             # Negative signals
             "product_removed_from_cart": -0.2,
             "bounce": -0.1,
@@ -45,10 +49,6 @@ class GorseFeedbackTransformer:
             "high_engagement_session": 0.4,
             "conversion_session": 0.8,
             "research_session": 0.3,
-            # Search-product feedback
-            "search_conversion": 0.75,
-            "search_engagement": 0.45,
-            "search_relevance": 0.35,
         }
 
     def transform_order_to_feedback(self, order, shop_id: str) -> List[Dict[str, Any]]:
@@ -436,109 +436,6 @@ class GorseFeedbackTransformer:
             logger.error(f"Failed to transform session features: {str(e)}")
             return []
 
-    def transform_search_product_features_to_feedback(
-        self, search_features, shop_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Transform optimized search-product features to search-based feedback
-
-        Creates feedback based on search relevance and conversion patterns
-        """
-        try:
-            if hasattr(search_features, "__dict__"):
-                search_dict = search_features.__dict__
-            else:
-                search_dict = search_features
-
-            search_query = search_dict.get("search_query", "")
-            product_id = search_dict.get("product_id", "")
-            # Note: For search feedback, we'll use search query as "user" for search-to-product recommendations
-
-            if not search_query or not product_id:
-                return None
-
-            # Use optimized search-product features
-            search_click_rate = float(search_dict.get("search_click_rate", 0) or 0)
-            search_conversion_rate = float(
-                search_dict.get("search_conversion_rate", 0) or 0
-            )
-            search_relevance_score = float(
-                search_dict.get("search_relevance_score", 0) or 0
-            )
-            total_search_interactions = int(
-                search_dict.get("total_search_interactions", 0) or 0
-            )
-            search_to_purchase_count = int(
-                search_dict.get("search_to_purchase_count", 0) or 0
-            )
-            semantic_match_score = float(
-                search_dict.get("semantic_match_score", 0) or 0
-            )
-            search_intent_alignment = search_dict.get(
-                "search_intent_alignment", "no_intent"
-            )
-
-            # Skip very weak search-product relationships
-            if search_relevance_score < 0.1 and search_click_rate < 0.05:
-                return None
-
-            # Determine search feedback type and value
-            if search_to_purchase_count >= 2:  # Multiple conversions
-                feedback_type = "search_conversion"
-                base_value = 0.75
-            elif search_conversion_rate >= 0.3:  # High conversion rate
-                feedback_type = "search_conversion"
-                base_value = 0.75 * search_conversion_rate
-            elif search_click_rate >= 0.2:  # Good engagement
-                feedback_type = "search_engagement"
-                base_value = 0.45 * search_click_rate
-            elif search_relevance_score >= 0.5:  # Good relevance
-                feedback_type = "search_relevance"
-                base_value = 0.35 * search_relevance_score
-            else:
-                return None  # Skip low-quality search relationships
-
-            # Apply semantic match bonus
-            semantic_bonus = semantic_match_score * 0.1
-
-            # Apply intent alignment bonus
-            intent_bonuses = {
-                "high_intent": 0.15,
-                "medium_intent": 0.10,
-                "browsing_intent": 0.05,
-                "low_intent": 0.02,
-                "no_intent": 0.0,
-            }
-            intent_bonus = intent_bonuses.get(search_intent_alignment, 0.0)
-
-            # Calculate final feedback value
-            final_value = base_value + semantic_bonus + intent_bonus
-            final_value = max(0.05, min(final_value, 1.0))
-
-            # Apply temporal decay based on recency
-            search_timestamp = search_dict.get("last_computed_at", now_utc())
-            temporal_decay = self._calculate_temporal_decay(search_timestamp)
-            final_value *= temporal_decay
-
-            feedback = {
-                "FeedbackType": feedback_type,
-                "UserId": f"shop_{shop_id}_search_{hash(search_query) % 10000}",  # Hash search query for user ID
-                "ItemId": f"shop_{shop_id}_{product_id}",
-                "Timestamp": (
-                    search_timestamp.isoformat()
-                    if hasattr(search_timestamp, "isoformat")
-                    else str(search_timestamp)
-                ),
-                "Value": round(final_value, 3),
-                "Comment": f"Search feedback: '{search_query}' -> {product_id} (relevance: {search_relevance_score:.2f}, intent: {search_intent_alignment})",
-            }
-
-            return feedback
-
-        except Exception as e:
-            logger.error(f"Failed to transform search-product features: {str(e)}")
-            return None
-
     def transform_product_pair_features_to_similarity_feedback(
         self, pair_features, shop_id: str
     ) -> Optional[Dict[str, Any]]:
@@ -614,6 +511,73 @@ class GorseFeedbackTransformer:
         except Exception as e:
             logger.error(f"Failed to transform product-pair features: {str(e)}")
             return None
+
+    def generate_exploration_feedback(
+        self,
+        items: List[Dict[str, Any]],
+        active_user_ids: List[str],
+        shop_id: str,
+        exploration_window_days: int = 7,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generate synthetic exploration feedback for new items to address cold-start gap.
+
+        Gorse has no native exploration parameter. New items receive zero interactions
+        initially, so the FM cannot learn meaningful embeddings for them. This method
+        injects a small positive signal (value=0.05) for each new item, distributed
+        across recent active users, giving the FM a starting point for item embeddings.
+
+        Args:
+            items: List of Gorse item dicts with 'ItemId' and 'Timestamp'
+            active_user_ids: List of recently active user IDs to distribute feedback across
+            shop_id: Shop ID for namespacing
+            exploration_window_days: Items newer than this many days get exploration feedback
+
+        Returns:
+            List of feedback dicts with FeedbackType="new_item_discovery", Value=0.05
+        """
+        feedback_list = []
+        now = datetime.utcnow()
+        cutoff = now - timedelta(days=exploration_window_days)
+
+        if not active_user_ids:
+            return feedback_list
+
+        for item in items:
+            item_timestamp = item.get("Timestamp")
+            if not item_timestamp:
+                continue
+
+            # Parse timestamp
+            if isinstance(item_timestamp, str):
+                try:
+                    item_time = datetime.fromisoformat(item_timestamp.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    continue
+            elif isinstance(item_timestamp, datetime):
+                item_time = item_timestamp
+            else:
+                continue
+
+            # Only for items created within the exploration window
+            if item_time < cutoff:
+                continue
+
+            # Assign this item to one random active user (deterministic by item_id hash)
+            item_id = item.get("ItemId", "")
+            user_idx = hash(item_id + shop_id) % len(active_user_ids)
+            user_id = active_user_ids[user_idx]
+
+            feedback_list.append({
+                "FeedbackType": "new_item_discovery",
+                "UserId": user_id,
+                "ItemId": item_id,
+                "Timestamp": now.isoformat(),
+                "Value": 0.05,
+                "Comment": f"Exploration boost: new item < {exploration_window_days}d old",
+            })
+
+        return feedback_list
 
     # ===== CONFIDENCE CALCULATION METHODS =====
 
@@ -766,21 +730,6 @@ class GorseFeedbackTransformer:
 
         return all_feedback
 
-    def transform_search_features_batch_to_feedback(
-        self, search_features_list: List[Any], shop_id: str
-    ) -> List[Dict[str, Any]]:
-        """Transform batch of search-product features to search-based feedback"""
-        feedback_list = []
-
-        for search_features in search_features_list:
-            feedback = self.transform_search_product_features_to_feedback(
-                search_features, shop_id
-            )
-            if feedback:
-                feedback_list.append(feedback)
-
-        return feedback_list
-
     def transform_product_pair_batch_to_similarity_feedback(
         self, pair_features_list: List[Any], shop_id: str
     ) -> List[Dict[str, Any]]:
@@ -806,14 +755,17 @@ class GorseFeedbackTransformer:
         orders: List[Any] = None,
         interaction_features: List[Any] = None,
         session_features: List[Any] = None,
-        search_features: List[Any] = None,
         pair_features: List[Any] = None,
         shop_id: str = "",
     ) -> List[Dict[str, Any]]:
         """
         Generate comprehensive feedback using ALL available optimized features
 
-        This is the main method that combines all feedback types for maximum Gorse performance
+        This is the main method that combines all feedback types for maximum Gorse performance.
+
+        Note: search_product_features feedback was removed (option A). Search queries are
+        session-level context, not user-item signals. Session signals are already captured
+        by transform_session_features_to_feedback().
         """
         all_feedback = []
 
@@ -841,14 +793,7 @@ class GorseFeedbackTransformer:
                 )
                 all_feedback.extend(session_feedback)
 
-            # 4. Search-based feedback (search-to-product relevance)
-            if search_features:
-                search_feedback = self.transform_search_features_batch_to_feedback(
-                    search_features, shop_id
-                )
-                all_feedback.extend(search_feedback)
-
-            # 5. Product similarity feedback (item-to-item relationships)
+            # 4. Product similarity feedback (item-to-item relationships)
             if pair_features:
                 similarity_feedback = (
                     self.transform_product_pair_batch_to_similarity_feedback(

@@ -1,0 +1,15 @@
+{
+  "name": "Low Cache Hit Ratio",
+  "stream": "python-worker-metrics",
+  "query": "SELECT sum(cache_hits) / (sum(cache_hits) + sum(cache_misses)) as hit_ratio FROM \"python-worker-metrics\" WHERE timestamp > now() - 10m",
+  "condition": "hit_ratio < 0.5",
+  "eval_period": "10m",
+  "frequency": "10m",
+  "notifications": [
+    {
+      "type": "slack",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    }
+  ],
+  "message": "Cache hit ratio is {{hit_ratio}} (threshold: 0.5)"
+}

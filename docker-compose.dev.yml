@@ -151,10 +151,10 @@ services:
       timeout: 3s
       retries: 5
 
-  # ==================== GORSE ====================
-  gorse:
-    image: zhenghaoz/gorse-in-one:latest
-    container_name: betterbundle-gorse-dev
+  # ==================== GORSE MASTER ====================
+  gorse-master:
+    image: zhenghaoz/gorse-master:latest
+    container_name: betterbundle-gorse-master-dev
     restart: unless-stopped
     ports:
       - "8086:8086"
@@ -177,8 +177,74 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=gorse,env=dev"
+        labels: "service=gorse-master,env=dev"
     depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ==================== GORSE SERVER ====================
+  gorse-server:
+    image: zhenghaoz/gorse-server:latest
+    container_name: betterbundle-gorse-server-dev
+    restart: unless-stopped
+    ports:
+      - "8089:8089"
+    env_file:
+      - .env.dev
+    command:
+      - -c
+      - /etc/gorse/config.toml
+      - --log-path
+      - /var/log/gorse/server.log
+      - --cache-path
+      - /var/lib/gorse/server
+    volumes:
+      - ./config.toml:/etc/gorse/config.toml
+      - gorse_logs:/var/log/gorse
+      - gorse_server_cache:/var/lib/gorse/server
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=gorse-server,env=dev"
+    depends_on:
+      gorse-master:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ==================== GORSE WORKER ====================
+  gorse-worker:
+    image: zhenghaoz/gorse-worker:latest
+    container_name: betterbundle-gorse-worker-dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    command:
+      - -c
+      - /etc/gorse/config.toml
+      - --log-path
+      - /var/log/gorse/worker.log
+      - --cache-path
+      - /var/lib/gorse/worker
+    volumes:
+      - ./config.toml:/etc/gorse/config.toml
+      - gorse_logs:/var/log/gorse
+      - gorse_worker_cache:/var/lib/gorse/worker
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=gorse-worker,env=dev"
+    depends_on:
+      gorse-master:
+        condition: service_started
       postgres:
         condition: service_healthy
       redis:
@@ -204,7 +270,7 @@ services:
         condition: service_healthy
       kafka_b:
         condition: service_healthy
-      gorse:
+      gorse-master:
         condition: service_started
     restart: unless-stopped
     logging:
@@ -220,81 +286,53 @@ services:
       retries: 3
       start_period: 60s
 
-  # ==================== LOGGING STACK ====================
-
-  # Loki - Log Aggregation
-  loki:
-    image: grafana/loki:3.4.1
-    container_name: betterbundle-loki-dev
-    ports:
-      - "3100:3100"
-    volumes:
-      - ./loki-config.yaml:/etc/loki/loki-config.yaml
-      - loki_data:/loki
-    command: -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost:3100/ready",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
-
-  # Promtail - Log Collector
-  promtail:
-    image: grafana/promtail:3.4.1
-    container_name: betterbundle-promtail-dev
-    volumes:
-      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    command: -config.file=/etc/promtail/promtail-config.yaml
+  # ── OpenObserve ──────────────────────────────────────
+  openobserve:
+    image: openobserve/openobserve:latest
+    container_name: betterbundle-openobserve
     depends_on:
-      loki:
+      minio:
         condition: service_healthy
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
-
-  # Grafana - Visualization
-  grafana:
-    image: grafana/grafana:11.4.0
-    container_name: betterbundle-grafana-dev
-    ports:
-      - "3001:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3001
-      - GF_INSTALL_PLUGINS=redis-datasource
+      - ZO_ROOT_USER_EMAIL=admin@betterbundle.io
+      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_ADMIN_PASSWORD:-admin}
+      - ZO_S3_BUCKET_NAME=betterbundle-observability
+      - ZO_S3_REGION=us-east-1
+      - ZO_S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - ZO_S3_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - ZO_S3_SERVER_URL=http://minio:9000
+      - ZO_DATA_DIR=/data
+      - ZO_LOCAL_MODE=false
+      - ZO_TELEMETRY=false
+    ports:
+      - "5080:5080"
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana-provisioning:/etc/grafana/provisioning # Mount entire directory
-    depends_on:
-      loki:
-        condition: service_healthy
+      - openobserve_data:/data
+    networks:
+      - betterbundle-network
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
+
+  # ── MinIO (S3-compatible storage for OpenObserve) ───
+  minio:
+    image: minio/minio:latest
+    container_name: betterbundle-minio
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - betterbundle-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
   postgres_data:
@@ -302,5 +340,11 @@ volumes:
   kafka_data:
   gorse_logs:
   gorse_cache:
-  loki_data:
-  grafana_data:
+  gorse_server_cache:
+  gorse_worker_cache:
+  openobserve_data:
+  minio_data:
+
+networks:
+  betterbundle-network:
+    driver: bridge

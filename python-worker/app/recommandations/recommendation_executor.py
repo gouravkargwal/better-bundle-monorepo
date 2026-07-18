@@ -15,6 +15,7 @@ from app.recommandations.frequently_bought_together import (
     FrequentlyBoughtTogetherService,
 )
 from app.recommandations.recently_viewed import RecentlyViewedService
+from app.shared.decorators.tracing import async_trace_func
 
 logger = get_logger(__name__)
 
@@ -37,6 +38,7 @@ class RecommendationExecutor:
         except Exception:
             return None
 
+    @async_trace_func()
     async def execute_recommendation_level(
         self,
         level: str,
@@ -430,6 +432,7 @@ class RecommendationExecutor:
         )
         return result
 
+    @async_trace_func()
     async def execute_fallback_chain(
         self,
         context: str,

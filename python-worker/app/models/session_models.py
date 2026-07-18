@@ -50,7 +50,7 @@ class SessionRequest(BaseModel):
     page_url: Optional[str] = Field(None, description="Current page URL")
     extension_type: Optional[str] = Field(
         None,
-        description="Extension type (phoenix, apollo, venus, atlas, mercury). Defaults to 'unknown' if not provided.",
+        description="Extension type (apollo, atlas, mercury). Defaults to 'unknown' if not provided.",
     )
 
 
@@ -104,7 +104,7 @@ class SessionAndRecommendationsRequest(BaseModel):
     )
     extension_type: Optional[str] = Field(
         None,
-        description="Extension type (phoenix, apollo, venus, atlas, mercury). Defaults to 'unknown' if not provided.",
+        description="Extension type (apollo, atlas, mercury). Defaults to 'unknown' if not provided.",
     )
 
 

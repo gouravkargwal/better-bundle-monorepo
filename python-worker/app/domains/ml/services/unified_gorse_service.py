@@ -41,8 +41,8 @@ from app.core.database.models import (
     SearchProductFeatures,  # NEW - Search-product features
     ProductPairFeatures,  # NEW - Product-pair features
     OrderData,
+    ProductData,
 )
-
 
 logger = get_logger(__name__)
 
@@ -109,7 +109,8 @@ class UnifiedGorseService:
             # Advanced feature sync
             ("interaction_feedback", self._sync_interaction_features_to_gorse(shop_id)),
             ("session_feedback", self._sync_session_features_to_gorse(shop_id)),
-            ("search_feedback", self._sync_search_product_features_to_gorse(shop_id)),
+            # Search feedback removed (Option A): search queries are session-level context,
+            # not user-item signals. Session signals are already captured by session_feedback.
             ("pair_feedback", self._sync_product_pair_features_to_gorse(shop_id)),
             # Traditional order feedback (for validation)
             ("order_feedback", self._sync_order_feedback_to_gorse(shop_id)),
@@ -284,6 +285,37 @@ class UnifiedGorseService:
                         products, shop_id
                     )
 
+                    # Fetch product title/description and compute item embeddings so
+                    # Gorse's embedding-based item-to-item similarity has something to
+                    # compare, and the LLM reranker's document_template has real text.
+                    if gorse_items:
+                        product_ids = [p.product_id for p in products]
+                        text_stmt = select(
+                            ProductData.product_id,
+                            ProductData.title,
+                            ProductData.description,
+                            ProductData.product_type,
+                        ).where(
+                            ProductData.shop_id == shop_id,
+                            ProductData.product_id.in_(product_ids),
+                        )
+                        text_result = await session.execute(text_stmt)
+                        product_texts = {
+                            row.product_id: " - ".join(
+                                part
+                                for part in [
+                                    row.title,
+                                    row.product_type,
+                                    (row.description or "")[:500],
+                                ]
+                                if part
+                            )
+                            for row in text_result.all()
+                        }
+                        gorse_items = await self.item_transformer.attach_embeddings(
+                            gorse_items, product_texts, shop_id
+                        )
+
                     # Push to Gorse API
                     if gorse_items:
                         await self.gorse_client.insert_items_batch(gorse_items)
@@ -396,52 +428,6 @@ class UnifiedGorseService:
         except Exception as e:
             logger.error(
                 f"Failed to sync session features for shop {shop_id}: {str(e)}"
-            )
-            return 0
-
-    async def _sync_search_product_features_to_gorse(self, shop_id: str) -> int:
-        """
-        Sync search-product features to create search relevance feedback
-        """
-        try:
-            total_synced = 0
-            offset = 0
-
-            async with get_session_context() as session:
-                while True:
-                    stmt = (
-                        select(SearchProductFeatures)
-                        .where(SearchProductFeatures.shop_id == shop_id)
-                        .order_by(SearchProductFeatures.last_computed_at.asc())
-                        .offset(offset)
-                        .limit(self.batch_size)
-                    )
-                    result = await session.execute(stmt)
-                    search_features = result.scalars().all()
-
-                    if not search_features:
-                        break
-
-                    # Transform search-product features to relevance feedback
-                    search_feedback = self.feedback_transformer.transform_search_features_batch_to_feedback(
-                        search_features, shop_id
-                    )
-
-                    # Push to Gorse API
-                    if search_feedback:
-                        await self.gorse_client.insert_feedback_batch(search_feedback)
-                        total_synced += len(search_feedback)
-
-                    if len(search_features) < self.batch_size:
-                        break
-
-                    offset += self.batch_size
-
-            return total_synced
-
-        except Exception as e:
-            logger.error(
-                f"Failed to sync search-product features for shop {shop_id}: {str(e)}"
             )
             return 0
 
@@ -582,22 +568,7 @@ class UnifiedGorseService:
                         )
                     )
 
-            # 3. Get search-product features and generate relevance feedback
-            async with get_session_context() as session:
-                stmt = select(SearchProductFeatures).where(
-                    SearchProductFeatures.shop_id == shop_id
-                )
-                result = await session.execute(stmt)
-                search_features = result.scalars().all()
-
-                if search_features:
-                    all_feedback_types["search_feedback"] = (
-                        self.feedback_transformer.transform_search_features_batch_to_feedback(
-                            search_features, shop_id
-                        )
-                    )
-
-            # 4. Get product-pair features and generate similarity feedback
+            # 3. Get product-pair features and generate similarity feedback
             async with get_session_context() as session:
                 stmt = select(ProductPairFeatures).where(
                     ProductPairFeatures.shop_id == shop_id
@@ -730,13 +701,14 @@ class UnifiedGorseService:
     def _track_product_label_stats(self, gorse_items: List[Dict[str, Any]]) -> None:
         """Track product label statistics for monitoring"""
         try:
-            total_labels = sum(len(i["Labels"]) for i in gorse_items)
+            # Labels is {"tags": [...], "embedding"?: [...]} - stats only cover tags.
+            total_labels = sum(len(i["Labels"]["tags"]) for i in gorse_items)
             avg_labels = total_labels / len(gorse_items)
 
             # Analyze label distribution
             label_distribution = {}
             for item in gorse_items:
-                for label in item["Labels"]:
+                for label in item["Labels"]["tags"]:
                     label_type = label.split(":")[0]
                     label_distribution[label_type] = (
                         label_distribution.get(label_type, 0) + 1

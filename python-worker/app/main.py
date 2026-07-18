@@ -9,9 +9,13 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import time
 
 from app.core.config.settings import settings
 from app.core.logging import get_logger
+from app.core.logging.otel_logger import init_otel_logger
+from app.core.logging.otel_metrics import init_otel_metrics
+from app.core.metrics import request_count, request_duration
 from app.shared.helpers import now_utc
 
 from app.domains.shopify.services import (
@@ -25,10 +29,10 @@ from app.core.kafka.consumer_manager import KafkaConsumerManager
 
 
 from app.api.v1.unified_gorse import router as unified_gorse_router
+from app.api.v1.ai_rerank import router as ai_rerank_router
 from app.api.v1.attribution_backfill import router as attribution_backfill_router
 from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
-from app.api.v1.record_matching import router as record_matching_router
 from app.api.v1.fbt_status import router as fbt_status_router
 from app.api.v1.logs import router as logs_router
 from app.api.v1.data_collection import router as data_collection_router
@@ -40,11 +44,25 @@ from app.routes.recommendation_routes import router as recommendation_router
 
 logger = get_logger(__name__)
 
+# OTel provider instances – kept alive for graceful shutdown
+_otel_provider = None
+_metrics_provider = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
+
+    # Initialize OpenTelemetry logging
+    global _otel_provider
+    _otel_provider = init_otel_logger(settings)
+    logger.info("✅ OpenTelemetry logging initialized")
+
+    # Initialize OpenTelemetry metrics
+    global _metrics_provider
+    _metrics_provider = init_otel_metrics(settings)
+    logger.info("✅ OpenTelemetry metrics initialized")
 
     # Initialize services
     await initialize_services()
@@ -69,6 +87,15 @@ async def lifespan(app: FastAPI):
 
     await cleanup_services()
 
+    # Graceful shutdown of OTel providers
+    if _otel_provider is not None and hasattr(_otel_provider, "shutdown"):
+        _otel_provider.shutdown()
+        logger.info("✅ OpenTelemetry logging provider shut down")
+
+    if _metrics_provider is not None and hasattr(_metrics_provider, "shutdown"):
+        _metrics_provider.shutdown()
+        logger.info("✅ OpenTelemetry metrics provider shut down")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -78,12 +105,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# OpenTelemetry instrumentation for FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+FastAPIInstrumentor.instrument_app(app)
+
 # Include API routers
 app.include_router(unified_gorse_router)
+app.include_router(ai_rerank_router)
 app.include_router(attribution_backfill_router)
 app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
-app.include_router(record_matching_router)
 app.include_router(fbt_status_router)
 app.include_router(logs_router)
 app.include_router(data_collection_router)
@@ -102,6 +134,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Metrics middleware — records request count and duration for every request
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    request_count.add(
+        1,
+        {
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+        },
+    )
+    request_duration.record(
+        duration,
+        {
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+        },
+    )
+    return response
+
+
 # Global service instances
 services = {}
 
@@ -113,6 +171,16 @@ async def initialize_services():
     """Initialize only essential services at startup"""
     try:
         logger.info("Starting service initialization...")
+
+        # Instrument HTTPX, Redis, and Kafka clients
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.instrumentation.redis import RedisInstrumentor
+        from opentelemetry.instrumentation.kafka_python import KafkaInstrumentor
+
+        HTTPXClientInstrumentor().instrument()
+        RedisInstrumentor().instrument()
+        KafkaInstrumentor().instrument()
+        logger.info("✅ OpenTelemetry instrumentations applied")
 
         # 1. Check Database connectivity first (critical - fail if unavailable)
         logger.info("Checking database connectivity...")

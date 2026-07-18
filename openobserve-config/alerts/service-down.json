@@ -1,0 +1,15 @@
+{
+  "name": "Python Worker Down",
+  "stream": "python-worker-logs",
+  "query": "SELECT count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 2m",
+  "condition": "log_count < 1",
+  "eval_period": "2m",
+  "frequency": "1m",
+  "notifications": [
+    {
+      "type": "slack",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    }
+  ],
+  "message": "Python worker has not emitted any logs for 2 minutes — possible down"
+}

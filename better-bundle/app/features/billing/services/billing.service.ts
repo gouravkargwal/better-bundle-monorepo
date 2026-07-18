@@ -12,91 +12,126 @@ export class BillingService {
     admin?: any,
   ): Promise<BillingState> {
     try {
-      // 1. Get trial revenue (single source of truth)
-      const trialRevenue = await this.getTrialRevenue(shopId);
-
-      // 2. Get trial threshold (from subscription override or pricing tier)
-      // Get active subscription (prioritize ACTIVE status, but also check SUSPENDED for cap increases)
+      // 1. Get shop subscription
       const subscription = await prisma.shop_subscriptions.findFirst({
         where: {
           shop_id: shopId,
           is_active: true,
         },
-        include: { pricing_tiers: true },
+        include: {
+          pricing_tiers: true,
+          subscription_plans: true,
+        },
         orderBy: {
-          created_at: "desc", // Get most recent active subscription
+          created_at: "desc",
         },
       });
-      const trialThreshold = Number(
-        subscription?.trial_threshold_override ||
-          subscription?.pricing_tiers?.trial_threshold_amount ||
-          75,
-      );
 
-      // 3. Simple logic: If trial not completed, show trial
-      if (trialRevenue < trialThreshold) {
+      if (!subscription) {
         return {
           status: "trial_active",
-          trialData: await this.getTrialDataFromRevenue(
-            shopId,
-            trialRevenue,
-            trialThreshold,
-          ),
+          trialData: await this.getDefaultTrialData(shopId),
         };
       }
 
-      // 4. Check subscription status: Always check Shopify GraphQL first (source of truth)
-      if (admin) {
-        const shopifyStatus = await this.getShopifySubscriptionStatus(
-          shopId,
-          admin,
+      const isTrialPhase = subscription.subscription_type === "TRIAL";
+      const isPaidPhase = subscription.subscription_type === "PAID";
+
+      // 2. TRIAL PHASE: Time-based, check expiry
+      if (isTrialPhase) {
+        const trialDays =
+          subscription.trial_duration_days ||
+          subscription.pricing_tiers?.trial_days ||
+          14;
+        const startedAt = subscription.started_at;
+        const trialEnd = new Date(
+          startedAt.getTime() + trialDays * 24 * 60 * 60 * 1000,
+        );
+        const now = new Date();
+        const daysRemaining = Math.max(
+          0,
+          Math.ceil(
+            (trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+          ),
         );
 
-        if (shopifyStatus) {
-          if (
-            shopifyStatus.status === "ACTIVE" ||
-            shopifyStatus.status === "PENDING"
-          ) {
-            // Both ACTIVE and PENDING subscriptions should show as active in our UI
-            // PENDING just means awaiting merchant approval
-            return {
-              status: "subscription_active",
-              subscriptionData: await this.getSubscriptionDataFromShopify(
-                subscription || {},
-                shopifyStatus,
-              ),
-            };
-          }
-        }
-      } else if (
-        subscription &&
-        subscription.subscription_type === "PAID" &&
-        subscription.shopify_subscription_id
-      ) {
-        // No admin client, but we have subscription with Shopify ID, assume active
-        return {
-          status: "subscription_active",
-          subscriptionData: await this.getSubscriptionDataFromShopify(
-            subscription,
-            {
-              status: subscription.shopify_status || "ACTIVE",
-              subscriptionId: subscription.shopify_subscription_id,
-              cappedAmount: Number(subscription.user_chosen_cap_amount || 0),
-              currentUsage: 0,
+        if (daysRemaining > 0 && subscription.status === "TRIAL") {
+          return {
+            status: "trial_active",
+            trialData: {
+              isActive: true,
+              daysRemaining,
+              trialDays,
               currency: subscription.pricing_tiers?.currency || "USD",
             },
-          ),
+          };
+        }
+
+        // Trial expired
+        return {
+          status: "trial_completed",
+          trialData: {
+            isActive: false,
+            daysRemaining: 0,
+            trialDays,
+            currency: subscription.pricing_tiers?.currency || "USD",
+          },
         };
       }
 
-      // 5. Trial completed, no active Shopify subscription = show setup button
+      // 3. PAID PHASE: Check Shopify subscription status
+      if (isPaidPhase) {
+        if (admin) {
+          const shopifyStatus = await this.getShopifySubscriptionStatus(
+            shopId,
+            admin,
+          );
+
+          if (shopifyStatus) {
+            if (
+              shopifyStatus.status === "ACTIVE" ||
+              shopifyStatus.status === "PENDING"
+            ) {
+              return {
+                status: "subscription_active",
+                subscriptionData: await this.getSubscriptionDataFromShopify(
+                  subscription,
+                  shopifyStatus,
+                ),
+              };
+            }
+
+            if (shopifyStatus.status === "CANCELLED") {
+              return {
+                status: "subscription_cancelled",
+              };
+            }
+          }
+        } else if (subscription.shopify_subscription_id) {
+          // No admin client, use DB info
+          return {
+            status: "subscription_active",
+            subscriptionData: {
+              id: subscription.shopify_subscription_id,
+              status:
+                (subscription.shopify_status as any) || "ACTIVE",
+              planName:
+                subscription.subscription_plans?.name || "Flat Fee Plan",
+              monthlyFee: Number(
+                subscription.monthly_fee_override ||
+                  subscription.pricing_tiers?.monthly_fee ||
+                  29,
+              ),
+              currency: subscription.pricing_tiers?.currency || "USD",
+            },
+          };
+        }
+      }
+
+      // 4. TRIAL COMPLETED - needs billing setup
       return {
         status: "trial_completed",
-        trialData: await this.getTrialDataFromRevenue(
-          shopId,
-          trialRevenue,
-          trialThreshold,
-        ),
+        trialData: await this.getDefaultTrialData(shopId),
       };
     } catch (error) {
       logger.error({ error }, "Error getting billing state");
@@ -110,77 +145,26 @@ export class BillingService {
     }
   }
 
-  /**
-   * ✅ Simplified: Get trial revenue from commission records
-   */
-  private static async getTrialRevenue(shopId: string): Promise<number> {
-    const result = await prisma.commission_records.aggregate({
-      where: {
-        shop_id: shopId,
-        billing_phase: "TRIAL",
-        status: {
-          in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-        },
-      },
-      _sum: {
-        attributed_revenue: true,
-      },
-    });
-    return Number(result._sum?.attributed_revenue || 0);
-  }
-
-  /**
-   * ✅ Simplified: Get trial data from revenue (no complex status checks)
-   */
-  private static async getTrialDataFromRevenue(
-    shopId: string,
-    revenue: number,
-    threshold: number = 75,
-  ): Promise<TrialData> {
-    const progress = Math.min((revenue / threshold) * 100, 100);
-
-    // Get shop currency from database
+  private static async getDefaultTrialData(shopId: string): Promise<TrialData> {
     const shop = await prisma.shops.findUnique({
       where: { id: shopId },
       select: { currency_code: true },
     });
-
     return {
-      isActive: revenue < threshold,
-      thresholdAmount: threshold,
-      accumulatedRevenue: revenue,
-      progress: Math.round(progress),
+      isActive: true,
+      daysRemaining: 14,
+      trialDays: 14,
       currency: shop?.currency_code || "USD",
     };
   }
 
   /**
-   * ✅ Simplified: Get subscription data from Shopify API
+   * Get subscription data from Shopify API (flat fee)
    */
   private static async getSubscriptionDataFromShopify(
     shopSubscription: any,
     shopifyStatus: any,
   ): Promise<SubscriptionData> {
-    const spendingLimit =
-      shopifyStatus.cappedAmount ||
-      Number(shopSubscription.user_chosen_cap_amount || 0);
-
-    // ✅ Get Shopify usage from RECORDED commissions (what's actually in Shopify)
-    const shopifyUsage = shopifyStatus.currentUsage || 0;
-
-    // ✅ Calculate expected charge from PENDING commissions (excluding REJECTED)
-    const { expectedCharge, rejectedAmount } =
-      await this.getCommissionBreakdown(
-        shopSubscription.shop_id,
-        shopSubscription.id,
-      );
-
-    // Total current usage = Shopify usage + expected charge
-    const currentUsage = shopifyUsage + expectedCharge;
-
-    const usagePercentage =
-      spendingLimit > 0 ? Math.round((currentUsage / spendingLimit) * 100) : 0;
-
     return {
       id: shopifyStatus.subscriptionId || shopSubscription.id,
       status: shopifyStatus.status as
@@ -189,82 +173,30 @@ export class BillingService {
         | "DECLINED"
         | "CANCELLED"
         | "EXPIRED",
-      spendingLimit,
-      currentUsage,
-      shopifyUsage,
-      expectedCharge,
-      rejectedAmount, // Optional: Show separately
-      usagePercentage,
-      confirmationUrl: shopifyStatus.confirmationUrl,
+      planName:
+        shopSubscription.subscription_plans?.name || "Flat Fee Plan",
+      monthlyFee:
+        shopifyStatus.monthlyFee ||
+        Number(
+          shopSubscription.monthly_fee_override ||
+            shopSubscription.pricing_tiers?.monthly_fee ||
+            29,
+        ),
       currency: shopifyStatus.currency || "USD",
+      confirmationUrl: shopifyStatus.confirmationUrl,
+      billingCycle: shopifyStatus.currentPeriodEnd
+        ? {
+            startDate: shopifyStatus.currentPeriodStart,
+            endDate: shopifyStatus.currentPeriodEnd,
+            cycleNumber: shopifyStatus.cycleNumber || 1,
+          }
+        : undefined,
     };
   }
 
   /**
-   * Get commission breakdown: expected charge and rejected amount
-   */
-  private static async getCommissionBreakdown(
-    shopId: string,
-    subscriptionId: string,
-  ): Promise<{ expectedCharge: number; rejectedAmount: number }> {
-    try {
-      // Get current billing cycle
-      const currentCycle = await prisma.billing_cycles.findFirst({
-        where: {
-          shop_subscription_id: subscriptionId,
-          status: "ACTIVE",
-        },
-      });
-
-      if (!currentCycle) {
-        return { expectedCharge: 0, rejectedAmount: 0 };
-      }
-
-      // ✅ Expected charge: PENDING commissions that will be charged
-      const pendingCommissions = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_cycle_id: currentCycle.id,
-          billing_phase: "PAID",
-          status: "PENDING", // Only PENDING, exclude REJECTED
-          commission_charged: {
-            gt: 0,
-          },
-        },
-        _sum: {
-          commission_charged: true,
-        },
-      });
-
-      // ✅ Rejected amount: REJECTED commissions (for transparency, not counted in usage)
-      const rejectedCommissions = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopId,
-          billing_cycle_id: currentCycle.id,
-          billing_phase: "PAID",
-          status: "REJECTED",
-        },
-        _sum: {
-          commission_earned: true, // Show what would have been charged
-        },
-      });
-
-      return {
-        expectedCharge: Number(
-          pendingCommissions._sum?.commission_charged || 0,
-        ),
-        rejectedAmount: Number(
-          rejectedCommissions._sum?.commission_earned || 0,
-        ),
-      };
-    } catch (error) {
-      logger.error({ error, shopId }, "Error calculating commission breakdown");
-      return { expectedCharge: 0, rejectedAmount: 0 };
-    }
-  }
-
-  /**
-   * Get real-time Shopify subscription status via GraphQL API
+   * Get real-time Shopify subscription status via GraphQL (flat fee)
+   * Uses AppRecurringPricing instead of AppUsagePricing
    */
   static async getShopifySubscriptionStatus(
     shopId: string,
@@ -273,13 +205,12 @@ export class BillingService {
     status: string;
     subscriptionId?: string;
     confirmationUrl?: string;
-    currentUsage?: number;
-    cappedAmount?: number;
+    monthlyFee?: number;
     currency?: string;
+    currentPeriodEnd?: string;
+    currentPeriodStart?: string;
   } | null> {
     try {
-      // ALWAYS check GraphQL first (source of truth) when admin is available
-      // This ensures we get the real-time status even if DB is out of sync
       const currentInstallationQuery = `
         query {
           currentAppInstallation {
@@ -292,6 +223,14 @@ export class BillingService {
               lineItems {
                 plan {
                   pricingDetails {
+                    __typename
+                    ... on AppRecurringPricing {
+                      price {
+                        amount
+                        currencyCode
+                      }
+                      interval
+                    }
                     ... on AppUsagePricing {
                       cappedAmount {
                         amount
@@ -301,14 +240,6 @@ export class BillingService {
                         amount
                         currencyCode
                       }
-                      terms
-                    }
-                    ... on AppRecurringPricing {
-                      price {
-                        amount
-                        currencyCode
-                      }
-                      interval
                     }
                   }
                 }
@@ -322,36 +253,38 @@ export class BillingService {
       const data = await response.json();
 
       if (data.errors) {
-        console.error(
-          "GraphQL errors in activeSubscriptions query:",
-          data.errors,
+        logger.error(
+          { errors: data.errors },
+          "GraphQL errors in activeSubscriptions query",
         );
       }
 
-      console.log("[BillingService] GraphQL activeSubscriptions response:", {
-        hasData: !!data.data,
-        subscriptionCount:
-          data.data?.currentAppInstallation?.activeSubscriptions?.length || 0,
-        firstSubscription:
-          data.data?.currentAppInstallation?.activeSubscriptions?.[0]?.status,
-      });
-
-      // If we found active subscriptions via GraphQL, use that
+      // Check for active subscriptions from Shopify
       if (data.data?.currentAppInstallation?.activeSubscriptions?.length > 0) {
         const subscription =
           data.data.currentAppInstallation.activeSubscriptions[0];
         const lineItem = subscription.lineItems[0];
         const pricingDetails = lineItem?.plan?.pricingDetails;
 
-        // Sync with database - find subscription record and update it
+        // Extract monthly fee (works for both recurring and usage-based)
+        let monthlyFee: number | undefined;
+        let currency: string | undefined;
+
+        if (pricingDetails?.__typename === "AppRecurringPricing") {
+          monthlyFee = pricingDetails.price?.amount;
+          currency = pricingDetails.price?.currencyCode;
+        } else if (pricingDetails?.__typename === "AppUsagePricing") {
+          monthlyFee = pricingDetails.cappedAmount?.amount;
+          currency = pricingDetails.cappedAmount?.currencyCode;
+        }
+
+        // Sync with database
         const dbSubscription = await prisma.shop_subscriptions.findFirst({
           where: {
             shop_id: shopId,
             is_active: true,
           },
-          orderBy: {
-            created_at: "desc",
-          },
+          orderBy: { created_at: "desc" },
         });
 
         if (dbSubscription) {
@@ -363,18 +296,17 @@ export class BillingService {
                 shopify_status: subscription.status,
                 subscription_type: "PAID",
                 status:
-                  subscription.status === "ACTIVE"
+                  subscription.status === "ACTIVE" ||
+                  subscription.status === "PENDING"
                     ? "ACTIVE"
-                    : subscription.status === "PENDING"
-                      ? "ACTIVE" // PENDING subscriptions should still be shown as ACTIVE in our system
-                      : dbSubscription.status,
+                    : dbSubscription.status,
                 updated_at: new Date(),
               },
             });
           } catch (error) {
-            console.error(
-              "Failed to update subscription with Shopify ID:",
-              error,
+            logger.error(
+              { error },
+              "Failed to update subscription with Shopify ID",
             );
           }
         }
@@ -382,106 +314,14 @@ export class BillingService {
         return {
           status: subscription.status,
           subscriptionId: subscription.id,
-          currentUsage: pricingDetails?.balanceUsed?.amount || 0,
-          cappedAmount: pricingDetails?.cappedAmount?.amount || 0,
-          currency:
-            pricingDetails?.cappedAmount?.currencyCode ||
-            pricingDetails?.price?.currencyCode ||
-            "USD",
+          monthlyFee,
+          currency,
+          currentPeriodEnd: subscription.currentPeriodEnd,
         };
       }
 
-      // If no active subscriptions found, check if we have a subscription ID in DB and query it
-      const shopifySub = await prisma.shop_subscriptions.findFirst({
-        where: {
-          shop_id: shopId,
-          is_active: true,
-          shopify_subscription_id: { not: null },
-        },
-        orderBy: {
-          created_at: "desc",
-        },
-      });
-
-      if (!shopifySub?.shopify_subscription_id) {
-        // No subscription ID in DB - we already checked GraphQL above, so return null
-        return null;
-      }
-
-      // We have a subscription ID in DB but it wasn't in activeSubscriptions
-      // Query it directly to get its status (might be pending, cancelled, etc.)
-      const subscriptionQuery = `
-      query($id: ID!) {
-        node(id: $id) {
-          ... on AppSubscription {
-            id
-            name
-            status
-            test
-            currentPeriodEnd
-            lineItems {
-              plan {
-                pricingDetails {
-                  ... on AppUsagePricing {
-                    cappedAmount {
-                      amount
-                      currencyCode
-                    }
-                    balanceUsed {
-                      amount
-                      currencyCode
-                    }
-                    terms
-                  }
-                  ... on AppRecurringPricing {
-                    price {
-                      amount
-                      currencyCode
-                    }
-                    interval
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-      const nodeResponse = await admin.graphql(subscriptionQuery, {
-        variables: {
-          id: shopifySub.shopify_subscription_id,
-        },
-      });
-
-      const nodeData = await nodeResponse.json();
-
-      if (nodeData.errors) {
-        logger.error(
-          { errors: nodeData.errors },
-          "GraphQL errors in node query",
-        );
-        return null;
-      }
-
-      const subscription = nodeData.data?.node;
-      if (!subscription) {
-        return null;
-      }
-
-      const lineItem = subscription.lineItems[0];
-      const pricingDetails = lineItem?.plan?.pricingDetails;
-
-      return {
-        status: subscription.status,
-        subscriptionId: subscription.id,
-        currentUsage: pricingDetails?.balanceUsed?.amount || 0,
-        cappedAmount: pricingDetails?.cappedAmount?.amount || 0,
-        currency:
-          pricingDetails?.cappedAmount?.currencyCode ||
-          pricingDetails?.price?.currencyCode ||
-          "USD",
-      };
+      // No active subscriptions found
+      return null;
     } catch (error) {
       logger.error({ error }, "Error getting Shopify subscription status");
       return null;

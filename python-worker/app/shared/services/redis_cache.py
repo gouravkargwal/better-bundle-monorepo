@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from app.core.logging import get_logger
 from app.core.redis_client import get_redis_client
 from app.core.exceptions import RedisConnectionError, RedisTimeoutError
+from app.core.metrics import cache_hits, cache_misses
 
 logger = get_logger(__name__)
 
@@ -145,6 +146,7 @@ class RedisCacheService(Generic[T]):
 
             if not value_data or not metadata_data:
                 self._stats["misses"] += 1
+                cache_misses.add(1, {"namespace": self.namespace})
                 return None
 
             # Parse metadata
@@ -155,6 +157,7 @@ class RedisCacheService(Generic[T]):
                     f"Invalid metadata for key {cache_key}, treating as cache miss"
                 )
                 self._stats["misses"] += 1
+                cache_misses.add(1, {"namespace": self.namespace})
                 return None
 
             # Check if expired
@@ -173,6 +176,7 @@ class RedisCacheService(Generic[T]):
             # Deserialize value
             value = self.serializer.deserialize(value_data)
             self._stats["hits"] += 1
+            cache_hits.add(1, {"namespace": self.namespace})
 
             return value
 

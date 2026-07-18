@@ -8,8 +8,24 @@ from typing import Any, Callable, Optional
 from datetime import datetime
 
 from app.core.logging import get_logger
+from app.core.metrics import get_meter
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# OTel instruments — created once at module level
+# ---------------------------------------------------------------------------
+_monitor_meter = get_meter()
+_monitor_calls = _monitor_meter.create_counter(
+    "function.calls",
+    description="Total function calls",
+    unit="1",
+)
+_monitor_errors = _monitor_meter.create_counter(
+    "function.errors",
+    description="Total function errors",
+    unit="1",
+)
 
 
 def monitor(func_name: Optional[str] = None):
@@ -29,10 +45,27 @@ def monitor(func_name: Optional[str] = None):
 
                 execution_time = time.time() - start_time
 
+                _monitor_calls.add(
+                    1,
+                    {
+                        "function": func.__name__,
+                        "module": func.__module__,
+                        "status": "success",
+                    },
+                )
+
                 return result
 
             except Exception as e:
                 execution_time = time.time() - start_time
+                _monitor_errors.add(
+                    1,
+                    {
+                        "function": func.__name__,
+                        "module": func.__module__,
+                        "error_type": type(e).__name__,
+                    },
+                )
                 logger.error(
                     f"Failed {name}",
                     extra={
@@ -66,10 +99,27 @@ def async_monitor(func_name: Optional[str] = None):
 
                 execution_time = time.time() - start_time
 
+                _monitor_calls.add(
+                    1,
+                    {
+                        "function": func.__name__,
+                        "module": func.__module__,
+                        "status": "success",
+                    },
+                )
+
                 return result
 
             except Exception as e:
                 execution_time = time.time() - start_time
+                _monitor_errors.add(
+                    1,
+                    {
+                        "function": func.__name__,
+                        "module": func.__module__,
+                        "error_type": type(e).__name__,
+                    },
+                )
                 logger.error(
                     f"Failed {name}",
                     extra={

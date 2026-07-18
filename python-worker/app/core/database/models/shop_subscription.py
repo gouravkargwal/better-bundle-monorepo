@@ -2,10 +2,11 @@
 Simplified Shop Subscription Model
 
 Single table approach: multiple subscription records per shop, only one active.
-Combines trial, paid subscription, and Shopify billing into one unified model.
+Supports flat fee pricing with trial periods.
 """
 
 from decimal import Decimal
+from datetime import datetime, timedelta
 from sqlalchemy import (
     Column,
     String,
@@ -24,7 +25,10 @@ from .enums import SubscriptionType, SubscriptionStatus
 
 class ShopSubscription(BaseModel, ShopMixin):
     """
-    Unified Shop Subscription Model - keeps essential relationships
+    Unified Shop Subscription Model
+
+    Single active subscription per shop.
+    Supports flat fee pricing: trial period → recurring monthly charge.
     """
 
     __tablename__ = "shop_subscriptions"
@@ -60,14 +64,31 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     # ===== TRIAL-SPECIFIC FIELDS =====
     # These override the pricing_tier defaults when needed
-    trial_threshold_override = Column(Numeric(10, 2), nullable=True)
-    trial_duration_days = Column(Integer, nullable=True)
+    trial_threshold_override = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="[LEGACY] Revenue threshold override for usage-based trial",
+    )
+    trial_duration_days = Column(
+        Integer,
+        nullable=True,
+        comment="Override trial duration in days (from pricing_tier.trial_days)",
+    )
 
     # ===== PAID SUBSCRIPTION FIELDS =====
-    user_chosen_cap_amount = Column(Numeric(10, 2), nullable=True)
+    monthly_fee_override = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Override monthly fee for this shop (from pricing_tier.monthly_fee)",
+    )
+    user_chosen_cap_amount = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="[LEGACY] User-chosen cap amount for usage-based billing",
+    )
     auto_renew = Column(Boolean, default=True, nullable=False)
 
-    # ===== SHOPIFY INTEGRATION (MOVED HERE) =====
+    # ===== SHOPIFY INTEGRATION =====
     shopify_subscription_id = Column(String(255), nullable=True, index=True)
     shopify_line_item_id = Column(String(255), nullable=True)
     shopify_status = Column(String(50), nullable=True)
@@ -96,21 +117,55 @@ class ShopSubscription(BaseModel, ShopMixin):
     # ===== SMART PROPERTIES USING PRICING TIER =====
 
     @property
+    def is_trial(self) -> bool:
+        """Check if subscription is in trial phase"""
+        return self.subscription_type == SubscriptionType.TRIAL
+
+    @property
+    def is_paid(self) -> bool:
+        """Check if subscription is in paid phase"""
+        return self.subscription_type == SubscriptionType.PAID
+
+    @property
+    def effective_monthly_fee(self) -> Decimal:
+        """Get the effective monthly fee from pricing tier or override"""
+        if self.monthly_fee_override:
+            return self.monthly_fee_override
+        return (
+            self.pricing_tier.monthly_fee
+            if self.pricing_tier and self.pricing_tier.monthly_fee
+            else Decimal("29.00")
+        )
+
+    @property
+    def effective_trial_days(self) -> int:
+        """Get the effective trial duration in days"""
+        if self.trial_duration_days:
+            return self.trial_duration_days
+        return (
+            self.pricing_tier.trial_days
+            if self.pricing_tier and self.pricing_tier.trial_days
+            else 14
+        )
+
+    @property
     def effective_trial_threshold(self) -> Decimal:
-        """Get trial threshold from pricing tier or override"""
+        """[LEGACY] Get trial threshold from pricing tier or override"""
         if self.trial_threshold_override:
             return self.trial_threshold_override
         return (
             self.pricing_tier.trial_threshold_amount
-            if self.pricing_tier
+            if self.pricing_tier and self.pricing_tier.trial_threshold_amount
             else Decimal("75.00")
         )
 
     @property
     def effective_commission_rate(self) -> Decimal:
-        """Get commission rate from pricing tier"""
+        """[LEGACY] Get commission rate from pricing tier"""
         return (
-            self.pricing_tier.commission_rate if self.pricing_tier else Decimal("0.03")
+            self.pricing_tier.commission_rate
+            if self.pricing_tier and self.pricing_tier.commission_rate
+            else Decimal("0.03")
         )
 
     @property
@@ -121,13 +176,27 @@ class ShopSubscription(BaseModel, ShopMixin):
     @property
     def region_info(self) -> dict:
         """Get region metadata from pricing tier"""
-        if self.pricing_tier and self.pricing_tier.metadata:
-            return self.pricing_tier.metadata
+        if self.pricing_tier and self.pricing_tier.tier_metadata:
+            import json
+            try:
+                return json.loads(self.pricing_tier.tier_metadata)
+            except (json.JSONDecodeError, TypeError):
+                return {}
         return {}
 
     @property
     def effective_cap_amount(self) -> Decimal:
-        """Get effective cap - user choice or fall back to trial threshold"""
+        """[LEGACY] Get effective cap - user choice or fall back to trial threshold"""
         if self.is_paid and self.user_chosen_cap_amount:
             return self.user_chosen_cap_amount
         return self.effective_trial_threshold
+
+    @property
+    def trial_remaining_days(self) -> int:
+        """Calculate remaining trial days"""
+        if not self.is_trial or not self.started_at:
+            return 0
+        trial_end = self.started_at + timedelta(days=self.effective_trial_days)
+        now = datetime.utcnow()
+        remaining = (trial_end - now).days
+        return max(0, remaining)

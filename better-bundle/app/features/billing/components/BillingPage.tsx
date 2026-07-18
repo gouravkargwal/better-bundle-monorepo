@@ -49,12 +49,12 @@ export function BillingPage({
             shopCurrency={shopCurrency}
             onSetupBilling={async (setupData: BillingSetupData) => {
               try {
-                // This will be handled by the existing API route
+                // Use planId to set up recurring billing
                 const response = await fetch("/api/billing/setup", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    monthlyCap: setupData.spendingLimit,
+                    planId: setupData.planId,
                     currency: setupData.currency,
                   }),
                 });
@@ -77,7 +77,7 @@ export function BillingPage({
                 return result;
               } catch (error) {
                 console.error("Billing setup failed:", error);
-                throw error; // Re-throw to let component handle it
+                throw error;
               }
             }}
           />
@@ -96,18 +96,9 @@ export function BillingPage({
           <SubscriptionActive
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
-            onIncreaseCap={async (newLimit: number) => {
-              const response = await fetch("/api/billing/increase-cap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ spendingLimit: newLimit }),
-              });
-
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              }
-              return result;
+            onIncreaseCap={async () => {
+              // Flat fee pricing — no cap to increase
+              return { success: false, error: "Not applicable for flat fee plans" };
             }}
           />
         );
@@ -118,7 +109,6 @@ export function BillingPage({
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
             onReactivate={async () => {
-              // This would typically redirect to a reactivation flow
               window.location.href = "/app/billing?action=reactivate";
               return { success: true };
             }}

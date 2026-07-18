@@ -394,7 +394,7 @@ export const trackRecommendationClick = async (
 };
 
 /**
- * Track add to cart action (following Phoenix pattern)
+ * Track add to cart action
  */
 export const trackAddToCart = async (
   storage,

@@ -164,7 +164,7 @@ class PurchaseAttributionKafkaConsumer:
                 currency = getattr(order, "currency_code", None) or "USD"
                 customer_id = getattr(order, "customer_id", None)
 
-                # ✅ CHECK ORDER METAFIELDS FOR SESSION ID (following Phoenix pattern)
+                # ✅ CHECK ORDER METAFIELDS FOR SESSION ID
                 session_id_from_metafields = None
                 order_metafields = getattr(order, "metafields", None)
                 if order_metafields and isinstance(order_metafields, list):
@@ -252,7 +252,7 @@ class PurchaseAttributionKafkaConsumer:
                         ]
 
                 # ✅ UPDATED: Check for tracking data in addition to UserInteraction records
-                # This ensures orders with line item properties (Phoenix) or metafields (Apollo)
+                # This ensures orders with line item properties or metafields (Apollo)
                 # are processed even if UserInteraction records don't exist
                 has_tracking_data = self._has_tracking_data_from_extensions(
                     products, order_metafields_list
@@ -312,8 +312,6 @@ class PurchaseAttributionKafkaConsumer:
                 UserInteraction.created_at >= cutoff_time,
                 UserInteraction.extension_type.in_(
                     [
-                        "phoenix",
-                        "venus",
                         "apollo",
                     ]
                 ),  # Attribution-eligible extensions
@@ -348,20 +346,18 @@ class PurchaseAttributionKafkaConsumer:
         order_metafields: Optional[List[Dict[str, Any]]],
     ) -> bool:
         """
-        Check if order has tracking data from extensions (Phoenix line items or Apollo metafields).
+        Check if order has tracking data from extensions (line items or Apollo metafields).
 
         This is the PRIORITY source of truth - what extensions actually added to the order
         at checkout time, regardless of whether UserInteraction records exist.
         """
-        # 1. Check for Phoenix tracking in line item properties
+        # 1. Check for tracking in line item properties
         for product in products:
             properties = product.get("properties", {})
             if isinstance(properties, dict) and properties:
                 extension = properties.get("_bb_rec_extension")
-                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
-                    logger.debug(
-                        f"✅ Found Phoenix tracking data in line item: {extension}"
-                    )
+                if extension and extension.lower() in ["apollo", "mercury"]:
+                    logger.debug(f"✅ Found tracking data in line item: {extension}")
                     return True
 
         # 2. Check for Apollo/Mercury tracking in order metafields
@@ -373,7 +369,7 @@ class PurchaseAttributionKafkaConsumer:
                     and metafield.get("key") == "extension"
                 ):
                     extension_value = metafield.get("value", "").lower()
-                    if extension_value in ["apollo", "phoenix", "venus", "mercury"]:
+                    if extension_value in ["apollo", "mercury"]:
                         logger.debug(
                             f"✅ Found tracking data in metafields: {extension_value}"
                         )
@@ -386,9 +382,7 @@ class PurchaseAttributionKafkaConsumer:
                 ):
                     products_value = metafield.get("value")
                     if products_value:
-                        logger.debug(
-                            f"✅ Found Mercury products array in metafields"
-                        )
+                        logger.debug(f"✅ Found Mercury products array in metafields")
                         return True
 
         return False

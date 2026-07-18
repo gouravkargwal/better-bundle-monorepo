@@ -32,7 +32,7 @@ class InteractionRequest(BaseModel):
     session_id: str = Field(..., description="Unified session identifier")
     shop_domain: str = Field(..., description="Shop domain")
     extension_type: ExtensionType = Field(
-        ..., description="Extension type (venus, atlas, phoenix, apollo, mercury)"
+        ..., description="Extension type (atlas, apollo, mercury)"
     )
     interaction_type: InteractionType = Field(..., description="Type of interaction")
     customer_id: Optional[str] = Field(

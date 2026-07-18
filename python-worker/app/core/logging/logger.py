@@ -12,11 +12,6 @@ from .config import LoggingConfig
 from .handlers import (
     FileHandler,
     ConsoleHandler,
-    PrometheusHandler,
-    GrafanaHandler,
-    TelemetryHandler,
-    GCPHandler,
-    AWSHandler,
 )
 from .formatters import JSONFormatter, ConsoleFormatter
 
@@ -140,43 +135,6 @@ def setup_logging(config: Optional[LoggingConfig] = None) -> None:
         )
         root_logger.addHandler(console_handler)
 
-    # Add Prometheus handler if enabled
-    if config.prometheus.enabled:
-        prometheus_handler = PrometheusHandler.create_handler(
-            port=config.prometheus.port, metrics_path=config.prometheus.metrics_path
-        )
-        if prometheus_handler:
-            root_logger.addHandler(prometheus_handler)
-
-    # Add external service handlers if enabled
-    if config.grafana.enabled:
-        grafana_handler = GrafanaHandler.create_handler(
-            config.grafana.url, config.grafana.username, config.grafana.password
-        )
-        if grafana_handler:
-            root_logger.addHandler(grafana_handler)
-
-    if config.telemetry.enabled:
-        telemetry_handler = TelemetryHandler.create_handler(
-            config.telemetry.endpoint, config.telemetry.service_name
-        )
-        if telemetry_handler:
-            root_logger.addHandler(telemetry_handler)
-
-    if config.gcp.enabled:
-        gcp_handler = GCPHandler.create_handler(
-            config.gcp.project_id, config.gcp.log_name
-        )
-        if gcp_handler:
-            root_logger.addHandler(gcp_handler)
-
-    if config.aws.enabled:
-        aws_handler = AWSHandler.create_handler(
-            config.aws.region, config.aws.log_group, config.aws.log_stream
-        )
-        if aws_handler:
-            root_logger.addHandler(aws_handler)
-
     # Disable propagation for external loggers
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -238,11 +196,6 @@ try:
         format=settings.logging.LOG_FORMAT,
         file=settings.logging.LOGGING["file"],
         console=settings.logging.LOGGING["console"],
-        prometheus=settings.logging.LOGGING["prometheus"],
-        grafana=settings.logging.LOGGING["grafana"],
-        telemetry=settings.logging.LOGGING["telemetry"],
-        gcp=settings.logging.LOGGING["gcp"],
-        aws=settings.logging.LOGGING["aws"],
     )
 
     # Setup logging

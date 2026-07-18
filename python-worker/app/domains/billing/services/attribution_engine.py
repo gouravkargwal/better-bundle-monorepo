@@ -198,7 +198,7 @@ class AttributionEngine:
                 total_attributed_revenue = Decimal("0.00")
 
             # ✅ FIX: Extract session_id from tracking interactions if context.session_id is None
-            # This ensures attributions from Phoenix line items (which have _bb_rec_session_id)
+            # This ensures attributions from line items (which have _bb_rec_session_id)
             # can be saved even when no UserSession record exists in the database
             final_session_id = context.session_id
             if not final_session_id and tracking_interactions:
@@ -533,8 +533,6 @@ class AttributionEngine:
 
         # Filter for extensions that can track attribution
         attribution_eligible_extensions = {
-            ExtensionType.PHOENIX.value,  # Recommendation engine
-            ExtensionType.VENUS.value,  # Customer account extensions
             ExtensionType.APOLLO.value,  # Post-purchase extensions
             ExtensionType.MERCURY.value,  # Shopify Plus checkout extensions
         }
@@ -718,7 +716,7 @@ class AttributionEngine:
                 "recommendation_viewed",
                 "recommendation_add_to_cart",
             ]
-            and i["extension_type"] in ["phoenix", "venus", "apollo"]
+            and i["extension_type"] in ["apollo"]
         ]
 
         if not recommendation_interactions:
@@ -1177,21 +1175,21 @@ class AttributionEngine:
         interactions: List[Dict[str, Any]],
     ) -> List[AttributionBreakdown]:
         """
-        Create cross-extension attribution for multiple interactions.
+                Create cross-extension attribution for multiple interactions.
 
-        ✅ SCENARIO 7: Cross-Extension Attribution
+                ✅ SCENARIO 7: Cross-Extension Attribution
 
-        Story: Sarah sees a recommendation on homepage (Atlas), clicks it,
-        then sees it again in cart (Phoenix), then sees it in post-purchase
+                Story: Sarah sees a recommendation on homepage (Atlas), clicks it,
+                then sees it again in cart, then sees it in post-purchase
         email (Apollo). All extensions should get proportional attribution.
 
-        Args:
-            product_id: Product ID
-            product_amount: Product amount
-            interactions: List of interactions (sorted by time)
+                Args:
+                    product_id: Product ID
+                    product_amount: Product amount
+                    interactions: List of interactions (sorted by time)
 
-        Returns:
-            List of attribution breakdowns
+                Returns:
+                    List of attribution breakdowns
         """
         breakdowns = []
 
@@ -1419,7 +1417,7 @@ class AttributionEngine:
         we need to distribute attribution fairly based on:
         - Interaction recency (newer = higher weight)
         - Interaction type (add_to_cart > clicked)
-        - Extension type (Phoenix > Venus > Apollo)
+        - Extension type (Apollo > Mercury)
         - Position (position 1 > position 5)
 
         Args:
@@ -1476,7 +1474,7 @@ class AttributionEngine:
         Scoring factors:
         - Recency (40%): Newer interactions score higher
         - Type (30%): add_to_cart > clicked > viewed
-        - Extension (20%): Phoenix > Venus > Apollo
+        - Extension (20%): Apollo > Mercury
         - Position (10%): Lower position number scores higher
         """
         # 1. Recency score (40% weight)
@@ -1492,9 +1490,7 @@ class AttributionEngine:
 
         # 3. Extension score (20% weight)
         extension_scores = {
-            "phoenix": 100,  # Cart recommendations are most influential
-            "venus": 80,  # Customer account recommendations
-            "apollo": 60,  # Post-purchase recommendations
+            "apollo": 80,  # Post-purchase recommendations
             "atlas": 40,  # Web pixel (least influential)
         }
         extension_score = extension_scores.get(interaction["extension_type"], 0)
@@ -1702,26 +1698,25 @@ class AttributionEngine:
         ✅ PRIORITY 1: Extract tracking data from extension tracking mechanisms.
 
         This prioritizes the actual checkout data over UserInteraction records:
-        - Phoenix: Uses _bb_rec_extension from line item properties
         - Apollo: Uses bb_recommendation.extension from order metafields
 
         Returns list of synthetic interactions created from tracking data.
         """
         tracking_interactions = []
 
-        # 1. Extract Phoenix tracking from line item properties
+        # 1. Extract tracking from line item properties
         for product in context.purchase_products:
             properties = product.get("properties", {})
             if isinstance(properties, dict) and properties:
-                # Check for Phoenix tracking data
+                # Check for tracking data
                 extension = properties.get("_bb_rec_extension")
                 session_id = properties.get("_bb_rec_session_id")
                 product_id = properties.get("_bb_rec_product_id") or product.get("id")
                 timestamp_str = properties.get("_bb_rec_timestamp")
                 position = properties.get("_bb_rec_position")
 
-                if extension and extension.lower() in ["phoenix", "venus", "apollo"]:
-                    # Create synthetic interaction from Phoenix line item data
+                if extension and extension.lower() in ["apollo", "mercury"]:
+                    # Create synthetic interaction from line item data
                     synthetic_interaction = (
                         self._create_synthetic_interaction_from_line_item(
                             product, context, properties
@@ -1730,25 +1725,25 @@ class AttributionEngine:
                     if synthetic_interaction:
                         tracking_interactions.append(synthetic_interaction)
                         logger.info(
-                            f"✅ Extracted Phoenix tracking data for product {product_id}: "
+                            f"✅ Extracted tracking data for product {product_id}: "
                             f"extension={extension}, session={session_id}"
                         )
 
         # 2. Extract Apollo tracking from order metafields
-        # Only use Apollo if Phoenix line items don't already have tracking data for that product
+        # Only use Apollo if line items don't already have tracking data for that product
         if context.order_metafields:
             apollo_extension = self._extract_apollo_extension_from_metafields(
                 context.order_metafields
             )
             if apollo_extension:
-                # Track which products already have Phoenix tracking
+                # Track which products already have tracking
                 products_with_tracking = {
                     tracking_int["metadata"].get("_bb_rec_product_id")
                     or tracking_int["metadata"].get("product_id")
                     for tracking_int in tracking_interactions
                 }
 
-                # Create synthetic interactions for products that don't have Phoenix tracking
+                # Create synthetic interactions for products that don't have tracking
                 # ✅ FIX: Use product_id from metafields to identify which products were added via Apollo
                 metafield_product_id = None
                 for metafield in context.order_metafields or []:
@@ -1762,11 +1757,11 @@ class AttributionEngine:
 
                 for product in context.purchase_products:
                     product_id = product.get("id")
-                    # Skip if this product already has tracking from Phoenix line items
+                    # Skip if this product already has tracking from line items
                     if product_id in products_with_tracking:
                         logger.debug(
                             f"⏭️ Skipping Apollo tracking for product {product_id} - "
-                            f"already has Phoenix line item tracking"
+                            f"already has line item tracking"
                         )
                         continue
 
@@ -1796,7 +1791,7 @@ class AttributionEngine:
         # 3. Extract Mercury tracking from order metafields (cart metafields become order metafields)
         # Mercury uses same namespace as Apollo but different extension value
         # Mercury stores multiple products in a JSON array to handle multiple additions
-        # Only use Mercury if Phoenix line items don't already have tracking data for that product
+        # Only use Mercury if line items don't already have tracking data for that product
         if context.order_metafields:
             mercury_extension = self._extract_mercury_extension_from_metafields(
                 context.order_metafields
@@ -1835,7 +1830,7 @@ class AttributionEngine:
                         elif key == "session_id":
                             mercury_session_id = value
 
-                # Track which products already have Phoenix tracking
+                # Track which products already have tracking
                 products_with_tracking = {
                     tracking_int["metadata"].get("_bb_rec_product_id")
                     or tracking_int["metadata"].get("product_id")
@@ -1876,11 +1871,11 @@ class AttributionEngine:
                         )
                         continue
 
-                    # Skip if this product already has tracking from Phoenix line items
+                    # Skip if this product already has tracking from line items
                     if str(mercury_product_id) in products_with_tracking:
                         logger.debug(
                             f"⏭️ Skipping Mercury tracking for product {mercury_product_id} - "
-                            f"already has Phoenix line item tracking"
+                            f"already has line item tracking"
                         )
                         continue
 
@@ -1901,7 +1896,7 @@ class AttributionEngine:
 
         logger.info(
             f"📊 Extracted {len(tracking_interactions)} tracking interactions from extensions "
-            f"(Phoenix line items + Apollo metafields + Mercury metafields)"
+            f"(line items + Apollo metafields + Mercury metafields)"
         )
 
         return tracking_interactions
@@ -1943,7 +1938,7 @@ class AttributionEngine:
         properties: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Create synthetic interaction from Phoenix line item custom attributes.
+        Create synthetic interaction from line item custom attributes.
 
         This represents the actual checkout data - what extension showed the recommendation
         at the time of purchase.
@@ -1956,8 +1951,6 @@ class AttributionEngine:
 
         extension = properties.get("_bb_rec_extension")
         if not extension or extension.lower() not in [
-            "phoenix",
-            "venus",
             "apollo",
             "mercury",
         ]:
@@ -2404,7 +2397,7 @@ class AttributionEngine:
             )
 
             # ✅ FIX: Extract session_id from tracking interactions if context.session_id is None
-            # This ensures attributions from Phoenix line items can be saved
+            # This ensures attributions from line items can be saved
             final_session_id = context.session_id
             if not final_session_id and interactions:
                 # Find session_id from synthetic interactions (tracking data)

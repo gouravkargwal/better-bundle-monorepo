@@ -33,6 +33,10 @@ class ProductFeatureComputer(BaseFeatureGenerator):
             orders = data.get("orders", [])
             user_interactions = data.get("user_interactions", [])
 
+            # Extract product_id and product_id_mapping from data
+            product_id = product_data.get("product_id") or product_data.get("id")
+            product_id_mapping = data.get("product_id_mapping", {})
+
             # Compute 30-day metrics
             metrics_30d = self._compute_30day_metrics(
                 product_id, orders, user_interactions, product_id_mapping
@@ -188,6 +192,7 @@ class ProductFeatureComputer(BaseFeatureGenerator):
         product_id: str,
         orders: List[Dict[str, Any]],
         user_interactions: List[Dict[str, Any]],
+        product_id_mapping: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Compute 30-day window metrics"""
 
@@ -196,7 +201,7 @@ class ProductFeatureComputer(BaseFeatureGenerator):
 
         # Filter events in 30-day window
         recent_events = []
-        for event in behavioral_events:
+        for event in user_interactions:
             event_time = self._parse_date(event.get("timestamp"))
             if event_time and event_time >= thirty_days_ago:
                 event_product_id = self._extract_product_id_from_event(event)

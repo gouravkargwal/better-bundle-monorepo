@@ -8,16 +8,19 @@ export async function action({ request }: ActionFunctionArgs) {
   const { shop } = session;
 
   try {
-    // Parse request body to get monthly cap
+    // Parse request body — now expects planName and monthlyFee instead of monthlyCap
     const body = await request.json();
-    const monthlyCap = body.monthlyCap;
+    const { planName, monthlyFee, trialDays } = body;
 
-    // Validate monthly cap
-    if (!monthlyCap || monthlyCap <= 0) {
+    // Validate inputs
+    const fee = Number(monthlyFee) || 29;
+    const trial = Number(trialDays) || 14;
+
+    if (!planName) {
       return json(
         {
           success: false,
-          error: "Monthly cap is required and must be greater than 0",
+          error: "Plan name is required",
         },
         { status: 400 },
       );
@@ -33,103 +36,49 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // ✅ Get shop subscription - allow if trial is completed OR pending approval
+    // Get shop subscription
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
       include: {
         pricing_tiers: true,
+        subscription_plans: true,
       },
     });
 
     if (!shopSubscription) {
       return json(
-        {
-          success: false,
-          error: "No subscription found",
-        },
+        { success: false, error: "No subscription found" },
         { status: 400 },
       );
     }
 
-    // ✅ Additional validation: Check if trial threshold was actually reached
-    if (shopSubscription.status === "PENDING_APPROVAL") {
-      const actualRevenue = await prisma.commission_records.aggregate({
-        where: {
-          shop_id: shopRecord.id,
-          billing_phase: "TRIAL",
-          status: {
-            in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-          },
-        },
-        _sum: {
-          attributed_revenue: true,
-        },
-      });
-
-      const actualAccumulatedRevenue = Number(
-        actualRevenue._sum?.attributed_revenue || 0,
-      );
-      const thresholdAmount = Number(
-        shopSubscription.trial_threshold_override ||
-          shopSubscription.pricing_tiers?.trial_threshold_amount ||
-          0,
-      );
-
-      if (actualAccumulatedRevenue < thresholdAmount) {
-        return json(
-          {
-            success: false,
-            error:
-              "Trial threshold not reached. Please complete your trial first.",
-          },
-          { status: 400 },
-        );
-      }
-    }
-
-    // ✅ No need to check existing Shopify subscriptions - we fetch status from Shopify API in real-time
-
-    // Get default subscription plan and pricing tier
-    const defaultPlan = await prisma.subscription_plans.findFirst({
+    // Get flat fee plan from database for pricing details
+    const pricingTier = await prisma.pricing_tiers.findFirst({
       where: {
-        is_active: true,
-        is_default: true,
-      },
-    });
-
-    if (!defaultPlan) {
-      return json(
-        { success: false, error: "No default subscription plan found" },
-        { status: 500 },
-      );
-    }
-
-    const defaultPricingTier = await prisma.pricing_tiers.findFirst({
-      where: {
-        subscription_plan_id: defaultPlan.id,
         currency: shopRecord.currency_code || "USD",
         is_active: true,
-        is_default: true,
+        subscription_plans: {
+          is_active: true,
+          plan_type: "FLAT_RATE",
+        },
+      },
+      include: {
+        subscription_plans: true,
       },
     });
 
-    if (!defaultPricingTier) {
-      return json(
-        { success: false, error: "No pricing tier found for currency" },
-        { status: 500 },
-      );
-    }
-
-    // Create Shopify subscription using GraphQL
-    const currency = shopRecord.currency_code;
-    const cappedAmount = monthlyCap; // User-selected monthly cap
+    // Create Shopify recurring subscription using AppRecurringPricing
+    const currency = shopRecord.currency_code || "USD";
+    const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
+    const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
 
     const mutation = `
-      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!, $test: Boolean!) {
+      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!, $trialDays: Int!, $test: Boolean!) {
         appSubscriptionCreate(
           name: $name
           returnUrl: $returnUrl
           lineItems: $lineItems
+          trialDays: $trialDays
           test: $test
         ) {
           userErrors {
@@ -141,17 +90,20 @@ export async function action({ request }: ActionFunctionArgs) {
             id
             name
             status
+            createdAt
+            currentPeriodEnd
+            trialDays
             lineItems {
               id
               plan {
                 pricingDetails {
                   __typename
-                  ... on AppUsagePricing {
-                    terms
-                    cappedAmount {
+                  ... on AppRecurringPricing {
+                    price {
                       amount
                       currencyCode
                     }
+                    interval
                   }
                 }
               }
@@ -161,25 +113,20 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
-    // For embedded apps, use the Shopify admin URL format
-    // This ensures proper authentication and embedded app context
-    const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
-    const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
-
     const variables = {
-      name: "Better Bundle - Usage Based",
-      // Redirect back to app after approval
+      name: `Better Bundle - ${planName}`,
       returnUrl: returnUrl,
       test: process.env.NODE_ENV === "development",
+      trialDays: trial,
       lineItems: [
         {
           plan: {
-            appUsagePricingDetails: {
-              terms: `3% of attributed revenue (capped at $${cappedAmount}/month)`,
-              cappedAmount: {
-                amount: cappedAmount,
+            appRecurringPricingDetails: {
+              price: {
+                amount: fee,
                 currencyCode: currency,
               },
+              interval: "EVERY_30_DAYS",
             },
           },
         },
@@ -211,25 +158,15 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // ✅ Mark subscription as SUSPENDED - Backend role ends here, Shopify takes over
-    await prisma.shop_subscriptions.update({
-      where: { id: shopSubscription.id },
-      data: {
-        status: "SUSPENDED" as any, // Backend no longer tracks status
-        user_chosen_cap_amount: monthlyCap, // Store user's chosen cap
-        is_active: false,
-        updated_at: new Date(),
-      },
-    });
-
     // Update shop subscription with Shopify subscription info
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         shopify_subscription_id: subscription.id,
-        shopify_line_item_id: subscription.lineItems[0].id,
+        shopify_line_item_id: subscription.lineItems[0]?.id,
         confirmation_url: confirmationUrl,
         shopify_status: "PENDING",
+        status: "PENDING_APPROVAL",
         updated_at: new Date(),
       },
     });
@@ -237,8 +174,8 @@ export async function action({ request }: ActionFunctionArgs) {
     return json({
       success: true,
       subscription_id: subscription.id,
-      confirmationUrl: confirmationUrl, // Use camelCase to match frontend expectation
-      message: "Please approve the subscription in Shopify",
+      confirmationUrl: confirmationUrl,
+      message: `Please approve the ${planName} plan ($${fee}/month) in Shopify`,
     });
   } catch (error) {
     logger.error({ error }, "Error in billing setup");

@@ -13,20 +13,13 @@ from pydantic import BaseModel, Field
 class ExtensionType(str, Enum):
     """Extension types in the BetterBundle ecosystem"""
 
-    VENUS = "venus"  # Customer account extensions
     ATLAS = "atlas"  # Web pixels (behavioral tracking)
-    PHOENIX = "phoenix"  # Checkout UI extensions
     APOLLO = "apollo"  # Post-purchase extensions
     MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class ExtensionContext(str, Enum):
     """Context where extensions can run"""
-
-    # Venus contexts
-    CUSTOMER_PROFILE = "customer_profile"
-    ORDER_STATUS = "order_status"
-    ORDER_INDEX = "order_index"
 
     # Atlas contexts (everywhere except checkout)
     HOMEPAGE = "homepage"
@@ -35,10 +28,6 @@ class ExtensionContext(str, Enum):
     CART_PAGE = "cart_page"
     SEARCH_PAGE = "search_page"
     CUSTOMER_ACCOUNT = "customer_account"
-
-    # Phoenix contexts (currently cart, future expansion)
-    CART_DRAWER = "cart_drawer"
-    # Future: HOMEPAGE, PRODUCT_PAGE, COLLECTION_PAGE
 
     # Apollo contexts
     POST_PURCHASE = "post_purchase"
@@ -61,18 +50,6 @@ class ExtensionCapability(BaseModel):
 
 # Extension capability definitions
 EXTENSION_CAPABILITIES: Dict[ExtensionType, ExtensionCapability] = {
-    ExtensionType.VENUS: ExtensionCapability(
-        extension_type=ExtensionType.VENUS,
-        supported_contexts=[
-            ExtensionContext.CUSTOMER_PROFILE,
-            ExtensionContext.ORDER_STATUS,
-            ExtensionContext.ORDER_INDEX,
-        ],
-        can_track_behavior=True,
-        can_show_recommendations=True,
-        can_track_attribution=True,
-        can_access_customer_data=True,
-    ),
     ExtensionType.ATLAS: ExtensionCapability(
         extension_type=ExtensionType.ATLAS,
         supported_contexts=[
@@ -86,18 +63,6 @@ EXTENSION_CAPABILITIES: Dict[ExtensionType, ExtensionCapability] = {
         can_track_behavior=True,
         can_show_recommendations=False,
         can_track_attribution=False,
-        can_access_customer_data=False,
-    ),
-    ExtensionType.PHOENIX: ExtensionCapability(
-        extension_type=ExtensionType.PHOENIX,
-        supported_contexts=[
-            ExtensionContext.CART_PAGE,
-            ExtensionContext.CART_DRAWER,
-            # Future: HOMEPAGE, PRODUCT_PAGE, COLLECTION_PAGE
-        ],
-        can_track_behavior=True,
-        can_show_recommendations=True,
-        can_track_attribution=True,
         can_access_customer_data=False,
     ),
     ExtensionType.APOLLO: ExtensionCapability(

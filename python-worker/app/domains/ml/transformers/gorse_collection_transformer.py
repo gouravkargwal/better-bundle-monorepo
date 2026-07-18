@@ -48,7 +48,12 @@ class GorseCollectionTransformer:
                 "ItemId": f"shop_{shop_id}_collection_{collection_id}",
                 "IsHidden": False,
                 "Categories": categories,
-                "Labels": labels,
+                # Wrapped under "tags" (not a bare list) so Gorse's item-to-item
+                # `column = "item.Labels.embedding"` expression - evaluated against
+                # every Gorse item, collections included - sees a JSON object rather
+                # than erroring on a list. Collections don't get an "embedding" key;
+                # they're just shaped consistently with product items.
+                "Labels": {"tags": labels},
                 "Timestamp": (
                     collection_dict.get("last_computed_at", now_utc()).isoformat()
                     if hasattr(collection_dict.get("last_computed_at"), "isoformat")
@@ -617,10 +622,10 @@ class GorseCollectionTransformer:
             bi_labels = self.generate_business_intelligence_labels(collection_dict)
 
             # Combine all labels
-            all_labels = base_item["Labels"] + predictive_labels + bi_labels
+            all_labels = base_item["Labels"]["tags"] + predictive_labels + bi_labels
             validated_labels = self.validate_label_quality(all_labels)
 
-            base_item["Labels"] = validated_labels
+            base_item["Labels"] = {"tags": validated_labels}
             base_item["Comment"] = (
                 f"Collection: {collection_dict.get('collection_id', '')} (comprehensive features + predictive + BI labels)"
             )

@@ -6,7 +6,6 @@ import {
   InlineStack,
   Text,
   Icon,
-  TextField,
   Banner,
   Badge,
 } from "@shopify/polaris";
@@ -26,7 +25,6 @@ export function TrialCompleted({
   shopCurrency,
   onSetupBilling,
 }: TrialCompletedProps) {
-  const [spendingLimit, setSpendingLimit] = useState<string>("1000");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,8 +40,9 @@ export function TrialCompleted({
     setError(null);
 
     try {
+      // Use default plan selection — in a more advanced UI, you'd let the user choose
       const setupData: BillingSetupData = {
-        spendingLimit: parseFloat(spendingLimit),
+        planId: "default",
         currency: shopCurrency,
       };
 
@@ -58,10 +57,6 @@ export function TrialCompleted({
     }
   };
 
-  const currentValue = parseFloat(spendingLimit);
-  const displayValue = Number.isFinite(currentValue) ? currentValue : 1000;
-  const revenueCapacity = Math.round(displayValue / 0.03);
-
   return (
     <BlockStack gap="500">
       {/* Status Header */}
@@ -73,8 +68,8 @@ export function TrialCompleted({
                 💳 Action Required
               </Text>
               <Text as="p" tone="subdued">
-                Your free trial has ended. Choose your spending limit and
-                activate usage-based billing.
+                Your free trial has ended. Select a plan to continue using
+                Better Bundle.
               </Text>
             </BlockStack>
             <Badge tone="warning" size="large">
@@ -146,7 +141,7 @@ export function TrialCompleted({
                 >
                   <div style={{ color: "#0C4A6E" }}>
                     <Text as="h3" variant="headingMd" fontWeight="bold">
-                      💡 Usage-Based Billing Plan
+                      💡 Flat Rate Pricing Plan
                     </Text>
                   </div>
                 </div>
@@ -154,10 +149,19 @@ export function TrialCompleted({
                 <BlockStack gap="200">
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Commission Rate:
+                      Plan:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="bold">
-                      3% of attributed revenue
+                      Pro
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Price:
+                    </Text>
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      {formatCurrency(29)}/month
                     </Text>
                   </InlineStack>
 
@@ -172,10 +176,10 @@ export function TrialCompleted({
 
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      When You Pay:
+                      What You Get:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="bold">
-                      Only when you make sales
+                      Full access to all features
                     </Text>
                   </InlineStack>
                 </BlockStack>
@@ -189,13 +193,14 @@ export function TrialCompleted({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    ✅ Cancel anytime • No hidden fees • Pay for value delivered
+                    ✅ Cancel anytime • No hidden fees • Predictable monthly
+                    pricing
                   </Text>
                 </div>
               </BlockStack>
             </div>
 
-            {/* Spending Limit Section */}
+            {/* Plan Selection Card */}
             <div
               style={{
                 padding: "20px",
@@ -223,50 +228,61 @@ export function TrialCompleted({
                   </div>
                   <BlockStack gap="100">
                     <Text as="h3" variant="headingMd" fontWeight="bold">
-                      Choose Your Monthly Spending Cap
+                      Continue with Pro Plan
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      This is the maximum you'll be charged per month. You can
-                      change this anytime.
+                      {formatCurrency(29)}/month — full access to all features
                     </Text>
                   </BlockStack>
                 </InlineStack>
 
-                <div style={{ paddingTop: "8px" }}>
-                  <Text as="p" variant="headingLg" fontWeight="bold">
-                    {formatCurrency(displayValue)}
-                  </Text>
-                </div>
-
-                <TextField
-                  label="Monthly Spending Cap"
-                  type="number"
-                  value={displayValue.toString()}
-                  onChange={(value) => {
-                    const numValue = parseFloat(value);
-                    if (!isNaN(numValue) && numValue > 0) {
-                      setSpendingLimit(value);
-                    }
-                  }}
-                  suffix={shopCurrency}
-                  helpText="Enter your monthly spending limit"
-                  autoComplete="off"
-                />
-
                 <div
                   style={{
-                    padding: "12px",
+                    padding: "16px",
                     backgroundColor: "#F0F9FF",
                     borderRadius: "8px",
                     border: "1px solid #BAE6FD",
                   }}
                 >
+                  <BlockStack gap="200">
+                    <InlineStack gap="200">
+                      <Text as="span" variant="bodySm" color="text-success">
+                        ✓
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        AI-powered product recommendations
+                      </Text>
+                    </InlineStack>
+                    <InlineStack gap="200">
+                      <Text as="span" variant="bodySm" color="text-success">
+                        ✓
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Detailed attribution & analytics
+                      </Text>
+                    </InlineStack>
+                    <InlineStack gap="200">
+                      <Text as="span" variant="bodySm" color="text-success">
+                        ✓
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        Priority support
+                      </Text>
+                    </InlineStack>
+                  </BlockStack>
+                </div>
+
+                <div
+                  style={{
+                    padding: "12px",
+                    backgroundColor: "#FEF3C7",
+                    borderRadius: "8px",
+                    border: "1px solid #FCD34D",
+                  }}
+                >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    💡 With a {formatCurrency(displayValue)} monthly cap, you'll
-                    never pay more than that—even if your 3% commission exceeds
-                    it. This cap lets you handle up to{" "}
-                    <strong>{formatCurrency(revenueCapacity)}</strong> in
-                    monthly attributed revenue.
+                    💡 You'll be charged {formatCurrency(29)} per month,
+                    automatically billed every 30 days. Cancel anytime.
                   </Text>
                 </div>
               </BlockStack>
@@ -293,7 +309,7 @@ export function TrialCompleted({
 
               <Text as="p" variant="bodySm" tone="subdued" alignment="center">
                 You'll be redirected to Shopify to review and approve your
-                billing setup
+                subscription
               </Text>
             </BlockStack>
           </BlockStack>
@@ -327,13 +343,13 @@ export function TrialCompleted({
               </div>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm">
-                  <strong>1.</strong> Choose your monthly spending cap
+                  <strong>1.</strong> Click "Continue to Shopify Approval"
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>2.</strong> Click "Continue to Shopify Approval"
+                  <strong>2.</strong> Review your subscription details in Shopify
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>3.</strong> Review and approve in Shopify
+                  <strong>3.</strong> Approve the recurring charge
                 </Text>
                 <Text as="p" variant="bodySm">
                   <strong>4.</strong> Services resume automatically
@@ -362,16 +378,16 @@ export function TrialCompleted({
               </div>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Safe & Predictable:</strong> Your spending cap
-                  protects you from unexpected charges.
+                  <strong>Predictable Pricing:</strong> One flat monthly fee —
+                  no surprises.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Flexible:</strong> Change your spending cap anytime or
-                  cancel with no penalties.
+                  <strong>Flexible:</strong> Upgrade, downgrade, or cancel
+                  anytime with no penalties.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Fair Pricing:</strong> Only pay 3% when Better Bundle
-                  generates revenue for you.
+                  <strong>Fair:</strong> Full access to all features for one
+                  simple price.
                 </Text>
               </BlockStack>
             </BlockStack>

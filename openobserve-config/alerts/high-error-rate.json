@@ -1,0 +1,15 @@
+{
+  "name": "High HTTP Error Rate",
+  "stream": "python-worker-metrics",
+  "query": "SELECT rate(count(*), 5m) as error_rate FROM \"python-worker-metrics\" WHERE status >= 500 AND timestamp > now() - 5m",
+  "condition": "error_rate > 0.05",
+  "eval_period": "5m",
+  "frequency": "5m",
+  "notifications": [
+    {
+      "type": "slack",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    }
+  ],
+  "message": "HTTP error rate is {{error_rate}} req/s (threshold: 0.05 req/s)"
+}

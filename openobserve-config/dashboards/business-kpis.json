@@ -1,0 +1,35 @@
+{
+  "title": "Business KPIs",
+  "description": "Business metrics: recommendation throughput and latency, error rates by module, slow function tracking",
+  "panels": [
+    {
+      "title": "Recommendations Served per Minute",
+      "type": "line",
+      "query": "SELECT rate(count(*), 1m) as rec_rate FROM \"python-worker-metrics\" WHERE metric_name = 'recommendations.served' AND timestamp > now() - 1h",
+      "unit": "rec/min"
+    },
+    {
+      "title": "Recommendation Latency (p50 / p95)",
+      "type": "line",
+      "query": "SELECT percentile(recommendation_duration_seconds, 0.50) as p50, percentile(recommendation_duration_seconds, 0.95) as p95 FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h",
+      "unit": "s"
+    },
+    {
+      "title": "Top Recommendation Sources",
+      "type": "bar",
+      "query": "SELECT source, count(*) as served FROM \"python-worker-metrics\" WHERE metric_name = 'recommendations.served' AND timestamp > now() - 1h GROUP BY source ORDER BY served DESC"
+    },
+    {
+      "title": "Function Error Rate by Module",
+      "type": "line",
+      "query": "SELECT module, rate(count(*), 5m) as error_rate FROM \"python-worker-metrics\" WHERE metric_name = 'function.errors' AND timestamp > now() - 1h GROUP BY module",
+      "unit": "errors/5m"
+    },
+    {
+      "title": "Slow Functions",
+      "type": "table",
+      "query": "SELECT timestamp, service.name, module, function, duration_ms, threshold_ms FROM \"python-worker-metrics\" WHERE metric_name = 'function.threshold_exceeded' AND timestamp > now() - 6h ORDER BY timestamp DESC",
+      "unit": "ms"
+    }
+  ]
+}

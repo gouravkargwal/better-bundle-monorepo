@@ -11,28 +11,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const appSub = payload.app_subscription;
     const subscriptionId = appSub?.admin_graphql_api_id || appSub?.id;
     const status = appSub?.status;
-    const lineItems = appSub?.line_items || [];
-
-    // Try multiple paths to extract capped amount from webhook payload
-    let currentCappedAmount =
-      lineItems[0]?.plan?.pricing_details?.capped_amount?.amount ||
-      lineItems[0]?.plan?.pricing_details?.capped_amount ||
-      lineItems[0]?.capped_amount?.amount ||
-      lineItems[0]?.capped_amount;
-
-    // Log webhook payload structure for debugging
-    if (!currentCappedAmount && lineItems.length > 0) {
-      logger.info(
-        {
-          shop,
-          subscriptionId,
-          status,
-          lineItemsStructure: JSON.stringify(lineItems[0], null, 2),
-          fullPayload: JSON.stringify(payload, null, 2),
-        },
-        "Webhook received but capped amount not found in expected location",
-      );
-    }
 
     if (!subscriptionId || !status) {
       logger.error({ payload }, "No subscription data in update webhook");
@@ -53,25 +31,20 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: true });
     }
 
-    // ✅ Handle business logic only - No status syncing
+    // Handle subscription status changes
     switch (status) {
       case "ACTIVE":
-        await handleActiveSubscription(
-          shopRecord,
-          subscriptionId,
-          currentCappedAmount,
-          admin,
-        );
+        await handleActiveSubscription(shopRecord, subscriptionId, appSub, admin);
         break;
       case "CANCELLED":
       case "DECLINED":
         await handleCancelledSubscription(shopRecord, subscriptionId);
         break;
-      case "APPROACHING_CAPPED_AMOUNT":
-        await handleCapApproach(shopRecord, subscriptionId);
-        break;
       default:
-        logger.info({ status }, "Subscription status change logged");
+        logger.info(
+          { shop, subscriptionId, status },
+          "Subscription status change logged (no action taken)",
+        );
     }
 
     return json({ success: true });
@@ -90,68 +63,40 @@ export async function action({ request }: ActionFunctionArgs) {
   }
 }
 
-// ✅ Business logic handlers - Handle subscription activation
+/**
+ * Handle subscription activation (flat fee)
+ */
 async function handleActiveSubscription(
   shopRecord: any,
   subscriptionId: string,
-  currentCappedAmount?: number,
+  appSub?: any,
   admin?: any,
 ) {
   try {
-    // If capped amount not in webhook, fetch from Shopify GraphQL API
-    if (!currentCappedAmount && admin) {
+    // Extract monthly fee from webhook payload (AppRecurringPricing)
+    let monthlyFee: number | undefined;
+    const lineItems = appSub?.line_items || [];
+
+    if (lineItems.length > 0) {
+      const pricing = lineItems[0]?.plan?.pricing_details;
+      // Try AppRecurringPricing price first, then AppUsagePricing capped amount
+      monthlyFee =
+        pricing?.price?.amount ||
+        pricing?.capped_amount?.amount ||
+        pricing?.cappedAmount?.amount;
+    }
+
+    // If not in webhook, fetch from Shopify GraphQL using the admin client
+    if (!monthlyFee && admin) {
       try {
-        // Use GraphQL to fetch current subscription details
-        const query = `
-          query($id: ID!) {
-            node(id: $id) {
-              ... on AppSubscription {
-                lineItems {
-                  plan {
-                    pricingDetails {
-                      ... on AppUsagePricing {
-                        cappedAmount {
-                          amount
-                          currencyCode
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `;
-
-        const response = await admin.graphql(query, {
-          variables: { id: subscriptionId },
-        });
-        const data = await response.json();
-
-        if (
-          data.data?.node?.lineItems?.[0]?.plan?.pricingDetails?.cappedAmount
-            ?.amount
-        ) {
-          currentCappedAmount = Number(
-            data.data.node.lineItems[0].plan.pricingDetails.cappedAmount.amount,
-          );
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              subscriptionId,
-              fetchedCapAmount: currentCappedAmount,
-            },
-            "Fetched capped amount from Shopify GraphQL API",
-          );
-        }
+        monthlyFee = await fetchMonthlyFeeFromShopifyWithAdmin(
+          subscriptionId,
+          admin,
+        );
       } catch (fetchError) {
         logger.warn(
-          {
-            error: fetchError,
-            shop: shopRecord.shop_domain,
-            subscriptionId,
-          },
-          "Failed to fetch capped amount from GraphQL, will use existing database value",
+          { error: fetchError, shop: shopRecord.shop_domain, subscriptionId },
+          "Failed to fetch monthly fee from GraphQL, will use database value",
         );
       }
     }
@@ -173,128 +118,52 @@ async function handleActiveSubscription(
       return;
     }
 
-    // Update shop_subscriptions table with Shopify subscription info
-    // ✅ When Shopify subscription becomes ACTIVE, convert from TRIAL to PAID
+    // Update shop subscription to PAID status
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         shopify_subscription_id: subscriptionId,
         shopify_status: "ACTIVE",
-        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
+        subscription_type: "PAID",
         status: "ACTIVE",
         is_active: true,
         updated_at: new Date(),
       },
     });
 
-    // ✅ CREATE BILLING CYCLE if it doesn't exist
-    // Check if there's already an active billing cycle
+    // Create billing cycle if it doesn't exist
     const activeCycle = shopSubscription.billing_cycles?.find(
       (cycle: any) => cycle.status === "ACTIVE",
     );
 
     if (!activeCycle) {
-      // Determine cap amount: use current capped amount from Shopify, or user_chosen_cap_amount, or default
-      const capAmount =
-        currentCappedAmount || shopSubscription.user_chosen_cap_amount || 1000;
+      const fee =
+        monthlyFee ||
+        Number(
+          shopSubscription.monthly_fee_override ||
+            shopSubscription.pricing_tiers?.monthly_fee ||
+            29,
+        );
 
       logger.info(
         {
           shop: shopRecord.shop_domain,
-          capAmount,
-          source: currentCappedAmount
-            ? "shopify"
-            : shopSubscription.user_chosen_cap_amount
-              ? "user_chosen"
-              : "default",
+          monthlyFee: fee,
         },
-        "Creating billing cycle for activated subscription",
+        "Creating billing cycle for activated flat fee subscription",
       );
 
-      // Create first billing cycle
       await prisma.billing_cycles.create({
         data: {
           shop_subscription_id: shopSubscription.id,
           cycle_number: 1,
           start_date: new Date(),
-          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
-          initial_cap_amount: capAmount,
-          current_cap_amount: capAmount,
-          usage_amount: 0,
-          commission_count: 0,
+          end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          period_fee: fee,
           status: "ACTIVE",
           activated_at: new Date(),
         },
       });
-
-      logger.info(
-        {
-          shop: shopRecord.shop_domain,
-          capAmount,
-        },
-        "Billing cycle created successfully",
-      );
-    } else {
-      // ✅ Update billing cycle cap if it changed in Shopify (e.g., after merchant approval)
-      if (currentCappedAmount) {
-        // Convert to numbers for proper comparison (Prisma Decimal vs Shopify number)
-        const newCapAmount = Number(currentCappedAmount);
-        const currentCapAmount = Number(activeCycle.current_cap_amount);
-
-        if (
-          !isNaN(newCapAmount) &&
-          !isNaN(currentCapAmount) &&
-          newCapAmount !== currentCapAmount
-        ) {
-          const oldCapAmount = activeCycle.current_cap_amount;
-
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              oldCapAmount,
-              newCapAmount,
-            },
-            "Updating billing cycle cap amount from Shopify webhook",
-          );
-
-          await prisma.billing_cycles.update({
-            where: { id: activeCycle.id },
-            data: {
-              current_cap_amount: newCapAmount,
-              updated_at: new Date(),
-            },
-          });
-
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              oldCapAmount,
-              newCapAmount,
-            },
-            "Billing cycle cap updated successfully",
-          );
-        } else {
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleId: activeCycle.id,
-              currentCap: activeCycle.current_cap_amount,
-              shopifyCap: currentCappedAmount,
-            },
-            "Active billing cycle already exists, cap amount unchanged",
-          );
-        }
-      } else {
-        logger.info(
-          {
-            shop: shopRecord.shop_domain,
-            cycleId: activeCycle.id,
-          },
-          "Active billing cycle already exists, no cap amount in webhook",
-        );
-      }
     }
 
     // Reactivate shop if suspended
@@ -309,17 +178,15 @@ async function handleActiveSubscription(
       },
     });
 
-    // Invalidate suspension cache
     await invalidateSuspensionCache(shopRecord.id);
 
     logger.info(
       {
         shop: shopRecord.shop_domain,
         subscriptionId,
-        currentCappedAmount,
-        shopSubscriptionId: shopSubscription.id,
+        monthlyFee,
       },
-      "Subscription activated and shop reactivated",
+      "Flat fee subscription activated and shop reactivated",
     );
   } catch (error) {
     logger.error({ error }, "Error activating subscription");
@@ -327,12 +194,14 @@ async function handleActiveSubscription(
   }
 }
 
+/**
+ * Handle subscription cancellation
+ */
 async function handleCancelledSubscription(
   shopRecord: any,
   subscriptionId: string,
 ) {
   try {
-    // Find the shop subscription record
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
     });
@@ -345,7 +214,6 @@ async function handleCancelledSubscription(
       return;
     }
 
-    // Update shop_subscriptions table
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
@@ -365,7 +233,7 @@ async function handleCancelledSubscription(
         is_active: false,
         suspended_at: new Date(),
         suspension_reason: "subscription_cancelled",
-        service_impact: "suspended", // ✅ FIX: Shortened to fit VarChar(50) limit
+        service_impact: "suspended",
         updated_at: new Date(),
       },
     });
@@ -384,17 +252,54 @@ async function handleCancelledSubscription(
   }
 }
 
-async function handleCapApproach(shopRecord: any, subscriptionId: string) {
+/**
+ * Fetch monthly fee from Shopify GraphQL API for an AppRecurringPricing subscription
+ * Uses the admin client from the webhook (no re-authentication needed)
+ */
+async function fetchMonthlyFeeFromShopifyWithAdmin(
+  subscriptionId: string,
+  admin: any,
+): Promise<number | undefined> {
   try {
-    // Handle cap approach - could send notifications, etc.
-    logger.info(
-      { shop: shopRecord.shop_domain, subscriptionId },
-      "Subscription approaching capped amount",
-    );
+    const query = `
+      query($id: ID!) {
+        node(id: $id) {
+          ... on AppSubscription {
+            lineItems {
+              plan {
+                pricingDetails {
+                  __typename
+                  ... on AppRecurringPricing {
+                    price {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
 
-    // TODO: Add cap approach logic (notifications, warnings, etc.)
+    const response = await admin.graphql(query, {
+      variables: { id: subscriptionId },
+    });
+    const data = await response.json();
+
+    const pricingDetails =
+      data.data?.node?.lineItems?.[0]?.plan?.pricingDetails;
+    if (pricingDetails?.__typename === "AppRecurringPricing") {
+      return Number(pricingDetails.price?.amount);
+    }
+
+    return undefined;
   } catch (error) {
-    logger.error({ error }, "Error handling cap approach");
-    throw error;
+    logger.warn(
+      { error, subscriptionId },
+      "Failed to fetch monthly fee from Shopify",
+    );
+    return undefined;
   }
 }

@@ -13,15 +13,38 @@ http_host = "0.0.0.0"
 n_jobs = 8
 meta_timeout = "120s"
 
+[model]
+# Increase from default 16 to 128 to capture interactions among ~50 categorical labels
+num_factors = 128
+# L2 regularization to prevent overfitting with high-dimensional factors
+regularization = 0.01
+# Lower learning rate for stability with 128 factors
+learning_rate = 0.005
+# Sufficient epochs for convergence at this dimensionality
+epochs = 100
+
 [server]
 default_n = 25
 api_key = "${GORSE_API_KEY}"
 cache_expire = "2h"
 auto_insert_user = true
 auto_insert_item = true
+# Split-mode: gRPC port for recommendation serving
+grpc_host = "0.0.0.0"
+grpc_port = 8089
+# Connect to master for job coordination
+master_host = "gorse-master"
+master_port = 8086
+
+[worker]
+# Number of CPU threads for model training
+n_jobs = 4
+# The worker connects to the master for job coordination
+master_host = "gorse-master"
+master_port = 8086
 
 [recommend]
-cache_size = 100000
+cache_size = 500000
 cache_expire = "4h"
 active_user_ttl = 0
 enable_hot_recommend = true
@@ -48,7 +71,9 @@ read_feedback_types = [
     "progressing_interest",
     "high_engagement_session",
     "search_engagement",
-    "basic_interest"
+    "basic_interest",
+    "similar_to",  # Product similarity relationships from co-purchase analysis
+    "new_item_discovery"  # Synthetic exploration signal for cold-start items
 ]
 
 negative_feedback_types = [
@@ -61,8 +86,8 @@ negative_feedback_types = [
     "recommendation_declined_similar"
 ]
 
-positive_feedback_ttl = 0
-item_ttl = 0
+positive_feedback_ttl = "4320h"
+item_ttl = "8760h"
 
 [recommend.popular]
 popular_window = "168h"
@@ -77,19 +102,39 @@ model_search_epoch = 75
 model_search_trials = 30
 enable_model_size_search = true
 
-[recommend.ranking]
-model = "fm"
-factors = 64
-epochs = 40
-learning_rate = 0.003
-reg = 0.01
-alpha = 0.01
-enable_user_features = true
-enable_item_features = true
+# NOTE: this section used to be [recommend.ranking] (model = "fm", factors, epochs, ...).
+# That key does not exist in Gorse's schema as of v0.5.x - it was renamed to
+# [recommend.ranker], which is why ranking/reranking was silently a no-op before this
+# change (Ranker.Type was empty, so the pipeline fell through to unranked candidate order).
+[recommend.ranker]
+type = "llm"
+cache_expire = "120h"
+recommenders = ["latest", "collaborative", "popular", "item-to-item/product_embedding"]
 fit_period = "45m"
-search_period = "3h"
-search_trials = 30
-search_epoch = 30
+fit_epoch = 100
+optimize_period = "360m"
+optimize_trials = 10
+query_template = """
+You are a product recommendation assistant for an e-commerce store. Given a customer who has shown interest in the following products:
+{% for f in feedback -%}
+- {{ f.Comment }}
+{% endfor -%}
+Please rank the candidate products below by how well they match this customer's interests.
+"""
+document_template = '{{ item.Comment | replace(",", " ") | replace("\n", " ") }}'
+
+[recommend.ranker.early_stopping]
+patience = 10
+
+[recommend.ranker.reranker_api]
+url = "http://python-worker:8000/api/v1/ai-rerank/rerank"
+auth_token = "${AI_RERANK_TOKEN}"
+model = "gemini-rerank"
+
+# item-to-item via Gorse embedding column is DISABLED — Labels is now a flat
+# []string (Gorse compatibility), so `item.Labels.embedding` would always
+# resolve to nil. Item similarity is computed in the Python worker using
+# Redis-cached embeddings and injected as explicit Gorse feedback.
 
 [recommend.replacement]
 enable_replacement = true
@@ -121,7 +166,7 @@ session_recommend_cache_size = 2000
 session_recommend_cache_expire = "45m"
 
 [tracing]
-enable_tracing = false
+enable_tracing = true
 
 [experimental]
 enable_deep_learning = false
@@ -131,4 +176,5 @@ deep_learning_batch_size = 512
 enable = false
 
 [opentelemetry]
-enabled = false
+enabled = true
+otlp_endpoint = "http://openobserve:5080/api/default/otlp/v1/metrics"

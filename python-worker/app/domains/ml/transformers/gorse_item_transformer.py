@@ -11,12 +11,20 @@ Key improvements:
 """
 
 from typing import Dict, Any, List, Optional
-from datetime import datetime
-from app.core.logging import get_logger
-from app.shared.helpers import now_utc
+import hashlib
 import json
+import math
+
+from app.core.logging import get_logger
+from app.core.redis_client import get_redis_client
+from app.shared.ai_provider import get_ai_provider
+from app.shared.helpers import now_utc
 
 logger = get_logger(__name__)
+
+# How long a computed item embedding is cached, keyed by (shop, product, text hash) -
+# unchanged products don't get re-embedded on every sync cycle.
+EMBEDDING_CACHE_TTL_SECONDS = 30 * 24 * 3600
 
 
 class GorseItemTransformer:
@@ -59,12 +67,19 @@ class GorseItemTransformer:
                 "ItemId": f"shop_{shop_id}_{product_id}",
                 "IsHidden": product_dict.get("is_hidden", False),
                 "Categories": categories,
+                # Labels is a flat []string for Gorse compatibility. Embeddings are
+                # cached separately in Redis for the Python worker's own similarity
+                # computations; they are NOT attached here because Gorse's
+                # item-to-item `column = "item.Labels.embedding"` expression requires
+                # Labels to be a JSON object, which breaks Gorse's internal Go model.
                 "Labels": labels,
                 "Timestamp": (
                     product_dict.get("last_computed_at", now_utc()).isoformat()
                     if hasattr(product_dict.get("last_computed_at"), "isoformat")
                     else now_utc().isoformat()
                 ),
+                # Placeholder until attach_embeddings() fills in real product text -
+                # the LLM reranker's document_template renders from this field.
                 "Comment": f"Product: {product_id} (using ALL 12 optimized features)",
             }
 
@@ -84,6 +99,98 @@ class GorseItemTransformer:
                 gorse_items.append(gorse_item)
 
         return gorse_items
+
+    async def attach_embeddings(
+        self,
+        gorse_items: List[Dict[str, Any]],
+        product_texts: Dict[str, str],
+        shop_id: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute an embedding vector per item and cache it in Redis for the Python
+        worker's own similarity computations. Also replaces the placeholder Comment
+        with real product text, since the LLM reranker's document_template renders
+        from Comment.
+
+        Labels is kept as a flat []string (Gorse compatibility), so embeddings are
+        NOT attached to Labels; they remain in Redis keyed by
+        item_embedding:{shop_id}:{product_id}:{text_hash}.
+
+        Args:
+            gorse_items: items already produced by transform_(batch_)to_gorse_item,
+                mutated and returned in place.
+            product_texts: raw product_id -> embeddable text (e.g. title + description).
+            shop_id: used to namespace the embedding cache key.
+        """
+        if not gorse_items:
+            return gorse_items
+
+        redis_client = await get_redis_client()
+
+        product_ids = [self._extract_product_id(item["ItemId"]) for item in gorse_items]
+        texts = [product_texts.get(pid, "") for pid in product_ids]
+        cache_keys = [
+            self._embedding_cache_key(shop_id, pid, text)
+            for pid, text in zip(product_ids, texts)
+        ]
+
+        cached_values = await redis_client.mget(cache_keys)
+        embeddings: List[Optional[List[float]]] = [None] * len(gorse_items)
+        to_compute_idx = []
+        for i, cached in enumerate(cached_values):
+            if cached:
+                try:
+                    embeddings[i] = json.loads(cached)
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            if texts[i]:
+                to_compute_idx.append(i)
+
+        if to_compute_idx:
+            try:
+                provider = get_ai_provider()
+                computed = await provider.embed([texts[i] for i in to_compute_idx])
+                # L2-normalize each embedding vector for cosine distance compatibility
+                computed = [self._l2_normalize(vec) for vec in computed]
+                for idx, vector in zip(to_compute_idx, computed):
+                    embeddings[idx] = vector
+                    await redis_client.setex(
+                        cache_keys[idx],
+                        EMBEDDING_CACHE_TTL_SECONDS,
+                        json.dumps(vector),
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to compute item embeddings for shop {shop_id}: {str(e)}"
+                )
+
+        for item, text, _embedding in zip(gorse_items, texts, embeddings):
+            # Embeddings are NOT attached to Labels (flat []string). They remain
+            # cached in Redis for the Python worker's own similarity computations.
+            if text:
+                item["Comment"] = text
+
+        return gorse_items
+
+    @staticmethod
+    def _l2_normalize(vector: List[float]) -> List[float]:
+        """L2-normalize a vector to unit length for cosine distance compatibility."""
+        norm = math.sqrt(sum(v * v for v in vector))
+        if norm == 0:
+            return vector
+        return [v / norm for v in vector]
+
+    @staticmethod
+    def _extract_product_id(item_id: str) -> str:
+        """ItemId is "shop_{shop_id}_{product_id}" - recover the raw product_id."""
+        parts = item_id.split("_", 2)
+        return parts[2] if len(parts) == 3 else item_id
+
+    @staticmethod
+    def _embedding_cache_key(shop_id: str, product_id: str, text: str) -> str:
+        text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        return f"item_embedding:{shop_id}:{product_id}:{text_hash}"
 
     def _convert_to_comprehensive_labels(
         self, product_dict: Dict[str, Any]
@@ -109,37 +216,37 @@ class GorseItemTransformer:
             lifecycle_stage = product_dict.get("product_lifecycle_stage", "dormant")
             labels.append(f"lifecycle:{lifecycle_stage}")
 
-            # 2. INTERACTION VOLUME SCORE (From optimized interaction_volume_score)
-            volume_score = float(product_dict.get("interaction_volume_score", 0) or 0)
-            if volume_score >= 0.8:
+            # 2. VOLUME (From popularity_score)
+            volume_score = float(product_dict.get("popularity_score", 0) or 0)
+            if volume_score >= 0.7:
                 labels.append("volume:viral")
-            elif volume_score >= 0.6:
+            elif volume_score >= 0.5:
                 labels.append("volume:high")
             elif volume_score >= 0.3:
                 labels.append("volume:medium")
             else:
                 labels.append("volume:low")
 
-            # 3. PURCHASE VELOCITY SCORE (From optimized purchase_velocity_score)
-            velocity_score = float(product_dict.get("purchase_velocity_score", 0) or 0)
-            if velocity_score >= 0.8:
+            # 3. VELOCITY (From stock_velocity - units/day)
+            velocity_score = float(product_dict.get("stock_velocity", 0) or 0)
+            if velocity_score >= 5.0:
                 labels.append("velocity:hot")
-            elif velocity_score >= 0.5:
+            elif velocity_score >= 2.0:
                 labels.append("velocity:fast")
-            elif velocity_score >= 0.2:
+            elif velocity_score >= 0.5:
                 labels.append("velocity:steady")
             else:
                 labels.append("velocity:slow")
 
-            # 4. ENGAGEMENT QUALITY SCORE (From optimized engagement_quality_score)
+            # 4. ENGAGEMENT (From overall_conversion_rate)
             engagement_score = float(
-                product_dict.get("engagement_quality_score", 0) or 0
+                product_dict.get("overall_conversion_rate", 0) or 0
             )
-            if engagement_score >= 0.8:
+            if engagement_score >= 0.15:
                 labels.append("engagement:exceptional")
-            elif engagement_score >= 0.6:
+            elif engagement_score >= 0.10:
                 labels.append("engagement:premium")
-            elif engagement_score >= 0.3:
+            elif engagement_score >= 0.05:
                 labels.append("engagement:good")
             else:
                 labels.append("engagement:basic")
@@ -148,33 +255,31 @@ class GorseItemTransformer:
             price_tier = product_dict.get("price_tier", "mid")
             labels.append(f"price:{price_tier}")
 
-            # 6. REVENUE POTENTIAL SCORE (From optimized revenue_potential_score)
-            revenue_potential = float(
-                product_dict.get("revenue_potential_score", 0) or 0
-            )
-            if revenue_potential >= 0.8:
+            # 6. REVENUE (From avg_selling_price)
+            revenue_value = float(product_dict.get("avg_selling_price", 0) or 0)
+            if revenue_value >= 200:
                 labels.append("revenue:blockbuster")
-            elif revenue_potential >= 0.5:
+            elif revenue_value >= 100:
                 labels.append("revenue:strong")
-            elif revenue_potential >= 0.2:
+            elif revenue_value >= 50:
                 labels.append("revenue:moderate")
             else:
                 labels.append("revenue:niche")
 
-            # 7. CONVERSION EFFICIENCY (From optimized conversion_efficiency)
-            conversion_efficiency = float(
-                product_dict.get("conversion_efficiency", 0) or 0
+            # 7. CONVERSION (From overall_conversion_rate)
+            conversion_value = float(
+                product_dict.get("overall_conversion_rate", 0) or 0
             )
-            if conversion_efficiency >= 0.2:
+            if conversion_value >= 0.2:
                 labels.append("conversion:excellent")
-            elif conversion_efficiency >= 0.1:
+            elif conversion_value >= 0.1:
                 labels.append("conversion:good")
-            elif conversion_efficiency >= 0.05:
+            elif conversion_value >= 0.05:
                 labels.append("conversion:average")
             else:
                 labels.append("conversion:poor")
 
-            # 8. DAYS SINCE LAST PURCHASE (From optimized days_since_last_purchase)
+            # 8. RECENCY (From days_since_last_purchase)
             days_since_last = product_dict.get("days_since_last_purchase")
             if days_since_last is not None:
                 if days_since_last <= 7:
@@ -186,31 +291,32 @@ class GorseItemTransformer:
                 else:
                     labels.append("recency:cold")
 
-            # 9. ACTIVITY RECENCY SCORE (From optimized activity_recency_score)
-            recency_score = float(product_dict.get("activity_recency_score", 0) or 0)
-            if recency_score >= 0.8:
+            # 9. ACTIVITY (From trending_score)
+            trending_score = float(product_dict.get("trending_score", 0) or 0)
+            if trending_score >= 0.7:
                 labels.append("activity:trending")
-            elif recency_score >= 0.5:
+            elif trending_score >= 0.4:
                 labels.append("activity:active")
             else:
                 labels.append("activity:dormant")
 
-            # 10. TRENDING MOMENTUM (From optimized trending_momentum)
-            trending_momentum = float(product_dict.get("trending_momentum", 0) or 0)
-            if trending_momentum >= 0.8:
+            # 10. MOMENTUM (Compound from trending_score & popularity_score)
+            momentum_trending = float(product_dict.get("trending_score", 0) or 0)
+            momentum_popularity = float(product_dict.get("popularity_score", 0) or 0)
+            if momentum_trending >= 0.7 and momentum_popularity >= 0.5:
                 labels.append("momentum:viral")
-            elif trending_momentum >= 0.5:
+            elif momentum_trending >= 0.5:
                 labels.append("momentum:rising")
             else:
                 labels.append("momentum:stable")
 
-            # 11. INVENTORY HEALTH SCORE (From optimized inventory_health_score)
-            inventory_health = float(product_dict.get("inventory_health_score", 0) or 0)
-            if inventory_health >= 0.8:
+            # 11. STOCK HEALTH (From inventory_turnover)
+            inventory_turnover = float(product_dict.get("inventory_turnover", 0) or 0)
+            if inventory_turnover >= 1.0:
                 labels.append("stock:healthy")
-            elif inventory_health >= 0.5:
+            elif inventory_turnover >= 0.5:
                 labels.append("stock:adequate")
-            elif inventory_health >= 0.2:
+            elif inventory_turnover >= 0.2:
                 labels.append("stock:low")
             else:
                 labels.append("stock:critical")
@@ -256,15 +362,15 @@ class GorseItemTransformer:
         categories.append(f"price_tier:{price_tier}")
 
         # Performance-based categorization
-        volume_score = float(product_dict.get("interaction_volume_score", 0) or 0)
+        volume_score = float(product_dict.get("popularity_score", 0) or 0)
         if volume_score >= 0.5:
             categories.append("performance:active")
         else:
             categories.append("performance:passive")
 
         # Revenue tier categorization
-        revenue_potential = float(product_dict.get("revenue_potential_score", 0) or 0)
-        if revenue_potential >= 0.6:
+        revenue_potential = float(product_dict.get("avg_selling_price", 0) or 0)
+        if revenue_potential >= 100:
             categories.append("revenue:high_potential")
         else:
             categories.append("revenue:standard")
@@ -283,14 +389,25 @@ class GorseItemTransformer:
         """
         # Get ALL key optimized scores
         lifecycle_stage = product_dict.get("product_lifecycle_stage", "dormant")
-        volume_score = float(product_dict.get("interaction_volume_score", 0) or 0)
-        velocity_score = float(product_dict.get("purchase_velocity_score", 0) or 0)
-        engagement_score = float(product_dict.get("engagement_quality_score", 0) or 0)
-        conversion_efficiency = float(product_dict.get("conversion_efficiency", 0) or 0)
-        revenue_potential = float(product_dict.get("revenue_potential_score", 0) or 0)
-        inventory_health = float(product_dict.get("inventory_health_score", 0) or 0)
-        recency_score = float(product_dict.get("activity_recency_score", 0) or 0)
-        trending_momentum = float(product_dict.get("trending_momentum", 0) or 0)
+        volume_score = float(product_dict.get("popularity_score", 0) or 0)
+        velocity_score = min(
+            float(product_dict.get("stock_velocity", 0) or 0) / 10.0, 1.0
+        )
+        engagement_score = float(product_dict.get("overall_conversion_rate", 0) or 0)
+        conversion_efficiency = float(
+            product_dict.get("overall_conversion_rate", 0) or 0
+        )
+        revenue_potential = min(
+            float(product_dict.get("avg_selling_price", 0) or 0) / 300.0, 1.0
+        )
+        inventory_health = min(
+            float(product_dict.get("inventory_turnover", 0) or 0) / 2.0, 1.0
+        )
+        days_since_last = product_dict.get("days_since_last_purchase")
+        recency_score = (
+            max(0, 1 - (days_since_last / 365)) if days_since_last is not None else 0.0
+        )
+        trending_momentum = float(product_dict.get("trending_score", 0) or 0)
 
         # Calculate comprehensive priority score
         # Growth and emerging products get lifecycle boost

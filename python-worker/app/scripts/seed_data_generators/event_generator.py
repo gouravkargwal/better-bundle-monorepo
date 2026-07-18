@@ -197,14 +197,14 @@ class EventGenerator(BaseGenerator):
         )
         seq += 1
 
-        # Phoenix recommendations (product page recommendations)
+        # Recommendations (product page recommendations)
         events.append(
             self._create_event(
                 "recommendation_viewed",
                 client_id,
                 seq,
                 self._build_recommendation_data(
-                    "phoenix", "product_page", [1, 2, 3], product_variant_ids
+                    "atlas", "product_page", [1, 2, 3], product_variant_ids
                 ),
                 self.past_date(5),
                 "mobile",
@@ -622,14 +622,14 @@ class EventGenerator(BaseGenerator):
         )
         seq += 1
 
-        # Venus cross-sell events (frequently bought together)
+        # Cross-sell events (frequently bought together)
         events.append(
             self._create_event(
                 "cross_sell_viewed",
                 client_id,
                 seq,
                 self._build_cross_sell_data(
-                    "venus", "product_page", [13, 14], product_variant_ids
+                    "atlas", "product_page", [13, 14], product_variant_ids
                 ),
                 self.past_date(7),
                 "desktop",
@@ -1627,18 +1627,18 @@ class EventGenerator(BaseGenerator):
             "checkout_started": "atlas",
             "checkout_completed": "atlas",
             "customer_linked": "atlas",
-            # Recommendation events (tracked by Phoenix)
-            "recommendation_viewed": "phoenix",
-            "recommendation_clicked": "phoenix",
-            "recommendation_add_to_cart": "phoenix",
+            # Recommendation events
+            "recommendation_viewed": "atlas",
+            "recommendation_clicked": "atlas",
+            "recommendation_add_to_cart": "atlas",
             # Post-purchase events (tracked by Apollo)
             "upsell_viewed": "apollo",
             "upsell_clicked": "apollo",
             "upsell_add_to_cart": "apollo",
-            # Cross-sell events (tracked by Venus)
-            "cross_sell_viewed": "venus",
-            "cross_sell_clicked": "venus",
-            "cross_sell_add_to_cart": "venus",
+            # Cross-sell events
+            "cross_sell_viewed": "atlas",
+            "cross_sell_clicked": "atlas",
+            "cross_sell_add_to_cart": "atlas",
         }
         return extension_mapping.get(event_name, "atlas")
 
@@ -1696,7 +1696,7 @@ class EventGenerator(BaseGenerator):
             "extensionType": extension_type,
             "context": context,
             "recommendedProducts": recommended_products,
-            "recommendationEngine": "phoenix",
+            "recommendationEngine": "default",
             "algorithm": "collaborative_filtering",
             "confidence": 0.85,
         }
@@ -1754,7 +1754,7 @@ class EventGenerator(BaseGenerator):
         cross_sell_indices: List[int],
         product_variant_ids: List[str],
     ) -> Dict[str, Any]:
-        """Build cross-sell event data for Venus."""
+        """Build cross-sell event data."""
         cross_sell_products = []
         for idx in cross_sell_indices:
             if idx < len(product_variant_ids):
@@ -1772,7 +1772,7 @@ class EventGenerator(BaseGenerator):
             "extensionType": extension_type,
             "context": context,
             "crossSellProducts": cross_sell_products,
-            "recommendationEngine": "venus",
+            "recommendationEngine": "atlas",
             "algorithm": "frequently_bought_together",
             "confidence": 0.68,
         }

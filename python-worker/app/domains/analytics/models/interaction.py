@@ -28,7 +28,7 @@ class InteractionType(str, Enum):
     CHECKOUT_COMPLETED = "checkout_completed"
     CUSTOMER_LINKED = "customer_linked"
 
-    # Custom recommendation events (tracked by Phoenix, Venus, Apollo)
+    # Custom recommendation events
     RECOMMENDATION_VIEWED = "recommendation_viewed"
     RECOMMENDATION_CLICKED = "recommendation_clicked"
     RECOMMENDATION_ADD_TO_CART = "recommendation_add_to_cart"

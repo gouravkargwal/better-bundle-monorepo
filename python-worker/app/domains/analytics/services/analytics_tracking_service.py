@@ -484,7 +484,7 @@ class AnalyticsTrackingService:
 
         Args:
             shop_id: The shop ID to compute features for
-            trigger_source: Source that triggered the computation (e.g., "venus_interaction")
+            trigger_source: Source that triggered the computation (e.g., "apollo_interaction")
             interaction_id: Optional interaction ID that triggered the computation
             batch_size: Batch size for feature processing
             incremental: Whether to run incremental processing

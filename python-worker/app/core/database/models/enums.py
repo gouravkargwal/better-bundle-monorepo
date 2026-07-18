@@ -64,13 +64,11 @@ class ExtensionType(str, Enum):
 
     APOLLO = "apollo"
     ATLAS = "atlas"
-    PHOENIX = "phoenix"
-    VENUS = "venus"
     MERCURY = "mercury"  # Shopify Plus checkout extensions
 
 
 class AppBlockTarget(str, Enum):
-    """App block targets for Venus extensions"""
+    """App block targets"""
 
     CUSTOMER_ACCOUNT_ORDER_STATUS_BLOCK_RENDER = (
         "customer_account_order_status_block_render"
@@ -182,8 +180,12 @@ class ShopifySubscriptionStatus(str, Enum):
 class AdjustmentReason(str, Enum):
     """Billing cycle adjustment reasons"""
 
-    CAP_INCREASE = "cap_increase"  # User requested cap increase
+    # Flat fee adjustments
     PLAN_UPGRADE = "plan_upgrade"  # Upgraded to higher tier
+    PLAN_DOWNGRADE = "plan_downgrade"  # Downgraded to lower tier
     ADMIN_ADJUSTMENT = "admin_adjustment"  # Admin adjustment
     PROMOTION = "promotion"  # Promotional adjustment
     DISPUTE_RESOLUTION = "dispute_resolution"  # Dispute resolution
+
+    # Legacy (usage-based pricing)
+    CAP_INCREASE = "cap_increase"  # User requested cap increase (legacy)

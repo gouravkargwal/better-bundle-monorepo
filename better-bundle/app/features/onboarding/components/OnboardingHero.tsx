@@ -9,7 +9,9 @@ interface OnboardingHeroProps {
   error?: OnboardingError;
   pricingTier?: {
     symbol: string;
-    threshold_amount: number;
+    monthly_fee: number;
+    trial_days: number;
+    plan_name: string;
   } | null;
 }
 
@@ -18,6 +20,11 @@ export function OnboardingHero({
   error,
   pricingTier,
 }: OnboardingHeroProps) {
+  const monthlyFee = pricingTier?.monthly_fee ?? 29;
+  const trialDays = pricingTier?.trial_days ?? 14;
+  const currencySymbol = pricingTier?.symbol ?? "$";
+  const planName = pricingTier?.plan_name ?? "Pro";
+
   return (
     <div
       style={{
@@ -114,9 +121,7 @@ export function OnboardingHero({
               variant="bodyLg"
               style={{ color: "rgba(255,255,255,0.9)" }}
             >
-              {pricingTier && pricingTier.symbol
-                ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()} Free Credits`
-                : "$200 Free Credits"}
+              {trialDays}-Day Free Trial
             </Text>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -133,7 +138,7 @@ export function OnboardingHero({
               variant="bodyLg"
               style={{ color: "rgba(255,255,255,0.9)" }}
             >
-              No Setup Fees
+              {currencySymbol}{monthlyFee}/month After Trial
             </Text>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -155,7 +160,7 @@ export function OnboardingHero({
           </div>
         </div>
 
-        {/* Pay-As-Performance Highlight */}
+        {/* Flat Rate Pricing Highlight */}
         <div
           style={{
             marginBottom: "24px",
@@ -193,7 +198,7 @@ export function OnboardingHero({
               </Text>
             </div>
             <Text as="h3" variant="headingLg" fontWeight="bold">
-              Pay-As-Performance Model
+              Simple Flat Rate Pricing
             </Text>
           </div>
 
@@ -206,7 +211,7 @@ export function OnboardingHero({
               marginBottom: "20px",
             }}
           >
-            Only pay when you see results • No upfront costs • Risk-free trial
+            {currencySymbol}{monthlyFee}/month • {trialDays}-day free trial • No hidden fees • Cancel anytime
           </Text>
 
           <Badge
@@ -219,7 +224,7 @@ export function OnboardingHero({
               fontWeight: "600",
             }}
           >
-            🎯 Guaranteed Results
+            🎯 Predictable Monthly Pricing
           </Badge>
         </div>
 
@@ -244,7 +249,7 @@ export function OnboardingHero({
             >
               {isLoading
                 ? "Setting up your store..."
-                : "Start Your Free Trial Now"}
+                : `Start Your ${trialDays}-Day Free Trial`}
             </Button>
           </Form>
           <div style={{ marginTop: "12px" }}>

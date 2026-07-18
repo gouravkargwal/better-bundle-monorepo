@@ -18,7 +18,6 @@ from app.consumers.kafka.purchase_attribution_consumer import (
 )
 from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
 from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
-from app.consumers.kafka.shopify_usage_consumer import ShopifyUsageKafkaConsumer
 
 logger = get_logger(__name__)
 
@@ -53,7 +52,6 @@ class KafkaConsumerManager:
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
                 "customer_linking": CustomerLinkingKafkaConsumer(),
                 "billing": BillingKafkaConsumer(),
-                "shopify_usage": ShopifyUsageKafkaConsumer(),
             }
 
             # Initialize each consumer in parallel to reduce overall startup time

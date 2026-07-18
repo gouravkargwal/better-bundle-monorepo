@@ -1,3 +1,4 @@
+import { initObservability } from "./utils/otel-logger";
 import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { RemixServer } from "@remix-run/react";
@@ -8,26 +9,26 @@ import {
 import { isbot } from "isbot";
 import { addDocumentResponseHeaders } from "./shopify.server";
 
+// Initialize OpenTelemetry observability before any request handling.
+// This must run at module load time so OTel can instrument HTTP/Express/pino
+// before any imports that might log or create connections.
+initObservability();
+
 export const streamTimeout = 5000;
 
 export default async function handleRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
-  remixContext: EntryContext
+  remixContext: EntryContext,
 ) {
   addDocumentResponseHeaders(request, responseHeaders);
   const userAgent = request.headers.get("user-agent");
-  const callbackName = isbot(userAgent ?? '')
-    ? "onAllReady"
-    : "onShellReady";
+  const callbackName = isbot(userAgent ?? "") ? "onAllReady" : "onShellReady";
 
   return new Promise((resolve, reject) => {
     const { pipe, abort } = renderToPipeableStream(
-      <RemixServer
-        context={remixContext}
-        url={request.url}
-      />,
+      <RemixServer context={remixContext} url={request.url} />,
       {
         [callbackName]: () => {
           const body = new PassThrough();
@@ -38,7 +39,7 @@ export default async function handleRequest(
             new Response(stream, {
               headers: responseHeaders,
               status: responseStatusCode,
-            })
+            }),
           );
           pipe(body);
         },
@@ -49,7 +50,7 @@ export default async function handleRequest(
           responseStatusCode = 500;
           console.error(error);
         },
-      }
+      },
     );
 
     // Automatically timeout the React renderer after 6 seconds, which ensures

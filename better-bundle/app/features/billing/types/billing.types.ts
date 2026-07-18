@@ -1,6 +1,6 @@
 /**
  * Billing feature types
- * Simplified state management for billing flow
+ * Flat fee pricing types for subscription management
  */
 
 export interface BillingState {
@@ -13,31 +13,25 @@ export interface BillingState {
 export type BillingStatus =
   | "trial_active"
   | "trial_completed"
+  | "trial_expired"
   | "subscription_pending"
   | "subscription_active"
-  | "subscription_suspended"
   | "subscription_cancelled";
 
 export interface TrialData {
   isActive: boolean;
-  thresholdAmount: number;
-  accumulatedRevenue: number;
-  progress: number; // 0-100
-  daysRemaining?: number;
+  daysRemaining: number;
+  trialDays: number; // Total trial days (e.g., 14)
   currency: string;
 }
 
 export interface SubscriptionData {
   id: string;
   status: "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED";
-  spendingLimit: number;
-  currentUsage: number; // Total: shopifyUsage + expectedCharge
-  shopifyUsage: number; // What's actually recorded to Shopify (RECORDED commissions)
-  expectedCharge: number; // Pending commissions not yet recorded (PENDING status only, excluding REJECTED)
-  rejectedAmount?: number; // Optional: Show rejected commissions separately for transparency
-  usagePercentage: number;
-  confirmationUrl?: string;
+  planName: string;
+  monthlyFee: number;
   currency: string;
+  confirmationUrl?: string;
   billingCycle?: {
     startDate: string;
     endDate: string;
@@ -53,14 +47,12 @@ export interface BillingError {
 }
 
 export interface BillingSetupData {
-  spendingLimit: number;
+  planId: string;
   currency: string;
 }
 
 export interface BillingMetrics {
   totalRevenue: number;
   attributedRevenue: number;
-  commissionEarned: number;
-  commissionRate: number;
   currency: string;
 }

@@ -112,7 +112,9 @@ export class OnboardingService {
 
       return {
         symbol: getCurrencySymbol(currencyCode),
-        threshold_amount: Number(pricingTier.trial_threshold_amount),
+        monthly_fee: Number(pricingTier.monthly_fee) || 29,
+        trial_days: Number(pricingTier.trial_days) || 14,
+        plan_name: defaultPlan.name || "Pro",
       };
     } catch (error) {
       logger.error({ error }, "Error getting pricing tier configuration");
@@ -230,7 +232,8 @@ export class OnboardingService {
         );
       }
 
-      // Create shop subscription (TRIAL status)
+      // Create shop subscription (TRIAL status) with flat fee trial configuration
+      const trialDays = Number(pricingTier.trial_days) || 14;
       const shopSubscription = await tx.shop_subscriptions.create({
         data: {
           shop_id: shopRecord.id,
@@ -241,7 +244,9 @@ export class OnboardingService {
           started_at: new Date(),
           is_active: true,
           auto_renew: true,
-          user_chosen_cap_amount: pricingTier.trial_threshold_amount,
+          trial_duration_days: trialDays,
+          // Set the monthly fee from pricing tier (used after trial ends)
+          monthly_fee_override: pricingTier.monthly_fee,
         },
       });
 

@@ -1,0 +1,34 @@
+{
+  "title": "Logs Explorer",
+  "description": "Explore and analyze log volume, error patterns, and search across all services",
+  "panels": [
+    {
+      "title": "Log Volume by Service",
+      "type": "bar",
+      "query": "SELECT service.name, count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 1h GROUP BY service.name ORDER BY log_count DESC"
+    },
+    {
+      "title": "Log Volume by Level",
+      "type": "bar",
+      "query": "SELECT level, count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 1h GROUP BY level ORDER BY log_count DESC"
+    },
+    {
+      "title": "Error Logs Timeline",
+      "type": "line",
+      "query": "SELECT rate(count(*), 5m) as error_rate FROM \"python-worker-logs\" WHERE level = 'error' AND timestamp > now() - 6h",
+      "unit": "errors/5m",
+      "color": "#e74c3c"
+    },
+    {
+      "title": "Log Search",
+      "type": "table",
+      "query": "SELECT timestamp, level, service.name, message FROM \"python-worker-logs\" WHERE timestamp > now() - 1h ORDER BY timestamp DESC LIMIT 100",
+      "search": true
+    },
+    {
+      "title": "Top Error Messages",
+      "type": "table",
+      "query": "SELECT message, count(*) as occurrence_count, max(timestamp) as last_seen FROM \"python-worker-logs\" WHERE level = 'error' AND timestamp > now() - 24h GROUP BY message ORDER BY occurrence_count DESC LIMIT 20"
+    }
+  ]
+}

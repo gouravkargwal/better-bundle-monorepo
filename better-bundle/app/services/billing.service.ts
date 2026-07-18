@@ -2,18 +2,10 @@ import prisma from "../db.server";
 import logger from "../utils/logger";
 import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 
-export interface TrialRevenueData {
-  attributedRevenue: number;
-  commissionEarned: number;
-}
-
-export interface CurrentCycleMetrics {
-  purchases: { count: number; total: number };
-  net_revenue: number;
-  commission: number;
-  final_commission: number;
-  capped_amount: number;
-  days_remaining: number;
+export interface TrialData {
+  daysRemaining: number;
+  trialDays: number;
+  isExpired: boolean;
 }
 
 export interface BillingSummary {
@@ -26,20 +18,18 @@ export interface BillingSummary {
   };
   pricing_tier: {
     currency: string;
-    commission_rate: number;
+    monthly_fee: number;
   };
   trial?: {
-    status: string;
-    threshold: number;
-    // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
-    progress_percentage: number;
+    days_remaining: number;
+    total_days: number;
+    is_expired: boolean;
   };
   current_cycle?: {
     id: string;
     cycle_number: number;
-    usage_amount: number;
-    current_cap: number;
-    usage_percentage: number;
+    start_date: string;
+    end_date: string;
     days_remaining: number;
   };
   shopify_subscription?: {
@@ -49,205 +39,58 @@ export interface BillingSummary {
 }
 
 /**
- * Get trial revenue data for a shop
+ * Get trial days remaining for a shop
  */
-export async function getTrialRevenueData(
-  shopId: string,
-): Promise<TrialRevenueData> {
+export async function getTrialData(shopId: string): Promise<TrialData> {
   try {
-    // Get shop subscription
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopId,
         is_active: true,
+        subscription_type: "TRIAL",
+        status: "TRIAL",
       },
       include: {
         pricing_tiers: true,
       },
     });
 
-    if (!shopSubscription || shopSubscription.subscription_type !== "TRIAL") {
-      return {
-        attributedRevenue: 0,
-        commissionEarned: 0,
-      };
+    if (!shopSubscription || !shopSubscription.started_at) {
+      return { daysRemaining: 0, trialDays: 14, isExpired: false };
     }
 
-    // ✅ Calculate actual revenue from commission records
-    const actualRevenue = await prisma.commission_records.aggregate({
-      where: {
-        shop_id: shopSubscription.shop_id,
-        billing_phase: "TRIAL",
-        status: {
-          in: ["TRIAL_PENDING", "TRIAL_COMPLETED"],
-        },
-      },
-      _sum: {
-        attributed_revenue: true,
-      },
-    });
+    const trialDays =
+      shopSubscription.trial_duration_days ||
+      shopSubscription.pricing_tiers?.trial_days ||
+      14;
 
-    // Calculate commission earned from trial revenue
-    const trialRevenue = Number(actualRevenue._sum?.attributed_revenue || 0);
-    const commissionRate = Number(
-      shopSubscription.pricing_tiers?.commission_rate || 0.03,
+    const trialEnd = new Date(
+      shopSubscription.started_at.getTime() + trialDays * 24 * 60 * 60 * 1000,
     );
-    const commissionEarned = trialRevenue * commissionRate;
-
-    return {
-      attributedRevenue: trialRevenue,
-      commissionEarned: commissionEarned,
-    };
-  } catch (error) {
-    logger.error({ error, shopId }, "Error getting trial revenue data");
-    throw error;
-  }
-}
-
-/**
- * Get usage revenue data for a shop (paid phase)
- */
-export async function getUsageRevenueData(
-  shopId: string,
-): Promise<TrialRevenueData> {
-  try {
-    // Get current billing cycle
-    const currentCycle = await prisma.billing_cycles.findFirst({
-      where: {
-        shop_subscriptions: {
-          shop_id: shopId,
-          is_active: true,
-        },
-        status: "ACTIVE",
-      },
-    });
-
-    if (!currentCycle) {
-      return {
-        attributedRevenue: 0,
-        commissionEarned: 0,
-      };
-    }
-
-    // Get commission records for current cycle
-    const aggregate = await prisma.commission_records.aggregate({
-      where: {
-        shop_id: shopId,
-        billing_cycle_id: currentCycle.id,
-        billing_phase: "PAID",
-        status: "RECORDED",
-      },
-      _sum: {
-        attributed_revenue: true,
-        commission_earned: true,
-      },
-    });
-
-    return {
-      attributedRevenue: Number(aggregate._sum?.attributed_revenue || 0),
-      commissionEarned: Number(aggregate._sum?.commission_earned || 0),
-    };
-  } catch (error) {
-    logger.error({ error, shopId }, "Error getting usage revenue data");
-    throw error;
-  }
-}
-
-/**
- * Get current cycle metrics for a shop
- */
-export async function getCurrentCycleMetrics(
-  shopId: string,
-  shopSubscription: any,
-): Promise<CurrentCycleMetrics> {
-  try {
-    // Get current billing cycle
-    const currentCycle = await prisma.billing_cycles.findFirst({
-      where: {
-        shop_subscription_id: shopSubscription.id,
-        status: "ACTIVE",
-      },
-    });
-
-    if (!currentCycle) {
-      return {
-        purchases: { count: 0, total: 0 },
-        net_revenue: 0,
-        commission: 0,
-        final_commission: 0,
-        capped_amount: Number(shopSubscription.user_chosen_cap_amount || 1000),
-        days_remaining: 0,
-      };
-    }
-
-    // Get commission records for current cycle
-    const commissionRecords = await prisma.commission_records.findMany({
-      where: {
-        shop_id: shopId,
-        billing_cycle_id: currentCycle.id,
-        billing_phase: "PAID",
-      },
-    });
-
-    // Calculate metrics
-    const purchases = commissionRecords.filter(
-      (r) => r.status === "RECORDED" || r.status === "INVOICED",
-    );
-
-    const purchasesCount = purchases.length;
-    const purchasesTotal = purchases.reduce(
-      (sum, r) => sum + Number(r.attributed_revenue || 0),
-      0,
-    );
-
-    const netRevenue = purchasesTotal;
-    const commission = netRevenue * 0.03; // 3% commission
-    const finalCommission = Math.min(
-      commission,
-      Number(currentCycle.current_cap_amount),
-    );
-
-    // Calculate days remaining
     const now = new Date();
     const daysRemaining = Math.max(
       0,
-      Math.ceil(
-        (currentCycle.end_date.getTime() - now.getTime()) /
-          (1000 * 60 * 60 * 24),
-      ),
+      Math.ceil((trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)),
     );
 
     return {
-      purchases: { count: purchasesCount, total: purchasesTotal },
-      net_revenue: netRevenue,
-      commission: commission,
-      final_commission: finalCommission,
-      capped_amount: Number(currentCycle.current_cap_amount),
-      days_remaining: daysRemaining,
+      daysRemaining,
+      trialDays,
+      isExpired: daysRemaining <= 0,
     };
   } catch (error) {
-    logger.error({ error, shopId }, "Error fetching current cycle metrics");
-    return {
-      purchases: { count: 0, total: 0 },
-      net_revenue: 0,
-      commission: 0,
-      final_commission: 0,
-      capped_amount: Number(
-        shopSubscription.pricing_tier?.trial_threshold_amount || 1000,
-      ),
-      days_remaining: 0,
-    };
+    logger.error({ error, shopId }, "Error getting trial data");
+    return { daysRemaining: 0, trialDays: 14, isExpired: false };
   }
 }
 
 /**
- * Get comprehensive billing summary for a shop using new schema
+ * Get billing summary for a shop (flat fee)
  */
 export async function getBillingSummary(
   shopId: string,
 ): Promise<BillingSummary | null> {
   try {
-    // Get shop subscription with all related data
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopId,
@@ -279,32 +122,53 @@ export async function getBillingSummary(
         plan_name: shopSubscription.subscription_plans?.name || "Unknown",
       },
       pricing_tier: {
-        currency: shopSubscription.pricing_tiers?.currency,
-        commission_rate: Number(
-          shopSubscription.pricing_tiers?.commission_rate || 0.03,
+        currency: shopSubscription.pricing_tiers?.currency || "USD",
+        monthly_fee: Number(
+          shopSubscription.pricing_tiers?.monthly_fee || 29.0,
         ),
       },
       trial:
         shopSubscription.subscription_type === "TRIAL"
-          ? {
-              status: shopSubscription.status,
-              threshold: Number(
-                shopSubscription.trial_threshold_override ||
-                  shopSubscription.pricing_tiers?.trial_threshold_amount ||
-                  1000,
-              ),
-              // ❌ REMOVED: accumulated_revenue - always calculate from commission_records
-              progress_percentage: 0, // Calculate based on actual revenue from commission_records
-            }
+          ? (() => {
+              // Compute trial days remaining in TypeScript (trial_remaining_days is a Python @property, not a DB column)
+              const trialTotalDays =
+                shopSubscription.trial_duration_days ||
+                shopSubscription.pricing_tiers?.trial_days ||
+                14;
+              let daysRemaining = 0;
+              if (shopSubscription.started_at) {
+                const trialEnd = new Date(
+                  shopSubscription.started_at.getTime() +
+                    trialTotalDays * 24 * 60 * 60 * 1000,
+                );
+                daysRemaining = Math.max(
+                  0,
+                  Math.ceil(
+                    (trialEnd.getTime() - Date.now()) /
+                      (1000 * 60 * 60 * 24),
+                  ),
+                );
+              }
+              return {
+                days_remaining: daysRemaining,
+                total_days: trialTotalDays,
+                is_expired: daysRemaining <= 0,
+              };
+            })()
           : undefined,
       current_cycle: currentCycle
         ? {
             id: currentCycle.id,
             cycle_number: currentCycle.cycle_number,
-            usage_amount: Number(currentCycle.usage_amount),
-            current_cap: Number(currentCycle.current_cap_amount),
-            usage_percentage: 0, // Calculate based on usage_amount / current_cap_amount
-            days_remaining: 0, // Calculate based on end_date - now
+            start_date: currentCycle.start_date.toISOString(),
+            end_date: currentCycle.end_date.toISOString(),
+            days_remaining: Math.max(
+              0,
+              Math.ceil(
+                (currentCycle.end_date.getTime() - Date.now()) /
+                  (1000 * 60 * 60 * 24),
+              ),
+            ),
           }
         : undefined,
       shopify_subscription: shopSubscription.shopify_subscription_id
@@ -321,14 +185,14 @@ export async function getBillingSummary(
 }
 
 /**
- * Create a new shop subscription (when shop installs)
+ * Create a new shop subscription (flat fee trial)
  */
 export async function createShopSubscription(
   shopId: string,
   shopDomain: string,
 ): Promise<any> {
   try {
-    // Idempotency: return existing active or pending subscription if present
+    // Idempotency: return existing active or pending subscription
     const existing = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopId,
@@ -336,7 +200,12 @@ export async function createShopSubscription(
           { is_active: true },
           {
             status: {
-              in: ["TRIAL", "PENDING_APPROVAL", "ACTIVE", "SUSPENDED"] as any,
+              in: [
+                "TRIAL",
+                "PENDING_APPROVAL",
+                "ACTIVE",
+                "SUSPENDED",
+              ] as any,
             },
           },
         ],
@@ -347,7 +216,8 @@ export async function createShopSubscription(
     if (existing) {
       return { shop_subscription: existing };
     }
-    // Get default subscription plan
+
+    // Get default subscription plan (flat fee)
     const defaultPlan = await prisma.subscription_plans.findFirst({
       where: {
         is_active: true,
@@ -372,7 +242,7 @@ export async function createShopSubscription(
       throw new Error("No default pricing tier found");
     }
 
-    // Create shop subscription
+    // Create trial subscription with time-based trial
     const shopSubscription = await prisma.shop_subscriptions.create({
       data: {
         shop_id: shopId,
@@ -383,7 +253,7 @@ export async function createShopSubscription(
         started_at: new Date(),
         is_active: true,
         auto_renew: true,
-        user_chosen_cap_amount: defaultPricingTier.trial_threshold_amount,
+        trial_duration_days: defaultPricingTier.trial_days || 14,
       },
     });
 
@@ -408,65 +278,18 @@ export async function createShopSubscription(
 }
 
 /**
- * Complete trial and create first billing cycle
- */
-export async function completeTrialAndCreateCycle(
-  shopId: string,
-): Promise<any> {
-  try {
-    // Get shop subscription
-    const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: {
-        shop_id: shopId,
-        is_active: true,
-      },
-      include: {
-        pricing_tiers: true,
-      },
-    });
-
-    if (!shopSubscription) {
-      throw new Error("Shop subscription not found");
-    }
-
-    // Trial completion is handled by updating shop subscription status
-
-    // Update shop subscription status
-    await prisma.shop_subscriptions.update({
-      where: { id: shopSubscription.id },
-      data: {
-        status: "PENDING_APPROVAL",
-      },
-    });
-
-    return {
-      success: true,
-      message: "Trial completed, subscription pending approval",
-    };
-  } catch (error) {
-    logger.error({ error, shopId }, "Error completing trial");
-    throw error;
-  }
-}
-
-/**
- * Activate subscription and create first billing cycle
+ * Activate subscription and create first billing cycle (flat fee)
  */
 export async function activateSubscription(
   shopId: string,
   shopifySubscriptionId: string,
+  monthlyFee?: number,
 ): Promise<any> {
   try {
-    // Get shop subscription
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopId,
         is_active: true,
-      },
-      select: {
-        id: true,
-        user_chosen_cap_amount: true,
-        pricing_tiers: true,
       },
     });
 
@@ -475,30 +298,30 @@ export async function activateSubscription(
     }
 
     // Update shop subscription with Shopify subscription info
-    // ✅ When subscription is activated, convert from TRIAL to PAID
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
         shopify_subscription_id: shopifySubscriptionId,
         shopify_status: "ACTIVE",
-        subscription_type: "PAID", // ✅ FIX: Change from TRIAL to PAID when subscription is active
+        subscription_type: "PAID",
         status: "ACTIVE",
         updated_at: new Date(),
       },
     });
 
-    // Create first billing cycle using user's chosen cap
-    const userChosenCap = shopSubscription.user_chosen_cap_amount || 1000; // Fallback to 1000 if not set
+    // Create first billing cycle with period fee
+    const fee =
+      monthlyFee ||
+      Number(shopSubscription.monthly_fee_override) ||
+      29.0;
+
     const billingCycle = await prisma.billing_cycles.create({
       data: {
         shop_subscription_id: shopSubscription.id,
         cycle_number: 1,
         start_date: new Date(),
-        end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-        initial_cap_amount: userChosenCap,
-        current_cap_amount: userChosenCap,
-        usage_amount: 0,
-        commission_count: 0,
+        end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        period_fee: fee,
         status: "ACTIVE",
         activated_at: new Date(),
       },
@@ -518,55 +341,10 @@ export async function activateSubscription(
 }
 
 /**
- * Increase billing cycle cap
- */
-export async function increaseBillingCycleCap(
-  shopId: string,
-  newCapAmount: number,
-  adjustedBy: string = "user",
-): Promise<any> {
-  try {
-    // Get current billing cycle
-    const currentCycle = await prisma.billing_cycles.findFirst({
-      where: {
-        shop_subscriptions: {
-          shop_id: shopId,
-          is_active: true,
-        },
-        status: "ACTIVE",
-      },
-    });
-
-    if (!currentCycle) {
-      throw new Error("No active billing cycle found");
-    }
-
-    const oldCapAmount = currentCycle.current_cap_amount;
-
-    // Update billing cycle cap
-    await prisma.billing_cycles.update({
-      where: { id: currentCycle.id },
-      data: {
-        current_cap_amount: newCapAmount,
-      },
-    });
-
-    return {
-      success: true,
-      message: `Cap increased from $${oldCapAmount} to $${newCapAmount}`,
-    };
-  } catch (error) {
-    logger.error({ error, shopId }, "Error increasing cap");
-    throw error;
-  }
-}
-
-/**
  * Reactivate shop services if suspended
  */
 export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
   try {
-    // Get shop record
     const shop = await prisma.shops.findUnique({
       where: { id: shopId },
       select: { id: true, shop_domain: true, is_active: true },
@@ -577,7 +355,6 @@ export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
       return;
     }
 
-    // Only reactivate if currently suspended
     if (!shop.is_active) {
       await prisma.shops.update({
         where: { id: shopId },
@@ -590,7 +367,6 @@ export async function reactivateShopIfSuspended(shopId: string): Promise<void> {
         },
       });
 
-      // Invalidate suspension cache so fresh data is fetched
       await invalidateSuspensionCache(shopId);
     }
   } catch (error) {

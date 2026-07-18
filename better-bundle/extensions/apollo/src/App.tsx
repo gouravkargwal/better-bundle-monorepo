@@ -411,7 +411,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
               variantId: variantId,
               quantity: quantity,
             },
-            // ✅ ADD SESSION ID TO ORDER METAFIELDS FOR ATTRIBUTION (following Phoenix pattern)
+            // ✅ ADD SESSION ID TO ORDER METAFIELDS FOR ATTRIBUTION
             {
               type: "set_metafield",
               namespace: "bb_recommendation",

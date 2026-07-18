@@ -13,6 +13,7 @@ from app.domains.analytics.models.session import (
 )
 from app.core.logging.logger import get_logger
 from app.repository.UserSessionRepository import SessionRepository
+from app.shared.decorators.tracing import async_trace_func
 
 logger = get_logger(__name__)
 
@@ -26,6 +27,7 @@ class SessionService:
         self._last_cleanup = now_utc()
         self.repository = SessionRepository()
 
+    @async_trace_func()
     async def get_or_create_session(
         self,
         shop_id: str,
@@ -83,6 +85,7 @@ class SessionService:
             logger.error(f"Error in get_or_create_session: {str(e)}")
             raise
 
+    @async_trace_func()
     async def get_session(self, session_id: str) -> Optional[UserSession]:
 
         try:
@@ -102,6 +105,7 @@ class SessionService:
             logger.error(f"Error getting session {session_id}: {str(e)}")
             return None
 
+    @async_trace_func()
     async def update_session(
         self, session_id: str, update_data: SessionUpdate
     ) -> Optional[UserSession]:
@@ -178,7 +182,7 @@ class SessionService:
 
         Args:
             session_id: The session ID
-            extension_type: The extension type (string: "phoenix", "apollo", "venus", "atlas", "mercury", or "unknown")
+            extension_type: The extension type (string: "apollo", "atlas", "mercury", or "unknown")
 
         Returns:
             True if successful, False otherwise

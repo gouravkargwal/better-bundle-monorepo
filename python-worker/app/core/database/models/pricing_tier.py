@@ -2,7 +2,7 @@
 Pricing Tier Model
 
 Defines pricing configuration for each subscription plan.
-Allows multi-currency support and flexible pricing.
+Allows multi-currency support and flexible flat-fee pricing.
 """
 
 from decimal import Decimal
@@ -10,6 +10,7 @@ from datetime import datetime
 from sqlalchemy import (
     Column,
     String,
+    Integer,
     Numeric,
     Boolean,
     ForeignKey,
@@ -28,6 +29,15 @@ class PricingTier(BaseModel):
 
     Defines pricing for a specific subscription plan in a specific currency.
     Links to subscription_plans table.
+
+    Flat Fee Pricing (current):
+    - monthly_fee: The fixed monthly price charged via Shopify AppSubscription
+    - trial_days: Number of free trial days before first charge
+
+    Legacy Usage-Based Pricing (deprecated):
+    - trial_threshold_amount: Revenue threshold to complete trial (legacy)
+    - commission_rate: Commission rate like 0.03 for 3% (legacy)
+    - minimum_charge / proration_enabled: Legacy fields
     """
 
     __tablename__ = "pricing_tiers"
@@ -42,23 +52,41 @@ class PricingTier(BaseModel):
 
     # Currency and pricing
     currency = Column(String(3), nullable=False, index=True)  # ISO 4217 currency code
+
+    # ===== FLAT FEE PRICING (NEW) =====
+    monthly_fee = Column(
+        Numeric(10, 2),
+        nullable=True,
+        default=Decimal("29.00"),
+        comment="Flat monthly fee charged via Shopify AppSubscription",
+    )
+    trial_days = Column(
+        Integer,
+        nullable=True,
+        default=14,
+        comment="Number of free trial days before first charge",
+    )
+
+    # ===== LEGACY USAGE-BASED PRICING (DEPRECATED) =====
     trial_threshold_amount = Column(
-        Numeric(10, 2), nullable=False, comment="Revenue threshold to complete trial"
+        Numeric(10, 2),
+        nullable=True,
+        comment="[LEGACY] Revenue threshold to complete trial",
     )
     commission_rate = Column(
         Numeric(5, 4),
-        nullable=False,
+        nullable=True,
         default=Decimal("0.03"),
-        comment="Commission rate (e.g., 0.03 for 3%)",
+        comment="[LEGACY] Commission rate (e.g., 0.03 for 3%)",
     )
 
     # Tier configuration
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_default = Column(Boolean, default=False, nullable=False, index=True)
 
-    # Additional pricing rules
+    # Legacy additional pricing rules
     minimum_charge = Column(
-        Numeric(10, 2), nullable=True, comment="Minimum charge per billing cycle"
+        Numeric(10, 2), nullable=True, comment="[LEGACY] Minimum charge per billing cycle"
     )
     proration_enabled = Column(Boolean, default=True, nullable=False)
 
@@ -94,7 +122,12 @@ class PricingTier(BaseModel):
     )
 
     def __repr__(self) -> str:
-        return f"<PricingTier(plan_id={self.subscription_plan_id}, currency={self.currency}, threshold={self.trial_threshold_amount}, commission_rate={self.commission_rate})>"
+        return (
+            f"<PricingTier(plan_id={self.subscription_plan_id}, "
+            f"currency={self.currency}, "
+            f"monthly_fee=${self.monthly_fee or 'N/A'}, "
+            f"trial_days={self.trial_days or 'N/A'})>"
+        )
 
     @property
     def is_currently_active(self) -> bool:
@@ -108,5 +141,5 @@ class PricingTier(BaseModel):
 
     @property
     def commission_rate_percentage(self) -> float:
-        """Get commission rate as percentage (e.g., 3.0 for 3%)"""
-        return float(self.commission_rate * 100)
+        """[LEGACY] Get commission rate as percentage (e.g., 3.0 for 3%)"""
+        return float((self.commission_rate or Decimal("0.03")) * 100)

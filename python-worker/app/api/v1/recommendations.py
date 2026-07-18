@@ -4,6 +4,7 @@ Handles all recommendation requests from Shopify extension with context-based ro
 """
 
 import asyncio
+import time
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Header
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 from app.shared.helpers import now_utc
 
 from app.core.logging import get_logger
+from app.core.metrics import recommendations_served, recommendation_duration
 from app.shared.gorse_api_client import GorseApiClient
 from app.core.database.session import get_transaction_context
 from app.core.config.settings import settings
@@ -520,6 +522,7 @@ async def get_recommendations(
     This endpoint provides context-aware recommendations using JWT-based authorization.
     It uses stateless JWT validation instead of Redis/database checks for better performance.
     """
+    start = time.time()
     try:
         # Extract JWT token from Authorization header
         if not authorization or not authorization.startswith("Bearer "):
@@ -537,6 +540,23 @@ async def get_recommendations(
         # Pass the request and the bundled services to the core logic function
         result_data = await fetch_recommendations_logic(request, services)
 
+        duration = time.time() - start
+        rec_count = result_data.get("count", 0)
+        recommendations_served.add(
+            rec_count,
+            {
+                "context": request.context,
+                "source": result_data.get("source", "unknown"),
+            },
+        )
+        recommendation_duration.record(
+            duration,
+            {
+                "context": request.context,
+                "source": result_data.get("source", "unknown"),
+            },
+        )
+
         return RecommendationResponse(success=True, **result_data)
 
     except HTTPException:
@@ -552,6 +572,10 @@ async def get_recommendations(
         # Handle all other logic or unexpected errors with a 500 Internal Server Error
         logger.error(
             f"💥 Recommendation request failed | shop={request.shop_domain} | context={request.context} | error={str(e)}"
+        )
+        recommendation_duration.record(
+            time.time() - start,
+            {"context": request.context, "source": "error", "error": "true"},
         )
         raise HTTPException(
             status_code=500,

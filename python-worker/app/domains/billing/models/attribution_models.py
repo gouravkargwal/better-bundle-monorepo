@@ -43,8 +43,6 @@ class InteractionType(str, Enum):
 class ExtensionType(str, Enum):
     """Extension types"""
 
-    VENUS = "venus"
-    PHOENIX = "phoenix"
     APOLLO = "apollo"
     ATLAS = "atlas"
     MERCURY = "mercury"  # Shopify Plus checkout extensions

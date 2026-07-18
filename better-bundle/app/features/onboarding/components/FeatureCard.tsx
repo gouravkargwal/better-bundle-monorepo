@@ -12,20 +12,26 @@ import {
 interface FeatureCardProps {
   pricingTier?: {
     symbol: string;
-    threshold_amount: number;
+    monthly_fee: number;
+    trial_days: number;
+    plan_name: string;
   } | null;
 }
 
 const FeatureCard = ({ pricingTier }: FeatureCardProps) => {
+  const monthlyFee = pricingTier?.monthly_fee ?? 29;
+  const trialDays = pricingTier?.trial_days ?? 14;
+  const currencySymbol = pricingTier?.symbol ?? "$";
+
   const features = [
     {
       icon: CreditCardIcon,
-      title: "Pay-As-Performance",
-      description: `Only pay when you see results! Start with ${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits, then pay only for actual revenue generated`,
+      title: "Simple Flat Pricing",
+      description: `Predictable monthly rate — no surprises. Start with a ${trialDays}-day free trial, then pay a flat ${currencySymbol}${monthlyFee}/month.`,
       color: "#F59E0B",
-      badge: "Risk-free trial",
-      stats: `${pricingTier && pricingTier.symbol ? `${pricingTier.symbol}${Math.round(pricingTier.threshold_amount).toLocaleString()}` : "$200"} free credits included`,
-      highlight: "No upfront costs",
+      badge: "Predictable billing",
+      stats: `${currencySymbol}${monthlyFee}/month · ${trialDays}-day trial`,
+      highlight: "No hidden fees",
       gradient: "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)",
     },
     {

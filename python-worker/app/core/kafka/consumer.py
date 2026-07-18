@@ -15,6 +15,9 @@ from aiokafka.errors import (
     ConsumerStoppedError,
 )
 
+from app.core.metrics import kafka_messages_consumed
+from app.shared.decorators.tracing import async_trace_func
+
 logger = logging.getLogger(__name__)
 
 
@@ -80,6 +83,7 @@ class KafkaConsumer:
             self._is_initialized = False
             raise
 
+    @async_trace_func()
     async def consume(self, timeout_ms: int = 1000) -> AsyncIterator[Dict[str, Any]]:
         """Consume messages with industry-standard error handling"""
         if not self._consumer:
@@ -108,6 +112,13 @@ class KafkaConsumer:
                     }
 
                     self._message_count += 1
+                    kafka_messages_consumed.add(
+                        1,
+                        {
+                            "topic": message.topic,
+                            "group_id": self._group_id,
+                        },
+                    )
                     yield kafka_message
 
                 except json.JSONDecodeError as e:

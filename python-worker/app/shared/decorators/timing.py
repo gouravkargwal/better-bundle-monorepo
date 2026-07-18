@@ -9,8 +9,36 @@ from typing import Callable, Any, Optional
 from functools import wraps
 
 from app.core.logging import get_logger
+from app.core.metrics import get_meter
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# OTel instruments — created once at module level
+# ---------------------------------------------------------------------------
+_timing_meter = get_meter()
+_timing_histogram = _timing_meter.create_histogram(
+    "function.duration",
+    description="Function execution duration in seconds",
+    unit="s",
+)
+_timing_threshold_exceeded = _timing_meter.create_counter(
+    "function.threshold_exceeded",
+    description="Count of function executions exceeding threshold",
+    unit="1",
+)
+
+_perf_meter = get_meter()
+_perf_wall_time = _perf_meter.create_histogram(
+    "performance.wall_time",
+    description="Wall-clock execution time in seconds",
+    unit="s",
+)
+_perf_cpu_time = _perf_meter.create_histogram(
+    "performance.cpu_time",
+    description="CPU execution time in seconds",
+    unit="s",
+)
 
 
 def timing(threshold_ms: Optional[float] = None):
@@ -55,6 +83,22 @@ def timing(threshold_ms: Optional[float] = None):
                     error=str(e),
                 )
                 raise
+            finally:
+                duration = time.time() - start_time
+                _timing_histogram.record(
+                    duration,
+                    {"function": func.__name__, "module": func.__module__},
+                )
+                if threshold_ms and duration * 1000 > threshold_ms:
+                    _timing_threshold_exceeded.add(
+                        1,
+                        {
+                            "function": func.__name__,
+                            "module": func.__module__,
+                            "threshold_ms": str(threshold_ms),
+                            "duration_ms": str(round(duration * 1000, 2)),
+                        },
+                    )
 
         return wrapper
 
@@ -103,6 +147,22 @@ def async_timing(threshold_ms: Optional[float] = None):
                     error=str(e),
                 )
                 raise
+            finally:
+                duration = time.time() - start_time
+                _timing_histogram.record(
+                    duration,
+                    {"function": func.__name__, "module": func.__module__},
+                )
+                if threshold_ms and duration * 1000 > threshold_ms:
+                    _timing_threshold_exceeded.add(
+                        1,
+                        {
+                            "function": func.__name__,
+                            "module": func.__module__,
+                            "threshold_ms": str(threshold_ms),
+                            "duration_ms": str(round(duration * 1000, 2)),
+                        },
+                    )
 
         return wrapper
 
@@ -145,6 +205,10 @@ def performance_monitor(operation_name: Optional[str] = None):
                     error=str(e),
                 )
                 raise
+            finally:
+                labels = {"function": func.__name__, "module": func.__module__}
+                _perf_wall_time.record(time.time() - start_time, labels)
+                _perf_cpu_time.record(time.process_time() - start_cpu, labels)
 
         return wrapper
 
@@ -187,6 +251,10 @@ def async_performance_monitor(operation_name: Optional[str] = None):
                     error=str(e),
                 )
                 raise
+            finally:
+                labels = {"function": func.__name__, "module": func.__module__}
+                _perf_wall_time.record(time.time() - start_time, labels)
+                _perf_cpu_time.record(time.process_time() - start_cpu, labels)
 
         return wrapper
 

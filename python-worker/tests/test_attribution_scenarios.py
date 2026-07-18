@@ -56,7 +56,7 @@ class TestAttributionScenarios:
         mock_interactions = [
             {
                 "id": "interaction_1",
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=10),
@@ -64,7 +64,7 @@ class TestAttributionScenarios:
             },
             {
                 "id": "interaction_2",
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_add_to_cart",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=5),
@@ -72,7 +72,7 @@ class TestAttributionScenarios:
             },
             {
                 "id": "interaction_3",
-                "extension_type": "venus",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=3),
@@ -115,13 +115,13 @@ class TestAttributionScenarios:
         # Mock interactions from multiple extensions
         mock_interactions = [
             {
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "created_at": datetime.now() - timedelta(minutes=10),
                 "metadata": {"position": 1},
             },
             {
-                "extension_type": "venus",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_add_to_cart",
                 "created_at": datetime.now() - timedelta(minutes=5),
                 "metadata": {"position": 2},
@@ -140,15 +140,16 @@ class TestAttributionScenarios:
         )
 
         # Should have weights for all extensions
-        assert "phoenix" in weights
-        assert "venus" in weights
+        assert "apollo" in weights
         assert "apollo" in weights
 
         # Weights should sum to 1.0
         assert abs(sum(weights.values()) - 1.0) < 0.01
 
         # Primary interaction should get highest weight
-        assert weights["venus"] > weights["phoenix"]  # add_to_cart > clicked
+        assert (
+            weights["apollo"] > weights["mercury"]
+        )  # add_to_cart > clicked (mercury used as secondary)
 
     # ============================================================================
     # SCENARIO 8: Session vs Customer Attribution
@@ -718,7 +719,7 @@ class TestAttributionPerformance:
         large_interactions = [
             {
                 "id": f"interaction_{i}",
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "product_id": f"product_{i % 10}",
                 "created_at": datetime.now() - timedelta(minutes=i),

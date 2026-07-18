@@ -2,7 +2,7 @@
 Billing Cycle Model
 
 Monthly billing periods for each shop subscription.
-Tracks usage, caps, and cycle state.
+Tracks subscription periods for flat fee billing.
 """
 
 from decimal import Decimal
@@ -12,7 +12,6 @@ from sqlalchemy import (
     String,
     Integer,
     Numeric,
-    Boolean,
     ForeignKey,
     Index,
     Enum as SQLEnum,
@@ -29,7 +28,10 @@ class BillingCycle(BaseModel):
     Billing Cycle
 
     One record per 30-day billing period per shop.
-    Tracks usage, caps, and cycle state.
+    For flat fee pricing, this tracks subscription periods
+    (monthly intervals for recurring charges).
+
+    Legacy usage-based fields are kept nullable for historical data.
     """
 
     __tablename__ = "billing_cycles"
@@ -49,26 +51,35 @@ class BillingCycle(BaseModel):
     start_date = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
     end_date = Column(TIMESTAMP(timezone=True), nullable=False, index=True)
 
-    # Cap management (supports mid-cycle cap increases)
-    initial_cap_amount = Column(
-        Numeric(10, 2), nullable=False, comment="Cap amount at cycle start"
-    )
-    current_cap_amount = Column(
-        Numeric(10, 2), nullable=False, comment="Current cap amount (after adjustments)"
+    # ===== FLAT FEE FIELDS =====
+    period_fee = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Flat fee charged for this period (from pricing tier)",
     )
 
-    # Usage tracking
+    # ===== LEGACY USAGE-BASED FIELDS (DEPRECATED, KEPT NULLABLE) =====
+    initial_cap_amount = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="[LEGACY] Cap amount at cycle start",
+    )
+    current_cap_amount = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="[LEGACY] Current cap amount (after adjustments)",
+    )
     usage_amount = Column(
         Numeric(10, 2),
-        nullable=False,
+        nullable=True,
         default=Decimal("0.00"),
-        comment="Total usage in this cycle",
+        comment="[LEGACY] Total usage in this cycle",
     )
     commission_count = Column(
         Integer,
-        nullable=False,
+        nullable=True,
         default=0,
-        comment="Number of commissions in this cycle",
+        comment="[LEGACY] Number of commissions in this cycle",
     )
 
     # Cycle state
@@ -116,7 +127,11 @@ class BillingCycle(BaseModel):
     )
 
     def __repr__(self) -> str:
-        return f"<BillingCycle(subscription_id={self.shop_subscription_id}, cycle={self.cycle_number}, status={self.status.value}, usage={self.usage_amount})>"
+        fee_str = f"fee=${self.period_fee}" if self.period_fee else "legacy"
+        return (
+            f"<BillingCycle(subscription_id={self.shop_subscription_id}, "
+            f"cycle={self.cycle_number}, status={self.status.value}, {fee_str})>"
+        )
 
     @property
     def is_active(self) -> bool:
@@ -134,29 +149,6 @@ class BillingCycle(BaseModel):
         return self.status == BillingCycleStatus.CANCELLED
 
     @property
-    def usage_percentage(self) -> float:
-        """Calculate usage percentage of current cap"""
-        if not self.current_cap_amount or self.current_cap_amount == 0:
-            return 0.0
-        return float((self.usage_amount / self.current_cap_amount) * 100)
-
-    @property
-    def remaining_cap(self) -> Decimal:
-        """Calculate remaining cap amount"""
-        remaining = self.current_cap_amount - self.usage_amount
-        return max(Decimal("0.00"), remaining)
-
-    @property
-    def is_cap_reached(self) -> bool:
-        """Check if current cap is reached"""
-        return self.usage_amount >= self.current_cap_amount
-
-    @property
-    def is_near_cap(self, threshold: float = 0.8) -> bool:
-        """Check if usage is near cap (default 80%)"""
-        return self.usage_percentage >= (threshold * 100)
-
-    @property
     def days_remaining(self) -> int:
         """Calculate days remaining in cycle"""
         now = datetime.utcnow()
@@ -164,14 +156,44 @@ class BillingCycle(BaseModel):
             return 0
         return (self.end_date - now).days
 
+    # ===== LEGACY USAGE-BASED PROPERTIES (DEPRECATED) =====
+
+    @property
+    def usage_percentage(self) -> float:
+        """[LEGACY] Calculate usage percentage of current cap"""
+        if not self.current_cap_amount or self.current_cap_amount == 0:
+            return 0.0
+        return float((self.usage_amount or Decimal("0")) / self.current_cap_amount * 100)
+
+    @property
+    def remaining_cap(self) -> Decimal:
+        """[LEGACY] Calculate remaining cap amount"""
+        remaining = (self.current_cap_amount or Decimal("0")) - (
+            self.usage_amount or Decimal("0")
+        )
+        return max(Decimal("0.00"), remaining)
+
+    @property
+    def is_cap_reached(self) -> bool:
+        """[LEGACY] Check if current cap is reached"""
+        return (self.usage_amount or Decimal("0")) >= (
+            self.current_cap_amount or Decimal("0")
+        )
+
     @property
     def has_cap_increase(self) -> bool:
-        """Check if cap was increased during this cycle"""
-        return self.current_cap_amount > self.initial_cap_amount
+        """[LEGACY] Check if cap was increased during this cycle"""
+        return (
+            self.initial_cap_amount is not None
+            and self.current_cap_amount is not None
+            and self.current_cap_amount > self.initial_cap_amount
+        )
 
     @property
     def cap_increase_amount(self) -> Decimal:
-        """Calculate total cap increase amount"""
+        """[LEGACY] Calculate total cap increase amount"""
         if not self.has_cap_increase:
             return Decimal("0.00")
-        return self.current_cap_amount - self.initial_cap_amount
+        return (self.current_cap_amount or Decimal("0")) - (
+            self.initial_cap_amount or Decimal("0")
+        )

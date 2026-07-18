@@ -2,7 +2,9 @@
 export interface OnboardingData {
   pricingTier: {
     symbol: string;
-    threshold_amount: number;
+    monthly_fee: number;
+    trial_days: number;
+    plan_name: string;
   } | null;
 }
 

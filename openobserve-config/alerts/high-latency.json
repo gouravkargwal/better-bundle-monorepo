@@ -1,0 +1,15 @@
+{
+  "name": "High P95 Latency",
+  "stream": "python-worker-metrics",
+  "query": "SELECT percentile(http_request_duration_seconds, 0.95) as p95 FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
+  "condition": "p95 > 2.0",
+  "eval_period": "5m",
+  "frequency": "5m",
+  "notifications": [
+    {
+      "type": "slack",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    }
+  ],
+  "message": "P95 latency is {{p95}}s (threshold: 2s)"
+}

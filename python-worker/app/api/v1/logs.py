@@ -1,6 +1,6 @@
 """
-Logging API endpoint for Phoenix extension
-Forwards logs from browser to Loki
+Logging API endpoint for extension logging
+Forwards logs from browser extensions to OpenObserve
 """
 
 import json
@@ -13,98 +13,87 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app.core.config.settings import settings
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter()
 
-# Loki configuration
-LOKI_URL = os.getenv("LOKI_URL", "http://localhost:3100")
-LOKI_ENABLED = os.getenv("LOKI_ENABLED", "true").lower() == "true"
+# OpenObserve configuration — from pydantic-settings with env fallback
+OPENOBSERVE_ENDPOINT = os.getenv("OPENOBSERVE_ENDPOINT", settings.OPENOBSERVE_ENDPOINT)
+OPENOBSERVE_ORG = os.getenv("OPENOBSERVE_ORG", settings.OPENOBSERVE_ORG)
+OPENOBSERVE_API_KEY = os.getenv(
+    "OPENOBSERVE_API_KEY", settings.OPENOBSERVE_API_KEY or ""
+)
 
 
-async def forward_to_loki(logs_data: Dict[str, Any]) -> bool:
+async def forward_to_openobserve(logs_data: Dict[str, Any]) -> bool:
     """
-    Forward logs to Loki
+    Forward logs to OpenObserve JSON HTTP API
     """
-    if not LOKI_ENABLED:
-        logger.info("Loki logging disabled, skipping log forward")
+    if not OPENOBSERVE_ENDPOINT:
+        logger.info("OpenObserve endpoint not configured, skipping")
         return True
 
     try:
-        # Extract logs from the payload
-        logs = logs_data.get("logs", {})
+        logs = logs_data.get("logs", [])
         source = logs_data.get("source", "unknown")
         timestamp = logs_data.get("timestamp", datetime.utcnow().isoformat())
 
-        # Extract service and env from the logs if available
-        service_name = "phoenix-extension"  # Default
-        env_name = "development"  # Default
-
+        # Build payload — OpenObserve JSON API expects an array of records
+        payload: list[dict] = []
         if logs and len(logs) > 0:
-            # Try to extract service and env from the first log entry
-            first_log = logs[0]
-            service_name = first_log.get("service", "phoenix-extension")
-            env_name = first_log.get("env", "development")
-
-        # Transform to Loki format
-        loki_payload = {
-            "streams": [
-                {
-                    "stream": {
-                        "service": service_name,
-                        "source": source,
-                        "env": env_name,
-                    },
-                    "values": [],
+            for entry in logs:
+                record = {
+                    **entry,
+                    "_source": source,
+                    "_timestamp": entry.get("time", timestamp),
                 }
-            ]
-        }
-
-        # Process each log entry
-        if logs and len(logs) > 0:
-            for log_entry in logs:
-                # Convert log entry to Loki format
-                timestamp_ns = str(
-                    int(
-                        datetime.fromisoformat(
-                            log_entry.get("time", timestamp).replace("Z", "+00:00")
-                        ).timestamp()
-                        * 1000000000
-                    )
-                )
-                log_message = json.dumps(log_entry)
-                loki_payload["streams"][0]["values"].append([timestamp_ns, log_message])
-
-        # Send to Loki
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{LOKI_URL}/loki/api/v1/push",
-                json=loki_payload,
-                headers={"Content-Type": "application/json"},
+                payload.append(record)
+        else:
+            # Send a heartbeat so we still see extension activity
+            payload.append(
+                {
+                    "source": source,
+                    "timestamp": timestamp,
+                    "msg": "heartbeat",
+                    "service": "better-bundle-extension",
+                    "level": 30,
+                }
             )
 
-            if response.status_code == 204:
-                logger.info(
-                    f"Successfully forwarded {len(loki_payload['streams'][0]['values'])} log entries to Loki"
-                )
+        url = (
+            f"{OPENOBSERVE_ENDPOINT}/api/{OPENOBSERVE_ORG}"
+            f"/betterbundle-extensions/_json"
+        )
+        headers = {"Content-Type": "application/json"}
+        if OPENOBSERVE_API_KEY:
+            headers["Authorization"] = f"Bearer {OPENOBSERVE_API_KEY}"
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+
+            if response.status_code in (200, 201):
+                logger.info(f"Forwarded {len(payload)} log entries to OpenObserve")
                 return True
             else:
                 logger.error(
-                    f"Loki returned status {response.status_code}: {response.text}"
+                    f"OpenObserve returned status {response.status_code}: "
+                    f"{response.text}"
                 )
                 return False
 
     except Exception as e:
-        logger.error(f"Failed to forward logs to Loki: {str(e)}")
+        logger.error(f"Failed to forward logs to OpenObserve: {str(e)}")
         return False
 
 
 @router.post("/logs")
 async def receive_logs(request: Request):
     """
-    Receive logs from Phoenix extension and forward to Loki
+    Receive logs from extension and forward to OpenObserve
     """
     try:
         # Parse request body
@@ -127,18 +116,26 @@ async def receive_logs(request: Request):
             env_name = first_log.get("env", "unknown")
             logger.info(f"Log service: {service_name}, env: {env_name}")
 
-        # Forward to Loki
-        success = await forward_to_loki(body)
+        # Forward to OpenObserve
+        openobserve_success = await forward_to_openobserve(body)
 
-        if success:
+        # Return success if OpenObserve received the logs
+        if openobserve_success:
             return JSONResponse(
                 status_code=200,
-                content={"success": True, "message": "Logs forwarded to Loki"},
+                content={
+                    "success": True,
+                    "message": "Logs forwarded",
+                    "openobserve": openobserve_success,
+                },
             )
         else:
             return JSONResponse(
                 status_code=500,
-                content={"success": False, "message": "Failed to forward logs to Loki"},
+                content={
+                    "success": False,
+                    "message": "Failed to forward logs to OpenObserve",
+                },
             )
 
     except json.JSONDecodeError:
@@ -153,12 +150,24 @@ async def logs_health():
     """
     Health check for logging service
     """
+    # Probe OpenObserve reachability
+    openobserve_reachable = False
+    if OPENOBSERVE_ENDPOINT:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{OPENOBSERVE_ENDPOINT}/health", timeout=5.0)
+                openobserve_reachable = resp.status_code < 500
+        except Exception:
+            openobserve_reachable = False
+
     return JSONResponse(
         status_code=200,
         content={
             "status": "healthy",
-            "loki_enabled": LOKI_ENABLED,
-            "loki_url": LOKI_URL,
+            "openobserve_enabled": bool(OPENOBSERVE_ENDPOINT),
+            "openobserve_endpoint": OPENOBSERVE_ENDPOINT,
+            "openobserve_reachable": openobserve_reachable,
+            "openobserve_org": OPENOBSERVE_ORG,
             "timestamp": datetime.utcnow().isoformat(),
         },
     )

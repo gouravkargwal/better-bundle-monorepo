@@ -1,0 +1,50 @@
+{
+  "title": "Service Health Overview",
+  "description": "Core service health metrics: request rates, latency, Kafka lag, DB connections, cache health, and active services",
+  "panels": [
+    {
+      "title": "HTTP Request Rate",
+      "type": "line",
+      "query": "SELECT rate(count(*), 1m) as request_rate FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h GROUP BY service.name",
+      "unit": "req/s"
+    },
+    {
+      "title": "HTTP Error Rate",
+      "type": "line",
+      "query": "SELECT rate(count(*), 1m) as error_rate FROM \"python-worker-metrics\" WHERE status >= 500 AND timestamp > now() - 1h",
+      "unit": "errors/s",
+      "color": "#e74c3c"
+    },
+    {
+      "title": "Request Latency (p50 / p95 / p99)",
+      "type": "line",
+      "query": "SELECT percentile(http_request_duration_seconds, 0.50) as p50, percentile(http_request_duration_seconds, 0.95) as p95, percentile(http_request_duration_seconds, 0.99) as p99 FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h",
+      "unit": "s"
+    },
+    {
+      "title": "Kafka Consumer Lag",
+      "type": "gauge",
+      "query": "SELECT max(kafka_consumer_lag) as lag FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
+      "unit": "messages",
+      "max": 10000
+    },
+    {
+      "title": "DB Connection Pool Size",
+      "type": "gauge",
+      "query": "SELECT max(db_connection_pool_size) as pool_size FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
+      "unit": "connections"
+    },
+    {
+      "title": "Cache Hit Ratio",
+      "type": "stat",
+      "query": "SELECT sum(cache_hits) / (sum(cache_hits) + sum(cache_misses)) as hit_ratio FROM \"python-worker-metrics\" WHERE timestamp > now() - 10m",
+      "unit": "ratio",
+      "format": "0.00%"
+    },
+    {
+      "title": "Active Services",
+      "type": "table",
+      "query": "SELECT service.name, count(*) as log_count, max(timestamp) as last_seen FROM \"python-worker-logs\" WHERE timestamp > now() - 5m GROUP BY service.name ORDER BY log_count DESC"
+    }
+  ]
+}

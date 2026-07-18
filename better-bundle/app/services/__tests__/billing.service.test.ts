@@ -31,13 +31,8 @@ vi.mock("../../middleware/serviceSuspension", () => ({
 
 import {
   createShopSubscription,
-  completeTrialAndCreateCycle,
   activateSubscription,
-  increaseBillingCycleCap,
   reactivateShopIfSuspended,
-  getTrialRevenueData,
-  getUsageRevenueData,
-  getCurrentCycleMetrics,
 } from "../billing.service";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -53,8 +48,8 @@ function defaultTier() {
     currency: "USD",
     is_active: true,
     is_default: true,
-    trial_threshold_amount: 75,
-    commission_rate: 0.03,
+    monthly_fee: 29,
+    trial_days: 14,
   };
 }
 
@@ -66,7 +61,8 @@ function defaultSubscription(overrides: any = {}) {
     status: "TRIAL",
     is_active: true,
     pricing_tier_id: "tier-1",
-    user_chosen_cap_amount: 100,
+    monthly_fee_override: null,
+    trial_duration_days: null,
     pricing_tiers: defaultTier(),
     ...overrides,
   };
@@ -103,7 +99,7 @@ describe("billing.service (root)", () => {
           status: "TRIAL",
           is_active: true,
           auto_renew: true,
-          user_chosen_cap_amount: 75, // trial_threshold_amount
+          trial_duration_days: 14, // flat fee: trial_days from pricing tier
         }),
       });
       expect(result.shop_subscription.id).toBe("sub-new");
@@ -139,39 +135,12 @@ describe("billing.service (root)", () => {
     });
   });
 
-  // ─── completeTrialAndCreateCycle ───────────────────────────────────────
-
-  describe("completeTrialAndCreateCycle", () => {
-    it("updates subscription status to PENDING_APPROVAL", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription(),
-      );
-      mockPrisma.shop_subscriptions.update.mockResolvedValue({});
-
-      const result = await completeTrialAndCreateCycle("shop-1");
-
-      expect(mockPrisma.shop_subscriptions.update).toHaveBeenCalledWith({
-        where: { id: "sub-1" },
-        data: { status: "PENDING_APPROVAL" },
-      });
-      expect(result.success).toBe(true);
-    });
-
-    it("throws when no active subscription found", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(null);
-
-      await expect(completeTrialAndCreateCycle("shop-1")).rejects.toThrow(
-        "Shop subscription not found",
-      );
-    });
-  });
-
   // ─── activateSubscription ──────────────────────────────────────────────
 
   describe("activateSubscription", () => {
-    it("activates subscription, creates first billing cycle, reactivates shop", async () => {
+    it("activates subscription with flat fee, creates billing cycle, reactivates shop", async () => {
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription({ user_chosen_cap_amount: 200 }),
+        defaultSubscription(),
       );
       mockPrisma.shop_subscriptions.update.mockResolvedValue({});
       mockPrisma.billing_cycles.create.mockResolvedValue({
@@ -182,7 +151,7 @@ describe("billing.service (root)", () => {
       mockPrisma.shops.findUnique.mockResolvedValue({
         id: "shop-1",
         shop_domain: "test.myshopify.com",
-        is_active: false, // Suspended
+        is_active: false,
       });
       mockPrisma.shops.update.mockResolvedValue({});
       mockInvalidateCache.mockResolvedValue(undefined);
@@ -203,43 +172,17 @@ describe("billing.service (root)", () => {
         }),
       });
 
-      // Verify billing cycle created with user's chosen cap
+      // Verify billing cycle created with period_fee
       expect(mockPrisma.billing_cycles.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           shop_subscription_id: "sub-1",
           cycle_number: 1,
-          initial_cap_amount: 200,
-          current_cap_amount: 200,
-          usage_amount: 0,
-          commission_count: 0,
+          period_fee: 29, // flat fee from pricing tier
           status: "ACTIVE",
         }),
       });
 
-      // Verify shop reactivated
-      expect(mockPrisma.shops.update).toHaveBeenCalled();
       expect(result.success).toBe(true);
-    });
-
-    it("uses fallback cap of 1000 when user_chosen_cap_amount is null", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription({ user_chosen_cap_amount: null }),
-      );
-      mockPrisma.shop_subscriptions.update.mockResolvedValue({});
-      mockPrisma.billing_cycles.create.mockResolvedValue({ id: "cycle-1" });
-      mockPrisma.shops.findUnique.mockResolvedValue({
-        id: "shop-1",
-        is_active: true,
-      });
-
-      await activateSubscription("shop-1", "gid://shopify/AppSubscription/123");
-
-      expect(mockPrisma.billing_cycles.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          initial_cap_amount: 1000,
-          current_cap_amount: 1000,
-        }),
-      });
     });
 
     it("throws when no subscription found", async () => {
@@ -248,35 +191,6 @@ describe("billing.service (root)", () => {
       await expect(
         activateSubscription("shop-1", "gid://shopify/AppSubscription/123"),
       ).rejects.toThrow("Shop subscription not found");
-    });
-  });
-
-  // ─── increaseBillingCycleCap ───────────────────────────────────────────
-
-  describe("increaseBillingCycleCap", () => {
-    it("updates current billing cycle cap amount", async () => {
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue({
-        id: "cycle-1",
-        current_cap_amount: 100,
-      });
-      mockPrisma.billing_cycles.update.mockResolvedValue({});
-
-      const result = await increaseBillingCycleCap("shop-1", 250);
-
-      expect(mockPrisma.billing_cycles.update).toHaveBeenCalledWith({
-        where: { id: "cycle-1" },
-        data: { current_cap_amount: 250 },
-      });
-      expect(result.message).toContain("100");
-      expect(result.message).toContain("250");
-    });
-
-    it("throws when no active billing cycle found", async () => {
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue(null);
-
-      await expect(
-        increaseBillingCycleCap("shop-1", 250),
-      ).rejects.toThrow("No active billing cycle found");
     });
   });
 
@@ -324,150 +238,6 @@ describe("billing.service (root)", () => {
       await reactivateShopIfSuspended("shop-1");
 
       expect(mockPrisma.shops.update).not.toHaveBeenCalled();
-    });
-  });
-
-  // ─── getTrialRevenueData ───────────────────────────────────────────────
-
-  describe("getTrialRevenueData", () => {
-    it("returns trial revenue and commission from commission records", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription(),
-      );
-      mockPrisma.commission_records.aggregate.mockResolvedValue({
-        _sum: { attributed_revenue: 500 },
-      });
-
-      const result = await getTrialRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(500);
-      expect(result.commissionEarned).toBe(15); // 500 * 0.03
-    });
-
-    it("returns zeros when no trial subscription exists", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(null);
-
-      const result = await getTrialRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(0);
-      expect(result.commissionEarned).toBe(0);
-    });
-
-    it("returns zeros when subscription is not TRIAL type", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription({ subscription_type: "PAID" }),
-      );
-
-      const result = await getTrialRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(0);
-      expect(result.commissionEarned).toBe(0);
-    });
-
-    it("handles null aggregate sum (no records)", async () => {
-      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        defaultSubscription(),
-      );
-      mockPrisma.commission_records.aggregate.mockResolvedValue({
-        _sum: { attributed_revenue: null },
-      });
-
-      const result = await getTrialRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(0);
-      expect(result.commissionEarned).toBe(0);
-    });
-  });
-
-  // ─── getUsageRevenueData ───────────────────────────────────────────────
-
-  describe("getUsageRevenueData", () => {
-    it("returns usage revenue from current billing cycle", async () => {
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue({
-        id: "cycle-1",
-        status: "ACTIVE",
-      });
-      mockPrisma.commission_records.aggregate.mockResolvedValue({
-        _sum: { attributed_revenue: 1000, commission_earned: 30 },
-      });
-
-      const result = await getUsageRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(1000);
-      expect(result.commissionEarned).toBe(30);
-    });
-
-    it("returns zeros when no active billing cycle", async () => {
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue(null);
-
-      const result = await getUsageRevenueData("shop-1");
-
-      expect(result.attributedRevenue).toBe(0);
-      expect(result.commissionEarned).toBe(0);
-    });
-  });
-
-  // ─── getCurrentCycleMetrics ────────────────────────────────────────────
-
-  describe("getCurrentCycleMetrics", () => {
-    it("returns metrics for current billing cycle", async () => {
-      const futureDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000); // 15 days from now
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue({
-        id: "cycle-1",
-        current_cap_amount: 200,
-        end_date: futureDate,
-      });
-      mockPrisma.commission_records.findMany.mockResolvedValue([
-        { status: "RECORDED", attributed_revenue: 100 },
-        { status: "RECORDED", attributed_revenue: 200 },
-        { status: "INVOICED", attributed_revenue: 50 },
-      ]);
-
-      const result = await getCurrentCycleMetrics(
-        "shop-1",
-        defaultSubscription(),
-      );
-
-      expect(result.purchases.count).toBe(3);
-      expect(result.purchases.total).toBe(350);
-      expect(result.net_revenue).toBe(350);
-      expect(result.commission).toBeCloseTo(10.5); // 350 * 0.03
-      expect(result.final_commission).toBeCloseTo(10.5); // min(10.5, 200) = 10.5
-      expect(result.capped_amount).toBe(200);
-      expect(result.days_remaining).toBeGreaterThan(0);
-    });
-
-    it("returns zero metrics when no active cycle", async () => {
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue(null);
-
-      const result = await getCurrentCycleMetrics(
-        "shop-1",
-        defaultSubscription(),
-      );
-
-      expect(result.purchases.count).toBe(0);
-      expect(result.net_revenue).toBe(0);
-      expect(result.commission).toBe(0);
-    });
-
-    it("caps commission at billing cycle cap amount", async () => {
-      const futureDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000);
-      mockPrisma.billing_cycles.findFirst.mockResolvedValue({
-        id: "cycle-1",
-        current_cap_amount: 5, // Very low cap
-        end_date: futureDate,
-      });
-      mockPrisma.commission_records.findMany.mockResolvedValue([
-        { status: "RECORDED", attributed_revenue: 10000 }, // Would be $300 commission
-      ]);
-
-      const result = await getCurrentCycleMetrics(
-        "shop-1",
-        defaultSubscription(),
-      );
-
-      expect(result.commission).toBe(300); // 10000 * 0.03
-      expect(result.final_commission).toBe(5); // Capped at 5
     });
   });
 });

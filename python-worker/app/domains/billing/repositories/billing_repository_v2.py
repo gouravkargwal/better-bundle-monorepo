@@ -523,6 +523,185 @@ class BillingRepositoryV2:
             logger.error(f"Error calculating trial revenue: {e}")
             return Decimal("0")
 
+    # ============= FLAT FEE OPERATIONS (NEW) =============
+
+    async def create_flat_fee_subscription(
+        self,
+        shop_id: str,
+        subscription_plan_id: str,
+        pricing_tier_id: str,
+        shopify_subscription_id: str,
+        shopify_line_item_id: Optional[str] = None,
+        confirmation_url: Optional[str] = None,
+        monthly_fee_override: Optional[Decimal] = None,
+    ) -> Optional[ShopSubscription]:
+        """
+        Create a flat fee paid subscription and complete the trial atomically.
+
+        For flat fee pricing, the trial is completed based on time (not revenue),
+        and a new PAID subscription is created with the flat monthly fee.
+        """
+        try:
+            # 1. Complete the trial subscription (time-based)
+            await self.session.execute(
+                update(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
+                        ShopSubscription.is_active == True,
+                    )
+                )
+                .values(
+                    status=SubscriptionStatus.COMPLETED,
+                    completed_at=now_utc(),
+                    is_active=False,
+                    updated_at=now_utc(),
+                )
+            )
+
+            # 2. Create paid subscription with flat fee
+            paid_subscription = ShopSubscription(
+                shop_id=shop_id,
+                subscription_type=SubscriptionType.PAID,
+                status=SubscriptionStatus.ACTIVE,
+                subscription_plan_id=subscription_plan_id,
+                pricing_tier_id=pricing_tier_id,
+                monthly_fee_override=monthly_fee_override,
+                shopify_subscription_id=shopify_subscription_id,
+                shopify_line_item_id=shopify_line_item_id,
+                confirmation_url=confirmation_url,
+                started_at=now_utc(),
+                is_active=True,
+                auto_renew=True,
+            )
+
+            self.session.add(paid_subscription)
+            await self.session.flush()
+
+            logger.info(
+                f"Created flat fee subscription {paid_subscription.id} for shop {shop_id}"
+            )
+            return paid_subscription
+
+        except Exception as e:
+            logger.error(f"Error creating flat fee subscription: {e}")
+            await self.session.rollback()
+            return None
+
+    async def check_trial_expiry_by_time(
+        self, shop_id: str
+    ) -> bool:
+        """
+        Check if trial has expired based on time (not revenue).
+        Marks trial as TRIAL_COMPLETED if trial_duration_days have passed.
+        """
+        try:
+            query = (
+                select(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,
+                        ShopSubscription.is_active == True,
+                    )
+                )
+                .options(selectinload(ShopSubscription.pricing_tier))
+            )
+            result = await self.session.execute(query)
+            subscription = result.scalar_one_or_none()
+
+            if not subscription or not subscription.started_at:
+                return False
+
+            trial_days = subscription.effective_trial_days
+            trial_end = subscription.started_at + timedelta(days=trial_days)
+
+            if now_utc() < trial_end:
+                return False  # Trial still active
+
+            # Trial has expired - mark as TRIAL_COMPLETED
+            update_result = await self.session.execute(
+                update(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.id == subscription.id,
+                        ShopSubscription.status == SubscriptionStatus.TRIAL,
+                    )
+                )
+                .values(
+                    status=SubscriptionStatus.TRIAL_COMPLETED,
+                    completed_at=now_utc(),
+                    updated_at=now_utc(),
+                )
+            )
+
+            if update_result.rowcount > 0:
+                logger.info(
+                    f"Time-based trial expired for shop {shop_id} after {trial_days} days"
+                )
+                await self.session.flush()
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking trial expiry by time: {e}")
+            return False
+
+    async def create_billing_cycle_for_subscription(
+        self,
+        shop_subscription_id: str,
+        cycle_number: int = 1,
+        period_fee: Optional[Decimal] = None,
+    ) -> Optional[BillingCycle]:
+        """Create a new billing cycle for a flat fee subscription"""
+        try:
+            billing_cycle = BillingCycle(
+                shop_subscription_id=shop_subscription_id,
+                cycle_number=cycle_number,
+                start_date=now_utc(),
+                end_date=now_utc() + timedelta(days=30),
+                period_fee=period_fee,
+                status=BillingCycleStatus.ACTIVE,
+                activated_at=now_utc(),
+            )
+
+            self.session.add(billing_cycle)
+            await self.session.flush()
+
+            logger.info(
+                f"Created billing cycle #{cycle_number} for subscription {shop_subscription_id}"
+            )
+            return billing_cycle
+
+        except Exception as e:
+            logger.error(f"Error creating billing cycle: {e}")
+            return None
+
+    async def get_active_billing_cycle_for_subscription(
+        self, shop_subscription_id: str
+    ) -> Optional[BillingCycle]:
+        """Get active billing cycle for a subscription"""
+        try:
+            query = (
+                select(BillingCycle)
+                .where(
+                    and_(
+                        BillingCycle.shop_subscription_id == shop_subscription_id,
+                        BillingCycle.status == BillingCycleStatus.ACTIVE,
+                    )
+                )
+                .order_by(BillingCycle.cycle_number.desc())
+                .limit(1)
+            )
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Error getting active billing cycle: {e}")
+            return None
+
     # ============= BILLING PERIODS & OVERFLOW (Keep unchanged) =============
 
     async def get_shops_for_billing(self) -> List[str]:

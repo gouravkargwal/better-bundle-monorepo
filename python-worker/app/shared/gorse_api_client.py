@@ -11,6 +11,7 @@ from datetime import datetime
 import httpx
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.shared.decorators.tracing import async_trace_func
 
 logger = get_logger(__name__)
 
@@ -373,6 +374,7 @@ class GorseApiClient:
             )
             return {"success": False, "error": str(e), "count": 0}
 
+    @async_trace_func()
     async def get_recommendations(
         self,
         user_id: str,
@@ -452,6 +454,7 @@ class GorseApiClient:
             logger.error(f"Gorse health check failed: {str(e)}")
             return {"success": False, "status": "unhealthy", "error": str(e)}
 
+    @async_trace_func()
     async def get_item_neighbors(
         self,
         item_id: str,
@@ -506,6 +509,7 @@ class GorseApiClient:
             logger.error(f"Failed to get item neighbors: {str(e)}")
             return {"success": False, "error": str(e), "neighbors": []}
 
+    @async_trace_func()
     async def get_latest_items(
         self, n: int = 10, category: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -550,6 +554,7 @@ class GorseApiClient:
             logger.error(f"Failed to get latest items: {str(e)}")
             return {"success": False, "error": str(e), "items": []}
 
+    @async_trace_func()
     async def get_popular_items(
         self, n: int = 10, category: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -634,6 +639,7 @@ class GorseApiClient:
             logger.error(f"Failed to get user neighbors: {str(e)}")
             return {"success": False, "error": str(e), "neighbors": []}
 
+    @async_trace_func()
     async def get_session_recommendations(
         self,
         session_data: List[Dict[str, Any]],

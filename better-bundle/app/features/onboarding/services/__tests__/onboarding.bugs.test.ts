@@ -62,6 +62,8 @@ function defaultPricingTier() {
     currency: "USD",
     is_active: true,
     is_default: true,
+    monthly_fee: 29,
+    trial_days: 14,
     trial_threshold_amount: 75,
     commission_rate: 0.03,
   };
@@ -178,22 +180,21 @@ describe("OnboardingService — BUG TESTS", () => {
     });
   });
 
-  // ─── BUG 4: Missing user_chosen_cap_amount in trial subscription ──────
+  // ─── BUG 4: Missing trial_duration_days in trial subscription ──────
 
-  describe("BUG 4: Trial subscription should set user_chosen_cap_amount", () => {
-    it("should set user_chosen_cap_amount from pricing tier threshold", async () => {
+  describe("BUG 4: Trial subscription should set trial_duration_days from pricing tier", () => {
+    it("should set trial_duration_days from pricing tier trial_days", async () => {
       const admin = mockAdminWebPixelSuccess();
       const session = defaultSession();
       const mockTx = setupFullOnboardingMocks();
 
       await service.completeOnboarding(session, admin);
 
-      // BUG: Current code creates subscription WITHOUT user_chosen_cap_amount
-      // Later, activateSubscription reads this field and falls back to $1000
-      // FIXED: Should set user_chosen_cap_amount = pricingTier.trial_threshold_amount
+      // BUG (fixed): flat fee trial subscription should set trial_duration_days and monthly_fee_override
       expect(mockTx.shop_subscriptions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          user_chosen_cap_amount: 75, // From defaultPricingTier().trial_threshold_amount
+          trial_duration_days: 14, // From defaultPricingTier().trial_days
+          monthly_fee_override: 29, // From defaultPricingTier().monthly_fee
         }),
       });
     });

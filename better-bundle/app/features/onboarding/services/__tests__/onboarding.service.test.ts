@@ -128,6 +128,8 @@ function defaultPricingTier() {
     currency: "USD",
     is_active: true,
     is_default: true,
+    monthly_fee: 29,
+    trial_days: 14,
     trial_threshold_amount: 75,
     commission_rate: 0.03,
   };
@@ -181,7 +183,9 @@ describe("OnboardingService", () => {
 
       expect(result.pricingTier).toEqual({
         symbol: "$",
-        threshold_amount: 75,
+        monthly_fee: 29,
+        trial_days: 14,
+        plan_name: "Default Plan",
       });
     });
 

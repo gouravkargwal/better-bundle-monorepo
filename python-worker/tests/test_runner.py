@@ -63,7 +63,7 @@ class AttributionScenarioTester:
     def create_mock_interactions(self, count: int = 5) -> List[Dict[str, Any]]:
         """Create mock interactions for testing"""
         interactions = []
-        extensions = ["phoenix", "venus", "apollo"]
+        extensions = ["apollo", "mercury"]
         interaction_types = [
             "recommendation_clicked",
             "recommendation_add_to_cart",
@@ -96,7 +96,7 @@ class AttributionScenarioTester:
         interactions = [
             {
                 "id": "interaction_1",
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=10),
@@ -104,7 +104,7 @@ class AttributionScenarioTester:
             },
             {
                 "id": "interaction_2",
-                "extension_type": "phoenix",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_add_to_cart",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=5),
@@ -112,7 +112,7 @@ class AttributionScenarioTester:
             },
             {
                 "id": "interaction_3",
-                "extension_type": "venus",
+                "extension_type": "apollo",
                 "interaction_type": "recommendation_clicked",
                 "product_id": "product_1",
                 "created_at": datetime.now() - timedelta(minutes=3),
@@ -420,7 +420,7 @@ class AttributionScenarioTester:
             large_interactions.append(
                 {
                     "id": f"interaction_{i}",
-                    "extension_type": "phoenix",
+                    "extension_type": "apollo",
                     "interaction_type": "recommendation_clicked",
                     "product_id": f"product_{i % 10}",
                     "created_at": datetime.now() - timedelta(minutes=i),

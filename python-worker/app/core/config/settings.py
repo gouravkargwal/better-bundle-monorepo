@@ -111,6 +111,18 @@ class MLSettings(BaseSettings):
     PRICE_TIER_HIGH_MIN: float = Field(default=100.0, env="PRICE_TIER_HIGH_MIN")
     TIME_DECAY_LAMBDA: float = Field(default=0.07, env="TIME_DECAY_LAMBDA")
 
+    # Google AI (Gemini / Vertex AI) - Gorse LLM reranking + item embeddings
+    AI_PROVIDER: str = Field(default="gemini", env="AI_PROVIDER")  # "gemini" | "vertex"
+    GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+    VERTEX_PROJECT_ID: str = Field(default="", env="VERTEX_PROJECT_ID")
+    VERTEX_LOCATION: str = Field(default="us-central1", env="VERTEX_LOCATION")
+    AI_EMBEDDING_MODEL: str = Field(
+        default="gemini-embedding-001", env="AI_EMBEDDING_MODEL"
+    )
+    AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
+    AI_CHAT_MODEL: str = Field(default="gemini-2.5-flash", env="AI_CHAT_MODEL")
+    AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
+
 
 class WorkerSettings(BaseSettings):
     """Worker configuration settings"""
@@ -159,14 +171,6 @@ class LoggingSettings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_FORMAT: str = Field(default="console", env="LOG_FORMAT")
 
-    # Grafana Loki settings
-    GF_SECURITY_ENABLED: bool = Field(default=False, env="GF_SECURITY_ENABLED")
-    GF_SECURITY_URL: str = Field(default="http://loki:3100", env="GF_SECURITY_URL")
-    GF_SECURITY_ADMIN_USER: str = Field(default="admin", env="GF_SECURITY_ADMIN_USER")
-    GF_SECURITY_ADMIN_PASSWORD: str = Field(
-        default="admin", env="GF_SECURITY_ADMIN_PASSWORD"
-    )
-
     # Comprehensive Logging Configuration
     LOGGING: dict = Field(
         default={
@@ -184,46 +188,9 @@ class LoggingSettings(BaseSettings):
                 "enabled": True,
                 "level": "INFO",
             },
-            "prometheus": {
-                "enabled": True,
-            },
-            "grafana": {
-                "enabled": False,
-                "url": "http://loki:3100",
-                "username": "admin",
-                "password": "admin",
-                "service_name": "betterbundle-python-worker",
-                "labels": {
-                    "service": "betterbundle-python-worker",
-                    "env": "development",
-                },
-            },
-            "telemetry": {
-                "enabled": False,
-                "endpoint": "",
-                "service_name": "betterbundle-python-worker",
-            },
-            "gcp": {
-                "enabled": False,
-                "project_id": "",
-                "log_name": "betterbundle-python-worker",
-            },
-            "aws": {
-                "enabled": False,
-                "region": "",
-                "log_group": "betterbundle-python-worker",
-                "log_stream": "",
-            },
         },
         env="LOGGING",
     )
-
-    def model_post_init(self, __context):
-        """Update logging config with environment variables after initialization"""
-        self.LOGGING["grafana"]["enabled"] = self.GF_SECURITY_ENABLED
-        self.LOGGING["grafana"]["url"] = self.GF_SECURITY_URL
-        self.LOGGING["grafana"]["username"] = self.GF_SECURITY_ADMIN_USER
-        self.LOGGING["grafana"]["password"] = self.GF_SECURITY_ADMIN_PASSWORD
 
 
 class Settings(BaseSettings):
@@ -251,6 +218,13 @@ class Settings(BaseSettings):
 
     # External Services
     ML_API_URL: str = Field(default="http://localhost:8000", env="ML_API_URL")
+
+    # OpenObserve (new observability platform)
+    OPENOBSERVE_ENDPOINT: str = Field(
+        default="http://localhost:5080", env="OPENOBSERVE_ENDPOINT"
+    )
+    OPENOBSERVE_ORG: str = Field(default="default", env="OPENOBSERVE_ORG")
+    OPENOBSERVE_API_KEY: str = Field(default="", env="OPENOBSERVE_API_KEY")
 
     # Redis Configuration (Direct access for backward compatibility)
     @property

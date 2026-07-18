@@ -19,7 +19,6 @@ interface SubscriptionSuspendedProps {
 export function SubscriptionSuspended({
   subscriptionData,
   shopCurrency,
-  onReactivate,
 }: SubscriptionSuspendedProps) {
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -29,7 +28,6 @@ export function SubscriptionSuspended({
   };
 
   const handleReactivate = () => {
-    // This would typically redirect to a reactivation flow
     window.location.href = "/app/billing?action=reactivate";
   };
 
@@ -113,18 +111,18 @@ export function SubscriptionSuspended({
                   </InlineStack>
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Monthly Cap:
+                      Plan:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {formatCurrency(subscriptionData.spendingLimit)}
+                      {subscriptionData.planName}
                     </Text>
                   </InlineStack>
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Last Usage:
+                      Monthly Fee:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {formatCurrency(subscriptionData.currentUsage)}
+                      {formatCurrency(subscriptionData.monthlyFee)}
                     </Text>
                   </InlineStack>
                 </BlockStack>
@@ -162,8 +160,8 @@ export function SubscriptionSuspended({
             >
               <Text as="p" variant="bodyMd">
                 <strong>Why was my subscription suspended?</strong> This usually
-                happens due to payment issues, reaching your spending cap, or
-                manual suspension. Contact support for assistance.
+                happens due to payment issues or manual suspension. Contact
+                support for assistance.
               </Text>
             </div>
           </BlockStack>

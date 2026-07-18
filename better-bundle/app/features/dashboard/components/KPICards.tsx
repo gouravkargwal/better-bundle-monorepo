@@ -12,6 +12,7 @@ import { formatCurrency } from "../../../utils/currency";
 import type {
   DashboardOverview,
   AttributedMetrics,
+  PerformanceMetrics,
 } from "../types/dashboard.types";
 
 interface KPICardsProps {

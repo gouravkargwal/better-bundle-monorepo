@@ -95,7 +95,7 @@ export function SubscriptionPending({
               </Text>
               <Text as="p" tone="subdued">
                 Complete the approval process in Shopify to activate your
-                usage-based billing
+                flat-rate subscription
               </Text>
             </BlockStack>
             <Badge tone="warning" size="large">
@@ -142,7 +142,7 @@ export function SubscriptionPending({
                       </Text>
                     </div>
                     <Text as="p" variant="bodyMd" tone="subdued">
-                      Your usage-based subscription is waiting for approval by a
+                      Your flat-rate subscription is waiting for approval by a
                       store owner or admin
                     </Text>
                   </BlockStack>
@@ -166,10 +166,10 @@ export function SubscriptionPending({
                 <InlineStack align="space-between" blockAlign="center">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Usage-Based Billing Plan
+                      Flat Rate Plan
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
-                      3% of Attributed Revenue
+                      {subscriptionData.planName}
                     </Text>
                   </BlockStack>
                   <Badge tone="info">Ready for Approval</Badge>
@@ -186,10 +186,10 @@ export function SubscriptionPending({
                   <BlockStack gap="200">
                     <InlineStack align="space-between">
                       <Text as="p" variant="bodySm" tone="subdued">
-                        Monthly Cap:
+                        Monthly Fee:
                       </Text>
                       <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {formatCurrency(subscriptionData.spendingLimit)}
+                        {formatCurrency(subscriptionData.monthlyFee)}
                       </Text>
                     </InlineStack>
                     <InlineStack align="space-between">
@@ -202,10 +202,10 @@ export function SubscriptionPending({
                     </InlineStack>
                     <InlineStack align="space-between">
                       <Text as="p" variant="bodySm" tone="subdued">
-                        Rate:
+                        Status:
                       </Text>
                       <Text as="p" variant="bodyMd" fontWeight="bold">
-                        3% of revenue
+                        Pending Approval
                       </Text>
                     </InlineStack>
                   </BlockStack>
@@ -220,10 +220,9 @@ export function SubscriptionPending({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You'll only pay for what you use, up to{" "}
-                    {formatCurrency(subscriptionData.spendingLimit)} per month.
-                    No charges until your customers make purchases through
-                    Better Bundle.
+                    💡 You'll be charged {formatCurrency(subscriptionData.monthlyFee)} per month.
+                    No usage tracking, no surprises — just predictable flat-rate
+                    pricing.
                   </Text>
                 </div>
               </BlockStack>
@@ -305,7 +304,7 @@ export function SubscriptionPending({
                   <strong>1.</strong> Click "Open Shopify Approval Page" above
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>2.</strong> Review your usage-based billing details
+                  <strong>2.</strong> Review your flat-rate subscription details
                 </Text>
                 <Text as="p" variant="bodySm">
                   <strong>3.</strong> Click "Approve charge" in Shopify
@@ -351,9 +350,8 @@ export function SubscriptionPending({
                   automatically once approved.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Wrong spending cap?</strong> Use the "Cancel This
-                  Subscription" button above and start the setup process again
-                  with your desired monthly cap amount.
+                  <strong>Wrong plan?</strong> Use the "Cancel This
+                  Subscription" button above and start the setup process again.
                 </Text>
               </BlockStack>
             </BlockStack>

@@ -21,7 +21,7 @@ class Logger {
   constructor(options = {}) {
     this.currentLevel = this.levels[options.level ?? "info"];
     this.base = {
-      service: "venus-extension",
+      service: "mercury-extension",
       env: "development",
       ...options.base ?? {},
     };

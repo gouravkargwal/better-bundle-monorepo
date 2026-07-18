@@ -1,0 +1,15 @@
+{
+  "name": "Kafka Consumer Lag Too High",
+  "stream": "python-worker-metrics",
+  "query": "SELECT max(kafka_consumer_lag) as max_lag FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
+  "condition": "max_lag > 10000",
+  "eval_period": "5m",
+  "frequency": "5m",
+  "notifications": [
+    {
+      "type": "slack",
+      "webhook_url": "${SLACK_WEBHOOK_URL}"
+    }
+  ],
+  "message": "Kafka consumer lag is {{max_lag}} (threshold: 10000)"
+}

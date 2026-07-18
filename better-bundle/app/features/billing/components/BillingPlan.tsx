@@ -48,7 +48,7 @@ export function BillingPlan({
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                  monthlyCap: setupData.spendingLimit,
+                  planId: setupData.planId,
                   currency: setupData.currency,
                 }),
               });
@@ -77,18 +77,9 @@ export function BillingPlan({
           <SubscriptionActive
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
-            onIncreaseCap={async (newLimit: number) => {
-              const response = await fetch("/api/billing/increase-cap", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ spendingLimit: newLimit }),
-              });
-
-              const result = await response.json();
-              if (result.success) {
-                window.location.reload();
-              }
-              return result;
+            onIncreaseCap={async () => {
+              // Flat fee pricing — no cap to increase
+              return { success: false, error: "Not applicable for flat fee plans" };
             }}
           />
         );
