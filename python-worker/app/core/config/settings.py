@@ -112,6 +112,9 @@ class MLSettings(BaseSettings):
     TIME_DECAY_LAMBDA: float = Field(default=0.07, env="TIME_DECAY_LAMBDA")
 
     # Google AI (Gemini / Vertex AI) - Gorse LLM reranking + item embeddings
+    # Gated separately from AI_PROVIDER since embedding calls cost money per item;
+    # disabled by default so syncs don't silently rack up Gemini API charges.
+    ENABLE_ITEM_EMBEDDINGS: bool = Field(default=False, env="ENABLE_ITEM_EMBEDDINGS")
     AI_PROVIDER: str = Field(default="gemini", env="AI_PROVIDER")  # "gemini" | "vertex"
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
     VERTEX_PROJECT_ID: str = Field(default="", env="VERTEX_PROJECT_ID")

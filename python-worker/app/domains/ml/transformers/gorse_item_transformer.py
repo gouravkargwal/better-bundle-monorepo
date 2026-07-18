@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 
+from app.core.config.settings import settings
 from app.core.logging import get_logger
 from app.core.redis_client import get_redis_client
 from app.shared.ai_provider import get_ai_provider
@@ -127,9 +128,21 @@ class GorseItemTransformer:
         if not gorse_items:
             return gorse_items
 
+        if not settings.ml.ENABLE_ITEM_EMBEDDINGS:
+            # Skip the paid Gemini embedding call entirely, but still attach the
+            # real product text as Comment (free) for the LLM reranker's template.
+            for item in gorse_items:
+                pid = self._extract_product_id(item["ItemId"], shop_id)
+                text = product_texts.get(pid, "")
+                if text:
+                    item["Comment"] = text
+            return gorse_items
+
         redis_client = await get_redis_client()
 
-        product_ids = [self._extract_product_id(item["ItemId"]) for item in gorse_items]
+        product_ids = [
+            self._extract_product_id(item["ItemId"], shop_id) for item in gorse_items
+        ]
         texts = [product_texts.get(pid, "") for pid in product_ids]
         cache_keys = [
             self._embedding_cache_key(shop_id, pid, text)
@@ -178,7 +191,10 @@ class GorseItemTransformer:
                     item["Labels"]["embedding"] = embedding
                 else:
                     # Defensive: if Labels somehow still a list, wrap it
-                    item["Labels"] = {"labels": item.get("Labels", []), "embedding": embedding}
+                    item["Labels"] = {
+                        "labels": item.get("Labels", []),
+                        "embedding": embedding,
+                    }
 
         return gorse_items
 
@@ -191,10 +207,14 @@ class GorseItemTransformer:
         return [v / norm for v in vector]
 
     @staticmethod
-    def _extract_product_id(item_id: str) -> str:
-        """ItemId is "shop_{shop_id}_{product_id}" - recover the raw product_id."""
-        parts = item_id.split("_", 2)
-        return parts[2] if len(parts) == 3 else item_id
+    def _extract_product_id(item_id: str, shop_id: str) -> str:
+        """ItemId is "shop_{shop_id}_{product_id}" - recover the raw product_id.
+
+        Splitting positionally (e.g. on the first N underscores) breaks whenever
+        shop_id itself contains underscores, so strip the known prefix instead.
+        """
+        prefix = f"shop_{shop_id}_"
+        return item_id[len(prefix):] if item_id.startswith(prefix) else item_id
 
     @staticmethod
     def _embedding_cache_key(shop_id: str, product_id: str, text: str) -> str:
@@ -643,11 +663,12 @@ class GorseItemTransformer:
             predictive_labels = self.generate_predictive_labels(product_dict)
             bi_labels = self.generate_business_intelligence_labels(product_dict)
 
-            # Combine all labels
-            all_labels = base_item["Labels"] + predictive_labels + bi_labels
+            # Combine all labels (Labels is {"labels": [...]}, optionally with "embedding")
+            existing_labels = base_item["Labels"].get("labels", [])
+            all_labels = existing_labels + predictive_labels + bi_labels
             validated_labels = self.validate_label_quality(all_labels)
 
-            base_item["Labels"] = validated_labels
+            base_item["Labels"]["labels"] = validated_labels
             base_item["Comment"] = (
                 f"Product: {product_dict.get('product_id', '')} (comprehensive features + predictive labels)"
             )

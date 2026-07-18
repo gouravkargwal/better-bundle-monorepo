@@ -112,7 +112,17 @@ class GorseApiClient:
                     response = await client.post(
                         url, json=valid_users, headers=self._get_headers()
                     )
-                    break  # Success - exit retry loop
+                    # 5xx (e.g. transient Postgres deadlocks in Gorse's backing
+                    # store) are worth retrying, same as connection errors.
+                    if response.status_code >= 500 and attempt < self.max_retries:
+                        attempt += 1
+                        logger.warning(
+                            f"Gorse users batch got HTTP {response.status_code}, "
+                            f"retrying (attempt {attempt})..."
+                        )
+                        await asyncio.sleep(self.retry_backoff * attempt)
+                        continue
+                    break  # Success, non-retryable status, or retries exhausted
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,
@@ -207,7 +217,17 @@ class GorseApiClient:
                     response = await client.post(
                         url, json=valid_items, headers=self._get_headers()
                     )
-                    break  # Success - exit retry loop
+                    # 5xx (e.g. transient Postgres deadlocks in Gorse's backing
+                    # store) are worth retrying, same as connection errors.
+                    if response.status_code >= 500 and attempt < self.max_retries:
+                        attempt += 1
+                        logger.warning(
+                            f"Gorse items batch got HTTP {response.status_code}, "
+                            f"retrying (attempt {attempt})..."
+                        )
+                        await asyncio.sleep(self.retry_backoff * attempt)
+                        continue
+                    break  # Success, non-retryable status, or retries exhausted
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,
@@ -308,7 +328,17 @@ class GorseApiClient:
                     response = await client.post(
                         url, json=valid_feedback, headers=self._get_headers()
                     )
-                    break  # Success - exit retry loop
+                    # 5xx (e.g. transient Postgres deadlocks in Gorse's backing
+                    # store) are worth retrying, same as connection errors.
+                    if response.status_code >= 500 and attempt < self.max_retries:
+                        attempt += 1
+                        logger.warning(
+                            f"Gorse feedback batch got HTTP {response.status_code}, "
+                            f"retrying (attempt {attempt})..."
+                        )
+                        await asyncio.sleep(self.retry_backoff * attempt)
+                        continue
+                    break  # Success, non-retryable status, or retries exhausted
                 except (
                     httpx.ConnectError,
                     httpx.TimeoutException,

@@ -556,7 +556,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
 
             # Trigger unified Gorse sync after successful feature computation
             await asyncio.sleep(0.1)  # 100ms delay to ensure DB commit
-            await self._trigger_gorse_sync(shop_id, save_results)
+            sync_result = await self._trigger_gorse_sync(shop_id, save_results)
 
             # Check if all feature types succeeded for logging purposes
             all_features_succeeded = True
@@ -591,6 +591,7 @@ class FeatureEngineeringService(IFeatureEngineeringService):
                 "success": True,
                 "shop_id": shop_id,
                 "results": save_results,
+                "sync_result": sync_result,
                 "all_features_succeeded": all_features_succeeded,
                 "data_loaded": {
                     "products": len(products),
@@ -1259,7 +1260,9 @@ class FeatureEngineeringService(IFeatureEngineeringService):
         except Exception:
             return None
 
-    async def _trigger_gorse_sync(self, shop_id: str, save_results: Dict[str, Any]):
+    async def _trigger_gorse_sync(
+        self, shop_id: str, save_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """Trigger unified Gorse sync after successful feature computation"""
         try:
             from app.domains.ml.services.unified_gorse_service import (
@@ -1270,13 +1273,14 @@ class FeatureEngineeringService(IFeatureEngineeringService):
             gorse_service = UnifiedGorseService()
 
             # Use the comprehensive sync method directly
-            await gorse_service.comprehensive_sync_and_train(shop_id=shop_id)
+            return await gorse_service.comprehensive_sync_and_train(shop_id=shop_id)
 
         except Exception as e:
             logger.error(
                 f"Failed to trigger unified Gorse sync after feature computation: {str(e)}",
                 shop_id=shop_id,
             )
+            return {"error": str(e), "total_items_synced": 0}
 
     async def generate_session_features_from_interactions(
         self,
