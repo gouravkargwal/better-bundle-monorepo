@@ -5,7 +5,6 @@ import {
   Badge,
   Button,
   InlineStack,
-  ProgressBar,
   Pagination,
 } from "@shopify/polaris";
 import { useState } from "react";
@@ -29,14 +28,6 @@ export function BillingCycles({
   // Get data from server
   const cycles = data?.cycles || [];
   const pagination = data?.pagination;
-  const currency = data?.shopCurrency || shopCurrency || "USD";
-
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency,
-    }).format(amount);
-  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -51,10 +42,6 @@ export function BillingCycles({
     }
   };
 
-  const getUsagePercentage = (usage: number, cap: number) => {
-    return Math.min((usage / cap) * 100, 100);
-  };
-
   const handlePageChange = (page: number) => {
     const newSearchParams = new URLSearchParams(searchParams);
     newSearchParams.set("page", page.toString());
@@ -66,14 +53,6 @@ export function BillingCycles({
     cycle.startDate,
     cycle.endDate,
     getStatusBadge(cycle.status),
-    formatCurrency(cycle.usageAmount),
-    formatCurrency(cycle.capAmount),
-    <div style={{ width: "100px" }}>
-      <ProgressBar
-        progress={getUsagePercentage(cycle.usageAmount, cycle.capAmount)}
-        size="small"
-      />
-    </div>,
     cycle.commissionCount.toString(),
   ]);
 
@@ -120,24 +99,12 @@ export function BillingCycles({
             </div>
           ) : (
             <DataTable
-              columnContentTypes={[
-                "text",
-                "text",
-                "text",
-                "text",
-                "text",
-                "text",
-                "text",
-                "text",
-              ]}
+              columnContentTypes={["text", "text", "text", "text", "text"]}
               headings={[
                 "Cycle",
                 "Start Date",
                 "End Date",
                 "Status",
-                "Usage",
-                "Cap",
-                "Progress",
                 "Commissions",
               ]}
               rows={rows}

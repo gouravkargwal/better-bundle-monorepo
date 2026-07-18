@@ -1,6 +1,6 @@
 // features/onboarding/services/onboarding.types.ts
 export interface OnboardingData {
-  pricingTier: {
+  subscriptionPlan: {
     symbol: string;
     monthly_fee: number;
     trial_days: number;

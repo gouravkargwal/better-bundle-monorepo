@@ -3,7 +3,6 @@ export interface ShopInfo {
   id: string;
   shop_domain: string;
   currency_code: string;
-  plan_type: string;
   created_at: Date;
 }
 

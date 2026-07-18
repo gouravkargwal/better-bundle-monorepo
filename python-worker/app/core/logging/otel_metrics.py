@@ -32,7 +32,7 @@ def init_otel_metrics(settings: "Settings") -> MeterProvider:
     )
 
     base = settings.OPENOBSERVE_ENDPOINT.rstrip("/")
-    endpoint = f"{base}/api/{settings.OPENOBSERVE_ORG}/otlp/v1/metrics"
+    endpoint = f"{base}/api/{settings.OPENOBSERVE_ORG}/v1/metrics"
 
     exporter = OTLPMetricExporter(
         endpoint=endpoint,

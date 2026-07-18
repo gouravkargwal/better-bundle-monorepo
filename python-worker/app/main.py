@@ -172,14 +172,12 @@ async def initialize_services():
     try:
         logger.info("Starting service initialization...")
 
-        # Instrument HTTPX, Redis, and Kafka clients
+        # Instrument HTTPX and Redis clients
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
-        from opentelemetry.instrumentation.kafka_python import KafkaInstrumentor
 
         HTTPXClientInstrumentor().instrument()
         RedisInstrumentor().instrument()
-        KafkaInstrumentor().instrument()
         logger.info("✅ OpenTelemetry instrumentations applied")
 
         # 1. Check Database connectivity first (critical - fail if unavailable)
@@ -474,7 +472,6 @@ async def get_consumers_status():
             "purchase_attribution_consumer",
             "feature_computation_consumer",
             "customer_linking_consumer",
-            "shopify_events_consumer",
         ]
 
         for consumer_type in consumer_types:

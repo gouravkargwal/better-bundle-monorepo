@@ -60,8 +60,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
           start_date: true,
           end_date: true,
           status: true,
-          usage_amount: true,
-          current_cap_amount: true,
           commission_count: true,
         },
       }),
@@ -81,8 +79,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
       startDate: cycle.start_date.toISOString().split("T")[0],
       endDate: cycle.end_date.toISOString().split("T")[0],
       status: cycle.status.toLowerCase(),
-      usageAmount: Number(cycle.usage_amount),
-      capAmount: Number(cycle.current_cap_amount),
       commissionCount: cycle.commission_count,
     }));
 

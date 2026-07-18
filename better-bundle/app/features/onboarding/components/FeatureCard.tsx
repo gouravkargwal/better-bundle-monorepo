@@ -10,7 +10,7 @@ import {
 } from "@shopify/polaris-icons";
 
 interface FeatureCardProps {
-  pricingTier?: {
+  subscriptionPlan?: {
     symbol: string;
     monthly_fee: number;
     trial_days: number;
@@ -18,10 +18,10 @@ interface FeatureCardProps {
   } | null;
 }
 
-const FeatureCard = ({ pricingTier }: FeatureCardProps) => {
-  const monthlyFee = pricingTier?.monthly_fee ?? 29;
-  const trialDays = pricingTier?.trial_days ?? 14;
-  const currencySymbol = pricingTier?.symbol ?? "$";
+const FeatureCard = ({ subscriptionPlan }: FeatureCardProps) => {
+  const monthlyFee = subscriptionPlan?.monthly_fee ?? 29;
+  const trialDays = subscriptionPlan?.trial_days ?? 14;
+  const currencySymbol = subscriptionPlan?.symbol ?? "$";
 
   const features = [
     {

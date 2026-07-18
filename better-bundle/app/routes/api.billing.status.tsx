@@ -18,72 +18,139 @@ export async function loader({ request }: LoaderFunctionArgs) {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    // Get billing plan
-    const billingPlan = await prisma.billing_plans.findFirst({
+    // Get active shop subscription with related pricing and plan info
+    const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
-        status: { in: ["active", "suspended"] },
+        is_active: true,
       },
+      include: {
+        subscription_plans: true,
+      },
+      orderBy: { created_at: "desc" },
     });
 
-    if (!billingPlan) {
+    if (!shopSubscription) {
+      // No subscription yet — first-time user in trial or just installed
       return json({
         shop_id: shopRecord.id,
-        billing_status: "no_plan",
-        message: "No billing plan found",
+        billing_status: "trial_active",
+        message: "No subscription found, trial period active",
+        subscription_type: null,
+        subscription_status: null,
+        plan_name: null,
+        monthly_fee: null,
+        currency: shopRecord.currency_code || "USD",
+        trial_active: true,
+        trial_days_remaining: 14,
+        shop_active: shopRecord.is_active,
       });
     }
 
-    // Determine billing status
-    let status: string;
+    // Map DB subscription status to frontend billing status
+    const dbStatus: string = shopSubscription.status;
+    const planName =
+      shopSubscription.subscription_plans?.name || "Flat Fee Plan";
+    const currency = shopRecord.currency_code || "USD";
+
+    let billingStatus: string;
     let message: string;
+    let trialActive = false;
 
-    if (billingPlan.is_trial_active) {
-      // ✅ NO REFUND COMMISSION POLICY - Only calculate gross attributed revenue
-      const purchasesAgg = await prisma.purchase_attributions.aggregate({
-        where: { shop_id: shopRecord.id },
-        _sum: { total_revenue: true },
-      });
+    switch (dbStatus) {
+      case "TRIAL": {
+        // Time-based trial
+        const trialDays = shopSubscription.trial_duration_days || 14;
+        const startedAt = shopSubscription.started_at;
+        const trialEnd = new Date(
+          startedAt.getTime() + trialDays * 24 * 60 * 60 * 1000,
+        );
+        const now = new Date();
+        const daysRemaining = Math.max(
+          0,
+          Math.ceil(
+            (trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+          ),
+        );
 
-      const currentRevenue = Number(purchasesAgg._sum.total_revenue || 0);
-      const threshold = billingPlan.trial_threshold || 200;
+        if (daysRemaining > 0) {
+          billingStatus = "trial_active";
+          trialActive = true;
+          message = `Trial active — ${daysRemaining} days remaining`;
+        } else {
+          billingStatus = "trial_completed";
+          message = "Trial period has ended";
+        }
+        break;
+      }
 
-      status = "trial_active";
-      message = `Trial active - $${currentRevenue} / $${threshold} revenue`;
-    } else if (billingPlan.subscription_status === "active") {
-      status = "subscription_active";
-      message = "Subscription active";
-    } else if (billingPlan.subscription_status === "pending") {
-      status = "subscription_pending";
-      message = "Subscription pending approval";
-    } else if (billingPlan.subscription_status === "declined") {
-      status = "subscription_declined";
-      message = "Subscription declined";
-    } else {
-      status = "suspended";
-      message = "Services suspended";
+      case "TRIAL_COMPLETED":
+        billingStatus = "trial_completed";
+        message = "Trial completed — please set up billing";
+        break;
+
+      case "PENDING_APPROVAL":
+        billingStatus = "subscription_pending";
+        message = "Subscription pending approval";
+        break;
+
+      case "ACTIVE":
+        billingStatus = "subscription_active";
+        message = "Subscription active";
+        break;
+
+      case "SUSPENDED":
+        billingStatus = "subscription_suspended";
+        message = "Services suspended";
+        break;
+
+      case "CANCELLED":
+        billingStatus = "subscription_cancelled";
+        message = "Subscription cancelled";
+        break;
+
+      default:
+        billingStatus = "trial_active";
+        trialActive = true;
+        message = "Trial period active";
+        break;
+    }
+
+    // Calculate trial days remaining if still in trial
+    let trialDaysRemaining = 0;
+    if (trialActive && shopSubscription.started_at) {
+      const trialDays = shopSubscription.trial_duration_days || 14;
+      const trialEnd = new Date(
+        shopSubscription.started_at.getTime() + trialDays * 24 * 60 * 60 * 1000,
+      );
+      trialDaysRemaining = Math.max(
+        0,
+        Math.ceil((trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
+      );
     }
 
     return json({
       shop_id: shopRecord.id,
-      billing_status: status,
+      billing_status: billingStatus,
       message,
-      trial_active: billingPlan.is_trial_active,
-      trial_revenue: billingPlan.trial_revenue || 0,
-      trial_threshold: billingPlan.trial_threshold || 200,
-      subscription_id: billingPlan.subscription_id,
-      subscription_status: billingPlan.subscription_status,
-      subscription_confirmation_url: billingPlan.subscription_confirmation_url,
-      requires_subscription_approval:
-        billingPlan.requires_subscription_approval,
+      subscription_type: shopSubscription.subscription_type,
+      subscription_status: dbStatus,
+      plan_name: planName,
+      monthly_fee:
+        Number(shopSubscription.subscription_plans?.monthly_fee) || null,
+      currency,
+      trial_active: trialActive,
+      trial_days_remaining: trialDaysRemaining,
+      shopify_subscription_id: shopSubscription.shopify_subscription_id,
+      confirmation_url: shopSubscription.confirmation_url,
       shop_active: shopRecord.is_active,
     });
   } catch (error) {
-    console.error("❌ Error getting billing status:", error);
+    logger.error({ error, shop }, "Error getting billing status");
     return json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "An internal error occurred. Please try again later.",
       },
       { status: 500 },
     );

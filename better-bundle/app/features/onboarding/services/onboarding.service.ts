@@ -9,17 +9,17 @@ export class OnboardingService {
       // Get shop info from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
 
-      // Get pricing tier configuration
-      const pricingTier = await this.getPricingTierConfig(
+      // Get subscription plan configuration
+      const subscriptionPlan = await this.getSubscriptionPlanConfig(
         shopDomain,
         shopData.currencyCode,
       );
 
       return {
-        pricingTier,
+        subscriptionPlan,
       };
     } catch (error) {
-      logger.error({ error }, "Error getting onboarding data");
+      logger.error({ err: error }, "Error getting onboarding data");
       throw new Error("Failed to get onboarding data");
     }
   }
@@ -82,7 +82,10 @@ export class OnboardingService {
     }
   }
 
-  private async getPricingTierConfig(shopDomain: string, currencyCode: string) {
+  private async getSubscriptionPlanConfig(
+    shopDomain: string,
+    currencyCode: string,
+  ) {
     try {
       // Get default subscription plan
       const defaultPlan = await prisma.subscription_plans.findFirst({
@@ -96,29 +99,15 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      // Get pricing tier for currency
-      const pricingTier = await prisma.pricing_tiers.findFirst({
-        where: {
-          subscription_plan_id: defaultPlan.id,
-          currency: currencyCode,
-          is_active: true,
-          is_default: true,
-        },
-      });
-
-      if (!pricingTier) {
-        throw new Error(`No pricing tier found for currency: ${currencyCode}`);
-      }
-
       return {
         symbol: getCurrencySymbol(currencyCode),
-        monthly_fee: Number(pricingTier.monthly_fee) || 29,
-        trial_days: Number(pricingTier.trial_days) || 14,
+        monthly_fee: Number(defaultPlan.monthly_fee) || 29,
+        trial_days: Number(defaultPlan.trial_days) || 14,
         plan_name: defaultPlan.name || "Pro",
       };
     } catch (error) {
-      logger.error({ error }, "Error getting pricing tier configuration");
-      throw new Error("Failed to get pricing tier configuration");
+      logger.error({ error }, "Error getting subscription plan configuration");
+      throw new Error("Failed to get subscription plan configuration");
     }
   }
 
@@ -154,6 +143,7 @@ export class OnboardingService {
           access_token: session.accessToken,
           currency_code: shopData.currencyCode,
           email: shopData.email,
+          // @deprecated shops.plan_type — to be removed in Phase 4. Use shop_subscriptions.subscription_plan.plan_type for billing plan type.
           plan_type: shopData.plan.displayName,
           is_active: true,
           shopify_plus: shopData.plan.shopifyPlus || false,
@@ -167,6 +157,7 @@ export class OnboardingService {
           access_token: session.accessToken,
           currency_code: shopData.currencyCode,
           email: shopData.email,
+          // @deprecated shops.plan_type — to be removed in Phase 4. Use shop_subscriptions.subscription_plan.plan_type for billing plan type.
           plan_type: shopData.plan.displayName,
           is_active: true,
           onboarding_completed: false,
@@ -204,6 +195,7 @@ export class OnboardingService {
       if (existing) {
         return existing;
       }
+
       // Get default subscription plan
       const defaultPlan = await tx.subscription_plans.findFirst({
         where: {
@@ -216,37 +208,18 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      // Get pricing tier for shop's currency
-      const pricingTier = await tx.pricing_tiers.findFirst({
-        where: {
-          subscription_plan_id: defaultPlan.id,
-          currency: shopRecord.currency_code,
-          is_active: true,
-          is_default: true,
-        },
-      });
-
-      if (!pricingTier) {
-        throw new Error(
-          `No pricing tier found for currency: ${shopRecord.currency_code}`,
-        );
-      }
-
       // Create shop subscription (TRIAL status) with flat fee trial configuration
-      const trialDays = Number(pricingTier.trial_days) || 14;
+      const trialDays = Number(defaultPlan.trial_days) || 14;
       const shopSubscription = await tx.shop_subscriptions.create({
         data: {
           shop_id: shopRecord.id,
           subscription_plan_id: defaultPlan.id,
-          pricing_tier_id: pricingTier.id,
           subscription_type: "TRIAL",
           status: "TRIAL",
           started_at: new Date(),
           is_active: true,
           auto_renew: true,
           trial_duration_days: trialDays,
-          // Set the monthly fee from pricing tier (used after trial ends)
-          monthly_fee_override: pricingTier.monthly_fee,
         },
       });
 

@@ -5,7 +5,7 @@ from django.urls import reverse
 from django.db import models
 import requests
 from django.conf import settings
-from .models import Shop, OrderData
+from .models import Shop, OrderData, SuspensionAuditLog
 
 
 @admin.register(Shop)
@@ -70,18 +70,28 @@ class ShopAdmin(admin.ModelAdmin):
         ),
     )
 
+    def get_queryset(self, request):
+        from django.db.models import Count
+
+        qs = super().get_queryset(request)
+        return qs.annotate(
+            _order_count=Count("order_data"),
+            _product_count=Count("product_data"),
+            _customer_count=Count("customer_data"),
+        )
+
     def total_orders_count(self, obj):
-        return obj.order_data.count()
+        return getattr(obj, "_order_count", 0)
 
     total_orders_count.short_description = "Orders"
 
     def total_products_count(self, obj):
-        return obj.product_data.count()
+        return getattr(obj, "_product_count", 0)
 
     total_products_count.short_description = "Products"
 
     def total_customers_count(self, obj):
-        return obj.customer_data.count()
+        return getattr(obj, "_customer_count", 0)
 
     total_customers_count.short_description = "Customers"
 
@@ -792,3 +802,42 @@ class OrderDataAdmin(admin.ModelAdmin):
         )
 
     mark_as_fulfilled.short_description = "📦 Mark as Fulfilled"
+
+
+@admin.register(SuspensionAuditLog)
+class SuspensionAuditLogAdmin(admin.ModelAdmin):
+    """Read-only admin for suspension audit log"""
+
+    list_display = [
+        "id",
+        "shop_id",
+        "action",
+        "reason",
+        "triggered_by",
+        "created_at",
+    ]
+    list_filter = [
+        "action",
+        "triggered_by",
+        "created_at",
+    ]
+    search_fields = ["shop_id", "reason"]
+    date_hierarchy = "created_at"
+    readonly_fields = [
+        "id",
+        "shop_id",
+        "action",
+        "reason",
+        "triggered_by",
+        "metadata_json",
+        "created_at",
+    ]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

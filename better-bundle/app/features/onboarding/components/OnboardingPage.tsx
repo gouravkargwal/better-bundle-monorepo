@@ -27,10 +27,10 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
         <OnboardingHero
           isLoading={isLoading}
           error={error}
-          pricingTier={data.pricingTier}
+          subscriptionPlan={data.subscriptionPlan}
         />
 
-        <FeatureCard pricingTier={data.pricingTier} />
+        <FeatureCard subscriptionPlan={data.subscriptionPlan} />
         <Benefits />
 
         {/* Error Display Section */}

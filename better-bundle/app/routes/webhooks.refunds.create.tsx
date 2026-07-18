@@ -3,6 +3,7 @@ import { json } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { KafkaProducerService } from "../services/kafka/kafka-producer.service";
 import { checkServiceSuspensionByDomain } from "../middleware/serviceSuspension";
+import logger from "../utils/logger";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   let payload, session, shop;
@@ -32,9 +33,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
   } catch (suspensionError) {
-    console.warn(
-      `⚠️ Error checking suspension status for ${shop}, proceeding with refund processing:`,
-      suspensionError,
+    logger.warn(
+      { error: suspensionError, shop },
+      "Error checking suspension status, proceeding with refund processing",
     );
   }
 
@@ -45,7 +46,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const orderId = refund.order_id?.toString();
 
     if (!refundId || !orderId) {
-      console.error("❌ No refund ID or order ID found in payload");
+      logger.error(
+        { payload: refund },
+        "No refund ID or order ID found in payload",
+      );
       return json({ error: "No refund ID or order ID found" }, { status: 400 });
     }
 
@@ -76,7 +80,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         "Refund event published to Kafka - will trigger order data update only (no refund attribution processing)",
     });
   } catch (error) {
-    console.error("❌ Error processing refund webhook:", error);
+    logger.error({ error, shop }, "Error processing refund webhook");
     return json({ error: "Internal server error" }, { status: 500 });
   }
 };

@@ -75,16 +75,6 @@ class Shop(BaseModel):
             return "No Subscription"
 
     @property
-    def total_revenue(self):
-        """Calculate total revenue from commission records"""
-        from apps.revenue.models import CommissionRecord
-
-        result = CommissionRecord.objects.filter(shop=self).aggregate(
-            total=Sum("commission_earned")
-        )
-        return result["total"] or 0
-
-    @property
     def total_orders(self):
         """Get total number of orders"""
         return self.order_data.count()
@@ -240,3 +230,28 @@ class CustomerData(BaseModel):
 
     def __str__(self):
         return f"{self.first_name} {self.last_name} - {self.shop.shop_domain}"
+
+
+class SuspensionAuditLog(models.Model):
+    """
+    Read-only model for the suspension_audit_log table.
+    Managed by the Python worker — Django should never create/migrate this table.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    shop_id = models.CharField(max_length=255)
+    action = models.CharField(max_length=50)
+    reason = models.TextField(null=True, blank=True)
+    triggered_by = models.CharField(max_length=50, default="system")
+    metadata_json = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "suspension_audit_log"
+        managed = False
+        ordering = ["-created_at"]
+        verbose_name = "Suspension Audit Log"
+        verbose_name_plural = "Suspension Audit Logs"
+
+    def __str__(self):
+        return f"{self.action} (shop_id={self.shop_id}) @ {self.created_at}"

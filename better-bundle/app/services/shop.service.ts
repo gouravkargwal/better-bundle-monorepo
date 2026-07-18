@@ -32,7 +32,7 @@ const getShopifyPlusStatus = async (shopDomain: string) => {
   try {
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
-      select: { shopify_plus: true, plan_type: true },
+      select: { shopify_plus: true },
     });
     if (!shop) {
       return false;
@@ -79,7 +79,9 @@ const deactivateShopBilling = async (
     const updatedSubscriptions = await prisma.shop_subscriptions.updateMany({
       where: {
         shop_id: updatedShops.id,
-        status: { in: ["ACTIVE", "TRIAL", "PENDING_APPROVAL", "SUSPENDED"] as any },
+        status: {
+          in: ["ACTIVE", "TRIAL", "PENDING_APPROVAL", "SUSPENDED"] as any,
+        },
       },
       data: {
         status: "CANCELLED",

@@ -88,29 +88,6 @@ services:
         max-size: "5m"
         max-file: "2"
         labels: "service=kafka-ui,env=dev"
-
-  # ==================== KAFKA REST PROXY ====================
-  rest-proxy:
-    image: confluentinc/cp-kafka-rest:latest
-    depends_on:
-      - kafka_b
-    ports:
-      - "8082:8082"
-    hostname: rest-proxy
-    container_name: rest-proxy-dev
-    env_file:
-      - .env.dev
-    environment:
-      KAFKA_REST_HOST_NAME: rest-proxy
-      KAFKA_REST_BOOTSTRAP_SERVERS: "kafka_b:9093"
-      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
-        labels: "service=rest-proxy,env=dev"
-
   # ==================== REDIS ====================
   redis:
     image: redis/redis-stack:7.2.0-v18

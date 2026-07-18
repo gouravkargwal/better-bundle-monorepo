@@ -35,7 +35,7 @@ def init_otel_logger(settings: "Settings") -> LoggerProvider:
 
     # --- OTLP HTTP endpoint for logs ---
     base = settings.OPENOBSERVE_ENDPOINT.rstrip("/")
-    endpoint = f"{base}/api/{settings.OPENOBSERVE_ORG}/otlp/v1/logs"
+    endpoint = f"{base}/api/{settings.OPENOBSERVE_ORG}/v1/logs"
 
     exporter = OTLPLogExporter(
         endpoint=endpoint,

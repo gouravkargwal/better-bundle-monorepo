@@ -37,7 +37,6 @@ function defaultShopRecord() {
     access_token: "shpat_test",
     currency_code: "USD",
     email: "test@test.com",
-    plan_type: "Basic",
     is_active: true,
     onboarding_completed: true,
     shopify_plus: false,
@@ -131,7 +130,6 @@ describe("shop.service", () => {
     it("returns true for Shopify Plus shops", async () => {
       mockPrisma.shops.findUnique.mockResolvedValue({
         shopify_plus: true,
-        plan_type: "Shopify Plus",
       });
 
       const result = await getShopifyPlusStatus("test.myshopify.com");
@@ -142,7 +140,6 @@ describe("shop.service", () => {
     it("returns false for non-Plus shops", async () => {
       mockPrisma.shops.findUnique.mockResolvedValue({
         shopify_plus: false,
-        plan_type: "Basic",
       });
 
       const result = await getShopifyPlusStatus("test.myshopify.com");
@@ -207,9 +204,9 @@ describe("shop.service", () => {
     it("throws on database error", async () => {
       mockPrisma.shops.update.mockRejectedValue(new Error("DB error"));
 
-      await expect(
-        deactivateShopBilling("test.myshopify.com"),
-      ).rejects.toThrow("Failed to deactivate billing for shop");
+      await expect(deactivateShopBilling("test.myshopify.com")).rejects.toThrow(
+        "Failed to deactivate billing for shop",
+      );
     });
   });
 

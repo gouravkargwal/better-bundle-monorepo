@@ -5,6 +5,7 @@ import {
   useRouteError,
   useLocation,
   useNavigation,
+  redirect,
 } from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
@@ -14,7 +15,10 @@ import { useState, useEffect } from "react";
 
 import { authenticate } from "../shopify.server";
 import { EnhancedNavMenu } from "../components/Navigation/EnhancedNavMenu";
+import { NotificationBanner } from "../components/Notifications/NotificationBanner";
 import { getShopOnboardingCompleted } from "../services/shop.service";
+import { checkServiceSuspensionMiddleware } from "../middleware/serviceSuspension";
+import { getBillingNotifications } from "../services/notification.service";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
@@ -23,14 +27,31 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const isOnboarded = await getShopOnboardingCompleted(session.shop);
 
+  // Check suspension status – if the shop is suspended and this is not a billing
+  // route, redirect to the billing page so the merchant can reactivate.
+  const { shouldRedirect, redirectUrl, suspensionStatus } =
+    await checkServiceSuspensionMiddleware(request, session.shop);
+
+  const url = new URL(request.url);
+  const isBillingRoute = url.pathname.startsWith("/app/billing");
+
+  if (shouldRedirect && redirectUrl && !isBillingRoute) {
+    return redirect(redirectUrl);
+  }
+
+  // Generate in-app notification banners from suspension status
+  const notifications = getBillingNotifications(suspensionStatus ?? null);
+
   return {
     apiKey: process.env.SHOPIFY_API_KEY || "",
     isOnboarded,
+    suspensionStatus: suspensionStatus ?? null,
+    notifications,
   };
 };
 
 export default function App() {
-  const { apiKey, isOnboarded } = useLoaderData<typeof loader>();
+  const { apiKey, isOnboarded, notifications } = useLoaderData<typeof loader>();
   const location = useLocation();
   const navigation = useNavigation();
 
@@ -71,6 +92,18 @@ export default function App() {
             background: "#008060",
           }}
         />
+
+        {/* In-app notification banners */}
+        {notifications.length > 0 && (
+          <div
+            style={{
+              paddingBlock: "var(--p-space-2, 8px) 0",
+              paddingInline: "var(--p-space-4, 16px)",
+            }}
+          >
+            <NotificationBanner notifications={notifications} />
+          </div>
+        )}
 
         <div
           suppressHydrationWarning

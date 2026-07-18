@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Depends, Header
 from pydantic import BaseModel
 
 from app.services.jwt_service import jwt_service, TokenValidationResult, ShopStatus
-from app.middleware.suspension_middleware import suspension_middleware
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

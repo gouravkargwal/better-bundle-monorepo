@@ -102,9 +102,6 @@ class BillingCycle(BaseModel):
     shop_subscription = relationship(
         "ShopSubscription", back_populates="billing_cycles"
     )
-    commission_records = relationship(
-        "CommissionRecord", back_populates="billing_cycle"
-    )
 
     # Indexes
     __table_args__ = (
@@ -163,7 +160,9 @@ class BillingCycle(BaseModel):
         """[LEGACY] Calculate usage percentage of current cap"""
         if not self.current_cap_amount or self.current_cap_amount == 0:
             return 0.0
-        return float((self.usage_amount or Decimal("0")) / self.current_cap_amount * 100)
+        return float(
+            (self.usage_amount or Decimal("0")) / self.current_cap_amount * 100
+        )
 
     @property
     def remaining_cap(self) -> Decimal:

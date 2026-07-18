@@ -128,7 +128,7 @@ VERTEX_PROJECT_ID: str = Field(default="", env="VERTEX_PROJECT_ID")
 VERTEX_LOCATION: str = Field(default="us-central1", env="VERTEX_LOCATION")
 AI_EMBEDDING_MODEL: str = Field(default="gemini-embedding-001", env="AI_EMBEDDING_MODEL")
 AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
-AI_CHAT_MODEL: str = Field(default="gemini-2.5-flash", env="AI_CHAT_MODEL")  # verify current name at deploy time
+AI_CHAT_MODEL: str = Field(default="gemini-3.1-flash-lite", env="AI_CHAT_MODEL")  # verify current name at deploy time
 AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
 ```
 

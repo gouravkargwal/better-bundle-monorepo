@@ -42,8 +42,9 @@ export function TrialCompleted({
     try {
       // Use default plan selection — in a more advanced UI, you'd let the user choose
       const setupData: BillingSetupData = {
-        planId: "default",
-        currency: shopCurrency,
+        planName: "Pro",
+        monthlyFee: 29,
+        trialDays: trialData.trialDays || 14,
       };
 
       const result = await onSetupBilling(setupData);
@@ -346,7 +347,8 @@ export function TrialCompleted({
                   <strong>1.</strong> Click "Continue to Shopify Approval"
                 </Text>
                 <Text as="p" variant="bodySm">
-                  <strong>2.</strong> Review your subscription details in Shopify
+                  <strong>2.</strong> Review your subscription details in
+                  Shopify
                 </Text>
                 <Text as="p" variant="bodySm">
                   <strong>3.</strong> Approve the recurring charge

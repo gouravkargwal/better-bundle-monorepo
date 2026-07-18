@@ -3,6 +3,16 @@ import type { LoaderFunctionArgs } from "@remix-run/node";
 import prisma from "../db.server";
 import { getCacheService } from "../services/redis.service";
 import logger from "app/utils/logger";
+import { incrementCounter } from "../services/metrics.service";
+
+export interface SuspensionStatus {
+  isSuspended: boolean;
+  reason: string;
+  requiresBillingSetup: boolean;
+  trialCompleted: boolean;
+  subscriptionActive: boolean;
+  subscriptionPending: boolean;
+}
 
 /**
  * Middleware to check service suspension status
@@ -14,7 +24,7 @@ export async function checkServiceSuspensionMiddleware(
 ): Promise<{
   shouldRedirect: boolean;
   redirectUrl?: string;
-  suspensionStatus?: any;
+  suspensionStatus?: SuspensionStatus;
 }> {
   try {
     // Get shop record
@@ -44,6 +54,9 @@ export async function checkServiceSuspensionMiddleware(
       ) {
         actionUrl = "/app/billing";
         actionRequired = true;
+      } else if (suspensionStatus.reason === "payment_failure") {
+        actionUrl = "/app/billing";
+        actionRequired = true;
       }
 
       if (actionRequired && actionUrl) {
@@ -62,7 +75,9 @@ export async function checkServiceSuspensionMiddleware(
   }
 }
 
-export async function checkServiceSuspension(shopId: string): Promise<any> {
+export async function checkServiceSuspension(
+  shopId: string,
+): Promise<SuspensionStatus> {
   try {
     const cacheService = await getCacheService();
     const cacheKey = `suspension:${shopId}`;
@@ -112,12 +127,18 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
         if (!shop.is_active) {
           const reason = shop.suspension_reason || "service_suspended";
 
+          incrementCounter("suspension.check", {
+            shopId,
+            reason,
+            isSuspended: 1,
+          });
+
           return {
             isSuspended: true,
             reason: reason,
             requiresBillingSetup:
-              reason === "trial_completed_subscription_required",
-            requiresCapIncrease: reason === "monthly_cap_reached",
+              reason === "trial_completed_subscription_required" ||
+              reason === "payment_failure",
             trialCompleted: shopSubscription.status !== "TRIAL",
             subscriptionActive: false,
             subscriptionPending: shopSubscription.status === "PENDING_APPROVAL",
@@ -142,7 +163,9 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
         }
 
         // ✅ NEW: Trial completed - services SUSPENDED until user sets up billing
-        if (shopSubscription.status === ("TRIAL_COMPLETED" as any)) {
+        // NOTE: "TRIAL_COMPLETED" should be added to the Prisma SubscriptionStatus enum.
+        // Using string comparison until schema is updated.
+        if (shopSubscription.status === "TRIAL_COMPLETED") {
           return {
             isSuspended: true,
             reason: "trial_completed_awaiting_setup",
@@ -190,15 +213,105 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
       300, // 5 minutes TTL
     );
   } catch (error) {
-    logger.error({ error }, "Error checking service suspension");
-    return {
-      isSuspended: true,
-      reason: "error_checking_status",
-      requiresBillingSetup: false,
-      trialCompleted: false,
-      subscriptionActive: false,
-      subscriptionPending: false,
-    };
+    // Structured logging for Redis/cache failure
+    console.error(
+      "[SuspensionMiddleware] Redis/cache failed, falling back to direct DB query:",
+      error,
+    );
+    logger.error({ error }, "Redis/cache failure in checkServiceSuspension");
+
+    // Fallback: try direct DB query when cache is unavailable
+    try {
+      const shop = await prisma.shops.findUnique({
+        where: { id: shopId },
+        select: {
+          id: true,
+          is_active: true,
+          suspended_at: true,
+          suspension_reason: true,
+        },
+      });
+
+      if (!shop) {
+        return {
+          isSuspended: true,
+          reason: "shop_not_found",
+          requiresBillingSetup: false,
+          trialCompleted: false,
+          subscriptionActive: false,
+          subscriptionPending: false,
+        };
+      }
+
+      const shopSubscription = await prisma.shop_subscriptions.findFirst({
+        where: { shop_id: shopId, is_active: true },
+      });
+
+      if (!shopSubscription) {
+        return {
+          isSuspended: true,
+          reason: "shop_not_found",
+          requiresBillingSetup: false,
+          trialCompleted: false,
+          subscriptionActive: false,
+          subscriptionPending: false,
+        };
+      }
+
+      if (!shop.is_active) {
+        return {
+          isSuspended: true,
+          reason: shop.suspension_reason || "service_suspended",
+          requiresBillingSetup:
+            shop.suspension_reason ===
+              "trial_completed_subscription_required" ||
+            shop.suspension_reason === "payment_failure",
+          trialCompleted: shopSubscription.status !== "TRIAL",
+          subscriptionActive: false,
+          subscriptionPending: false,
+        };
+      }
+
+      if (shopSubscription.status === "ACTIVE") {
+        return {
+          isSuspended: false,
+          reason: "active",
+          requiresBillingSetup: false,
+          trialCompleted: true,
+          subscriptionActive: true,
+          subscriptionPending: false,
+        };
+      }
+
+      // For any other status, return suspended but let through on errors
+      return {
+        isSuspended: true,
+        reason: `subscription_${shopSubscription.status.toLowerCase()}`,
+        requiresBillingSetup: false,
+        trialCompleted: true,
+        subscriptionActive: false,
+        subscriptionPending: false,
+      };
+    } catch (dbError) {
+      // Both Redis and DB failed — fail-open: allow service access
+      console.error(
+        "[SuspensionMiddleware] Redis AND DB both failed, failing open (isSuspended=false):",
+        dbError,
+      );
+      logger.error(
+        { error: dbError },
+        "DB fallback also failed in checkServiceSuspension, failing open",
+      );
+
+      return {
+        isSuspended: false,
+        reason: "suspension_check_error",
+        requiresBillingSetup: false,
+        trialCompleted: false,
+        subscriptionActive: false,
+        subscriptionPending: false,
+      };
+    }
   }
 }
 
@@ -207,7 +320,7 @@ export async function checkServiceSuspension(shopId: string): Promise<any> {
  */
 export async function checkServiceSuspensionByDomain(
   shopDomain: string,
-): Promise<any> {
+): Promise<SuspensionStatus> {
   try {
     const shop = await prisma.shops.findUnique({
       where: { shop_domain: shopDomain },
@@ -218,20 +331,32 @@ export async function checkServiceSuspensionByDomain(
       return {
         isSuspended: true,
         reason: "shop_not_found",
+        requiresBillingSetup: false,
+        trialCompleted: false,
         subscriptionActive: false,
+        subscriptionPending: false,
       };
     }
 
     return await checkServiceSuspension(shop.id);
   } catch (error) {
+    console.error(
+      "[SuspensionMiddleware] Error checking suspension by domain, failing open:",
+      error,
+    );
     logger.error(
       { error, shopDomain },
-      "Error checking suspension status by domain",
+      "Error checking suspension status by domain, failing open",
     );
+
+    // Fail-open: allow service access on error
     return {
-      isSuspended: true,
+      isSuspended: false,
       reason: "suspension_check_error",
+      requiresBillingSetup: false,
+      trialCompleted: false,
       subscriptionActive: false,
+      subscriptionPending: false,
     };
   }
 }

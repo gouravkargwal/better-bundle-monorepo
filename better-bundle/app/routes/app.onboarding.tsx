@@ -26,7 +26,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
     return json(data);
   } catch (error) {
-    logger.error({ error }, "Failed to load onboarding data");
+    logger.error(
+      { err: error, shop: session.shop },
+      "Failed to load onboarding data",
+    );
     return json(
       {
         error:
@@ -71,11 +74,11 @@ export default function OnboardingRoute() {
   const loaderData = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
 
-  // Handle loader error shape — when loader returns { error }, data won't have pricingTier
+  // Handle loader error shape — when loader returns { error }, data won't have subscriptionPlan
   const hasLoaderError = "error" in loaderData;
   const data = hasLoaderError
-    ? { pricingTier: null }
-    : (loaderData as { pricingTier: any });
+    ? { subscriptionPlan: null }
+    : (loaderData as { subscriptionPlan: any });
   const error = actionData ?? (hasLoaderError ? loaderData : undefined);
 
   return <OnboardingPage data={data} error={error} />;

@@ -55,36 +55,20 @@ class ShopSubscription(BaseModel, ShopMixin):
         nullable=False,  # This is required for plan configuration
         index=True,
     )
-    pricing_tier_id = Column(
-        String(255),
-        ForeignKey("pricing_tiers.id", ondelete="RESTRICT"),
-        nullable=False,  # This determines regional pricing!
-        index=True,
-    )
 
     # ===== TRIAL-SPECIFIC FIELDS =====
-    # These override the pricing_tier defaults when needed
-    trial_threshold_override = Column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="[LEGACY] Revenue threshold override for usage-based trial",
-    )
+    # These override the subscription_plan defaults when needed
     trial_duration_days = Column(
         Integer,
         nullable=True,
-        comment="Override trial duration in days (from pricing_tier.trial_days)",
+        comment="Override trial duration in days (from subscription_plan.trial_days)",
     )
 
     # ===== PAID SUBSCRIPTION FIELDS =====
     monthly_fee_override = Column(
         Numeric(10, 2),
         nullable=True,
-        comment="Override monthly fee for this shop (from pricing_tier.monthly_fee)",
-    )
-    user_chosen_cap_amount = Column(
-        Numeric(10, 2),
-        nullable=True,
-        comment="[LEGACY] User-chosen cap amount for usage-based billing",
+        comment="Override monthly fee for this shop (from subscription_plan.monthly_fee)",
     )
     auto_renew = Column(Boolean, default=True, nullable=False)
 
@@ -104,17 +88,16 @@ class ShopSubscription(BaseModel, ShopMixin):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     shop_subscription_metadata = Column(JSONB, nullable=True)
 
-    # ===== KEEP ESSENTIAL RELATIONSHIPS =====
+    # ===== RELATIONSHIPS =====
     shop = relationship("Shop", back_populates="shop_subscriptions")
     subscription_plan = relationship(
         "SubscriptionPlan", back_populates="shop_subscriptions"
     )
-    pricing_tier = relationship("PricingTier", back_populates="shop_subscriptions")
 
     # Keep operational relationships
     billing_cycles = relationship("BillingCycle", back_populates="shop_subscription")
 
-    # ===== SMART PROPERTIES USING PRICING TIER =====
+    # ===== SMART PROPERTIES =====
 
     @property
     def is_trial(self) -> bool:
@@ -128,12 +111,12 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     @property
     def effective_monthly_fee(self) -> Decimal:
-        """Get the effective monthly fee from pricing tier or override"""
+        """Get the effective monthly fee from subscription plan or override"""
         if self.monthly_fee_override:
             return self.monthly_fee_override
         return (
-            self.pricing_tier.monthly_fee
-            if self.pricing_tier and self.pricing_tier.monthly_fee
+            self.subscription_plan.monthly_fee
+            if self.subscription_plan and self.subscription_plan.monthly_fee
             else Decimal("29.00")
         )
 
@@ -143,53 +126,15 @@ class ShopSubscription(BaseModel, ShopMixin):
         if self.trial_duration_days:
             return self.trial_duration_days
         return (
-            self.pricing_tier.trial_days
-            if self.pricing_tier and self.pricing_tier.trial_days
+            self.subscription_plan.trial_days
+            if self.subscription_plan and self.subscription_plan.trial_days
             else 14
         )
 
     @property
-    def effective_trial_threshold(self) -> Decimal:
-        """[LEGACY] Get trial threshold from pricing tier or override"""
-        if self.trial_threshold_override:
-            return self.trial_threshold_override
-        return (
-            self.pricing_tier.trial_threshold_amount
-            if self.pricing_tier and self.pricing_tier.trial_threshold_amount
-            else Decimal("75.00")
-        )
-
-    @property
-    def effective_commission_rate(self) -> Decimal:
-        """[LEGACY] Get commission rate from pricing tier"""
-        return (
-            self.pricing_tier.commission_rate
-            if self.pricing_tier and self.pricing_tier.commission_rate
-            else Decimal("0.03")
-        )
-
-    @property
     def currency(self) -> str:
-        """Get currency from pricing tier"""
-        return self.pricing_tier.currency if self.pricing_tier else "USD"
-
-    @property
-    def region_info(self) -> dict:
-        """Get region metadata from pricing tier"""
-        if self.pricing_tier and self.pricing_tier.tier_metadata:
-            import json
-            try:
-                return json.loads(self.pricing_tier.tier_metadata)
-            except (json.JSONDecodeError, TypeError):
-                return {}
-        return {}
-
-    @property
-    def effective_cap_amount(self) -> Decimal:
-        """[LEGACY] Get effective cap - user choice or fall back to trial threshold"""
-        if self.is_paid and self.user_chosen_cap_amount:
-            return self.user_chosen_cap_amount
-        return self.effective_trial_threshold
+        """Always returns USD (global flat fee pricing)"""
+        return "USD"
 
     @property
     def trial_remaining_days(self) -> int:

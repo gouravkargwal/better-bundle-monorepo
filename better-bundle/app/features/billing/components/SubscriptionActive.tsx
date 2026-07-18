@@ -1,21 +1,9 @@
-import { useState } from "react";
-import {
-  Card,
-  BlockStack,
-  InlineStack,
-  Text,
-  Badge,
-  Button,
-  Banner,
-} from "@shopify/polaris";
+import { Card, BlockStack, InlineStack, Text, Badge } from "@shopify/polaris";
 import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionActiveProps {
   subscriptionData: SubscriptionData;
   shopCurrency: string;
-  onIncreaseCap: (
-    newLimit: number,
-  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 export function SubscriptionActive({
@@ -191,7 +179,8 @@ export function SubscriptionActive({
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(200px, 1fr))",
                       gap: "8px",
                     }}
                   >
@@ -271,8 +260,8 @@ export function SubscriptionActive({
                 <BlockStack gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Plan Changes:</strong> Upgrade, downgrade, or cancel
-                    your subscription at any time. Changes apply at the next billing
-                    cycle.
+                    your subscription at any time. Changes apply at the next
+                    billing cycle.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Billing:</strong> You'll be charged{" "}
@@ -280,8 +269,8 @@ export function SubscriptionActive({
                     No overage fees or usage tracking.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Invoices:</strong> View all past invoices and billing
-                    history in the billing section.
+                    <strong>Invoices:</strong> View all past invoices and
+                    billing history in the billing section.
                   </Text>
                 </BlockStack>
               </BlockStack>
@@ -308,16 +297,17 @@ export function SubscriptionActive({
                 </div>
                 <BlockStack gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Questions about your plan?</strong> Contact our support
-                    team for assistance with billing, upgrades, or feature requests.
+                    <strong>Questions about your plan?</strong> Contact our
+                    support team for assistance with billing, upgrades, or
+                    feature requests.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Need to cancel?</strong> Visit the billing settings to
-                    cancel your subscription. No cancellation fees.
+                    <strong>Need to cancel?</strong> Visit the billing settings
+                    to cancel your subscription. No cancellation fees.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Payment issues?</strong> We'll notify you if there's a
-                    problem with your payment method.
+                    <strong>Payment issues?</strong> We'll notify you if there's
+                    a problem with your payment method.
                   </Text>
                 </BlockStack>
               </BlockStack>

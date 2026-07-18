@@ -8,11 +8,9 @@ Flat fee pricing services:
 """
 
 from .billing_service_v2 import BillingServiceV2
-from .commission_service_v2 import CommissionServiceV2
 from .flat_fee_billing_service import FlatFeeBillingService
 
 __all__ = [
     "BillingServiceV2",
-    "CommissionServiceV2",
     "FlatFeeBillingService",
 ]

@@ -32,19 +32,15 @@ function mockSubscription(overrides: any = {}) {
     is_active: true,
     started_at: new Date(), // now so trial is active
     subscription_plan_id: "plan-1",
-    pricing_tier_id: "tier-1",
     shopify_subscription_id: null,
     shopify_status: null,
     monthly_fee_override: null,
     trial_duration_days: null,
     created_at: new Date(),
-    pricing_tiers: {
-      monthly_fee: 29,
-      trial_days: 14,
-      currency: "USD",
-    },
     subscription_plans: {
       name: "Pro",
+      monthly_fee: 29,
+      trial_days: 14,
     },
     ...overrides,
   };
@@ -170,20 +166,14 @@ describe("BillingService", () => {
       expect(result.trialData!.trialDays).toBe(30);
     });
 
-    it("uses shop currency from database for trial data", async () => {
+    it("uses USD as default currency for trial data", async () => {
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        mockSubscription({
-          pricing_tiers: {
-            monthly_fee: 49,
-            trial_days: 14,
-            currency: "EUR",
-          },
-        }),
+        mockSubscription(),
       );
 
       const result = await BillingService.getBillingState("shop-1");
 
-      expect(result.trialData!.currency).toBe("EUR");
+      expect(result.trialData!.currency).toBe("USD");
     });
 
     it("returns trial_active with error on DB exception", async () => {
@@ -224,9 +214,7 @@ describe("BillingService", () => {
       );
       mockPrisma.shop_subscriptions.update.mockResolvedValue({});
 
-      const admin = mockAdmin([
-        mockShopifySubscription({ status: "PENDING" }),
-      ]);
+      const admin = mockAdmin([mockShopifySubscription({ status: "PENDING" })]);
 
       const result = await BillingService.getBillingState("shop-1", admin);
 
@@ -288,9 +276,7 @@ describe("BillingService", () => {
 
       expect(result).not.toBeNull();
       expect(result!.status).toBe("ACTIVE");
-      expect(result!.subscriptionId).toBe(
-        "gid://shopify/AppSubscription/123",
-      );
+      expect(result!.subscriptionId).toBe("gid://shopify/AppSubscription/123");
       expect(result!.monthlyFee).toBe(29);
       expect(result!.currency).toBe("USD");
     });
@@ -307,22 +293,20 @@ describe("BillingService", () => {
       expect(result).toBeNull();
     });
 
-    it("falls back to DB info when no active Shopify subscriptions", async () => {
+    it("returns null when no active Shopify subscriptions", async () => {
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue({
         shopify_subscription_id: "gid://shopify/AppSubscription/456",
         shopify_status: "ACTIVE",
       });
 
       const admin = {
-        graphql: vi
-          .fn()
-          .mockResolvedValueOnce({
-            json: vi.fn().mockResolvedValue({
-              data: {
-                currentAppInstallation: { activeSubscriptions: [] },
-              },
-            }),
+        graphql: vi.fn().mockResolvedValueOnce({
+          json: vi.fn().mockResolvedValue({
+            data: {
+              currentAppInstallation: { activeSubscriptions: [] },
+            },
           }),
+        }),
       };
 
       const result = await BillingService.getShopifySubscriptionStatus(

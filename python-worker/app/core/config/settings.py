@@ -120,7 +120,7 @@ class MLSettings(BaseSettings):
         default="gemini-embedding-001", env="AI_EMBEDDING_MODEL"
     )
     AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
-    AI_CHAT_MODEL: str = Field(default="gemini-2.5-flash", env="AI_CHAT_MODEL")
+    AI_CHAT_MODEL: str = Field(default="gemini-3.1-flash-lite", env="AI_CHAT_MODEL")
     AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
 
 
@@ -248,57 +248,21 @@ class Settings(BaseSettings):
         return self.redis.REDIS_TLS
 
     # Redis Stream Names (Direct access for backward compatibility)
-    @property
-    def ML_TRAINING_STREAM(self) -> str:
-        return self.redis.ML_TRAINING_STREAM
-
-    @property
-    def ANALYSIS_RESULTS_STREAM(self) -> str:
-        return self.redis.ANALYSIS_RESULTS_STREAM
-
-    @property
-    def USER_NOTIFICATIONS_STREAM(self) -> str:
-        return self.redis.USER_NOTIFICATIONS_STREAM
-
-    @property
-    def FEATURES_COMPUTED_STREAM(self) -> str:
-        return self.redis.FEATURES_COMPUTED_STREAM
-
-    @property
-    def ML_TRAINING_COMPLETE_STREAM(self) -> str:
-        return self.redis.ML_TRAINING_COMPLETE_STREAM
-
-    @property
-    def HEURISTIC_DECISION_REQUESTED_STREAM(self) -> str:
-        return self.redis.HEURISTIC_DECISION_REQUESTED_STREAM
-
-    @property
-    def HEURISTIC_DECISION_MADE_STREAM(self) -> str:
-        return self.redis.HEURISTIC_DECISION_MADE_STREAM
-
-    @property
-    def HEURISTIC_DECISION_STREAM(self) -> str:
-        return self.redis.HEURISTIC_DECISION_STREAM
-
-    @property
-    def NEXT_ANALYSIS_SCHEDULED_STREAM(self) -> str:
-        return self.redis.NEXT_ANALYSIS_SCHEDULED_STREAM
-
-    @property
-    def COMPLETION_RESULTS_STREAM(self) -> str:
-        return self.redis.COMPLETION_RESULTS_STREAM
-
-    @property
-    def COMPLETION_EVENTS_STREAM(self) -> str:
-        return self.redis.COMPLETION_EVENTS_STREAM
-
-    @property
-    def BEHAVIORAL_EVENTS_STREAM(self) -> str:
-        return self.redis.BEHAVIORAL_EVENTS_STREAM
-
-    @property
-    def GORSE_SYNC_STREAM(self) -> str:
-        return self.redis.GORSE_SYNC_STREAM
+    # These are the stream/topic names used for inter-service messaging.
+    # They can be overridden via env vars if needed.
+    ML_TRAINING_STREAM: str = "ml-training"
+    ANALYSIS_RESULTS_STREAM: str = "analysis-results"
+    USER_NOTIFICATIONS_STREAM: str = "user-notifications"
+    FEATURES_COMPUTED_STREAM: str = "features-computed"
+    ML_TRAINING_COMPLETE_STREAM: str = "ml-training-complete"
+    HEURISTIC_DECISION_REQUESTED_STREAM: str = "heuristic-decision-requested"
+    HEURISTIC_DECISION_MADE_STREAM: str = "heuristic-decision-made"
+    HEURISTIC_DECISION_STREAM: str = "heuristic-decision"
+    NEXT_ANALYSIS_SCHEDULED_STREAM: str = "next-analysis-scheduled"
+    COMPLETION_RESULTS_STREAM: str = "completion-results"
+    COMPLETION_EVENTS_STREAM: str = "completion-events"
+    BEHAVIORAL_EVENTS_STREAM: str = "behavioral-events"
+    GORSE_SYNC_STREAM: str = "gorse-sync"
 
     # Worker Configuration (Direct access for backward compatibility)
     @property
@@ -336,8 +300,9 @@ class Settings(BaseSettings):
     )
 
     # CORS Configuration
+    # Should be configured via env vars in production; never use ["*"] in production.
     CORS_ORIGINS: List[str] = Field(
-        default=["*"],
+        default=[],
         env="CORS_ORIGINS",
     )
 

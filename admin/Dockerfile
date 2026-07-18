@@ -58,10 +58,10 @@ python manage.py migrate\n\
 python manage.py collectstatic --noinput\n\
 \n\
 # Create admin user if it doesn\'t exist\n\
-python manage.py create_admin_user --username admin --email admin@betterbundle.com --password admin123\n\
+python manage.py create_admin_user --username "${ADMIN_USERNAME:-admin}" --email "${ADMIN_EMAIL:-admin@betterbundle.com}" --password "${ADMIN_PASSWORD:?Set ADMIN_PASSWORD environment variable}"\n\
 \
-# Start server with environment-based configuration\n\
-python manage.py runserver $HOST:$PORT' > /app/entrypoint.sh
+# Start server with production WSGI server\n\
+gunicorn config.wsgi:application --bind $HOST:$PORT --workers 3 --timeout 120' > /app/entrypoint.sh
 
 RUN chmod +x /app/entrypoint.sh
 
@@ -72,4 +72,4 @@ EXPOSE $PORT
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Default command (will use environment variables)
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "120"]

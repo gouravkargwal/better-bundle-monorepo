@@ -11,7 +11,6 @@ const { mockPrisma, mockPublishDataJobEvent } = vi.hoisted(() => {
   return {
     mockPrisma: {
       subscription_plans: { findFirst: vi.fn() },
-      pricing_tiers: { findFirst: vi.fn() },
       shops: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
       shop_subscriptions: { findFirst: vi.fn(), create: vi.fn() },
       $transaction: vi.fn(),
@@ -52,25 +51,21 @@ function defaultShopData() {
 }
 
 function defaultPlan() {
-  return { id: "plan-1", name: "Default Plan", is_active: true, is_default: true };
-}
-
-function defaultPricingTier() {
   return {
-    id: "tier-1",
-    subscription_plan_id: "plan-1",
-    currency: "USD",
+    id: "plan-1",
+    name: "Default Plan",
     is_active: true,
     is_default: true,
     monthly_fee: 29,
     trial_days: 14,
-    trial_threshold_amount: 75,
-    commission_rate: 0.03,
   };
 }
 
 function defaultSession() {
-  return { shop: "test-store.myshopify.com", accessToken: "shpat_test_token_123" };
+  return {
+    shop: "test-store.myshopify.com",
+    accessToken: "shpat_test_token_123",
+  };
 }
 
 function defaultShopRecord() {
@@ -80,7 +75,6 @@ function defaultShopRecord() {
     access_token: "shpat_test_token_123",
     currency_code: "USD",
     email: "test@test-store.com",
-    plan_type: "Basic",
     is_active: true,
     onboarding_completed: false,
     shopify_plus: false,
@@ -133,9 +127,6 @@ function setupFullOnboardingMocks(shopRecordOverrides: any = {}) {
     subscription_plans: {
       findFirst: vi.fn().mockResolvedValue(defaultPlan()),
     },
-    pricing_tiers: {
-      findFirst: vi.fn().mockResolvedValue(defaultPricingTier()),
-    },
   };
   mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockTx));
   mockPrisma.shops.findUnique.mockResolvedValue({
@@ -182,19 +173,18 @@ describe("OnboardingService — BUG TESTS", () => {
 
   // ─── BUG 4: Missing trial_duration_days in trial subscription ──────
 
-  describe("BUG 4: Trial subscription should set trial_duration_days from pricing tier", () => {
-    it("should set trial_duration_days from pricing tier trial_days", async () => {
+  describe("BUG 4: Trial subscription should set trial_duration_days from plan", () => {
+    it("should set trial_duration_days from plan trial_days", async () => {
       const admin = mockAdminWebPixelSuccess();
       const session = defaultSession();
       const mockTx = setupFullOnboardingMocks();
 
       await service.completeOnboarding(session, admin);
 
-      // BUG (fixed): flat fee trial subscription should set trial_duration_days and monthly_fee_override
+      // BUG (fixed): flat fee trial subscription should set trial_duration_days
       expect(mockTx.shop_subscriptions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          trial_duration_days: 14, // From defaultPricingTier().trial_days
-          monthly_fee_override: 29, // From defaultPricingTier().monthly_fee
+          trial_duration_days: 14, // From defaultPlan().trial_days
         }),
       });
     });

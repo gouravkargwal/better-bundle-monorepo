@@ -2,21 +2,36 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import logger from "app/utils/logger";
+import { incrementCounter } from "../services/metrics.service";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
+  // Declared here so catch block can reference them
+  let planName: string | undefined;
+  let monthlyFee: number | undefined;
+  let trialDays: number | undefined;
+
   try {
-    // Parse request body — now expects planName and monthlyFee instead of monthlyCap
+    // Parse request body — expects planName and monthlyFee
     const body = await request.json();
-    const { planName, monthlyFee, trialDays } = body;
+    planName = body.planName;
+    monthlyFee = body.monthlyFee;
+    trialDays = body.trialDays;
 
     // Validate inputs
     const fee = Number(monthlyFee) || 29;
     const trial = Number(trialDays) || 14;
 
+    logger.info({ shop, planName, fee, trial }, "Billing setup started");
+
     if (!planName) {
+      logger.warn({ shop }, "Billing setup failed: plan name not provided");
+      incrementCounter("billing.setup.validation_error", {
+        shop,
+        reason: "missing_plan_name",
+      });
       return json(
         {
           success: false,
@@ -33,6 +48,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopRecord) {
+      logger.warn({ shop }, "Billing setup failed: shop not found");
+      incrementCounter("billing.setup.validation_error", {
+        shop,
+        reason: "shop_not_found",
+      });
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
@@ -40,7 +60,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: { shop_id: shopRecord.id },
       include: {
-        pricing_tiers: true,
         subscription_plans: true,
       },
     });
@@ -51,21 +70,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 400 },
       );
     }
-
-    // Get flat fee plan from database for pricing details
-    const pricingTier = await prisma.pricing_tiers.findFirst({
-      where: {
-        currency: shopRecord.currency_code || "USD",
-        is_active: true,
-        subscription_plans: {
-          is_active: true,
-          plan_type: "FLAT_RATE",
-        },
-      },
-      include: {
-        subscription_plans: true,
-      },
-    });
 
     // Create Shopify recurring subscription using AppRecurringPricing
     const currency = shopRecord.currency_code || "USD";
@@ -138,7 +142,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     if (result.data?.appSubscriptionCreate?.userErrors?.length > 0) {
       const errors = result.data.appSubscriptionCreate.userErrors;
-      logger.error({ errors }, "Shopify errors while creating subscription");
+      logger.error(
+        { errors, shop, planName },
+        "Shopify errors while creating subscription",
+      );
+      incrementCounter("billing.setup.shopify_error", { shop, planName });
       return json(
         {
           success: false,
@@ -152,6 +160,15 @@ export async function action({ request }: ActionFunctionArgs) {
     const confirmationUrl = result.data?.appSubscriptionCreate?.confirmationUrl;
 
     if (!subscription) {
+      logger.error(
+        { shop, planName },
+        "Billing setup failed: no subscription returned from Shopify",
+      );
+      incrementCounter("billing.setup.error", {
+        shop,
+        planName,
+        reason: "no_subscription",
+      });
       return json(
         { success: false, error: "Failed to create subscription" },
         { status: 500 },
@@ -171,6 +188,12 @@ export async function action({ request }: ActionFunctionArgs) {
       },
     });
 
+    logger.info(
+      { shop, planName, fee, subscriptionId: subscription.id },
+      "Billing setup completed successfully",
+    );
+    incrementCounter("billing.setup.completed", { shop, planName });
+
     return json({
       success: true,
       subscription_id: subscription.id,
@@ -178,11 +201,16 @@ export async function action({ request }: ActionFunctionArgs) {
       message: `Please approve the ${planName} plan ($${fee}/month) in Shopify`,
     });
   } catch (error) {
-    logger.error({ error }, "Error in billing setup");
+    logger.error({ error, shop, planName }, "Error in billing setup");
+    incrementCounter("billing.setup.error", {
+      shop,
+      planName,
+      reason: "exception",
+    });
     return json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "An internal error occurred. Please try again later.",
       },
       { status: 500 },
     );

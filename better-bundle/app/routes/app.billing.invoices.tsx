@@ -98,16 +98,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
                         currencyCode
                       }
                     }
-                    ... on AppUsagePricing {
-                      balanceUsed {
-                        amount
-                        currencyCode
-                      }
-                      cappedAmount {
-                        amount
-                        currencyCode
-                      }
-                    }
                   }
                 }
                 usageRecords(first: 250) {
@@ -140,16 +130,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
                         __typename
                         ... on AppRecurringPricing {
                           price {
-                            amount
-                            currencyCode
-                          }
-                        }
-                        ... on AppUsagePricing {
-                          balanceUsed {
-                            amount
-                            currencyCode
-                          }
-                          cappedAmount {
                             amount
                             currencyCode
                           }
@@ -273,92 +253,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           "No usage records from subscriptions, checking commission records with usage_record_id...",
         );
 
-        // Get commission records that have been recorded to Shopify
-        const recordedCommissions = await prisma.commission_records.findMany({
-          where: {
-            shop_id: shop.id,
-            shopify_usage_record_id: {
-              not: null,
-            },
-            deleted_at: null,
-            billing_phase: "PAID",
-            status: "RECORDED",
-          },
-          select: {
-            shopify_usage_record_id: true,
-            shopify_response: true,
-            commission_charged: true,
-            created_at: true,
-            order_id: true,
-            attributed_revenue: true,
-          },
-          orderBy: {
-            created_at: "desc",
-          },
-          take: 250, // Limit to most recent 250
-        });
-
-        console.log(
-          `Found ${recordedCommissions.length} commission records with usage_record_id`,
-        );
-
         // Group by usage_record_id to avoid duplicates
         const usageRecordsMap = new Map<string, InvoiceItem>();
-
-        for (const commission of recordedCommissions) {
-          if (!commission.shopify_usage_record_id) continue;
-
-          const usageRecordId = commission.shopify_usage_record_id;
-          const shopifyResponse = commission.shopify_response as any;
-
-          // Apply date filter
-          if (startDate || endDate) {
-            const recordDate = new Date(commission.created_at);
-            const recordDateStr = recordDate.toISOString().split("T")[0];
-
-            if (startDate && recordDateStr < startDate) continue;
-            if (endDate && recordDateStr > endDate) continue;
-          }
-
-          // Get or create usage record entry
-          if (!usageRecordsMap.has(usageRecordId)) {
-            // Extract data from shopify_response if available
-            const price = shopifyResponse?.price || {
-              amount: String(commission.commission_charged || 0),
-              currencyCode: shop.currency_code || "USD",
-            };
-            const createdAt =
-              shopifyResponse?.created_at || commission.created_at;
-
-            usageRecordsMap.set(usageRecordId, {
-              id: usageRecordId,
-              date: new Date(createdAt).toISOString().split("T")[0],
-              amount: parseFloat(
-                price.amount || String(commission.commission_charged || 0),
-              ),
-              status: "paid",
-              description: shopifyResponse?.description || "Usage charge",
-              type: "usage_record" as const,
-              createdAt: createdAt,
-              orderIds: [],
-              totalRevenue: 0,
-              orderCount: 0,
-            });
-          }
-
-          // Add order details to existing record
-          const record = usageRecordsMap.get(usageRecordId)!;
-          if (commission.order_id) {
-            if (!record.orderIds) record.orderIds = [];
-            if (!record.orderIds.includes(commission.order_id)) {
-              record.orderIds.push(commission.order_id);
-            }
-          }
-          record.totalRevenue =
-            (record.totalRevenue || 0) +
-            Number(commission.attributed_revenue || 0);
-          record.orderCount = record.orderIds?.length || 0;
-        }
 
         // Convert map to array
         usageRecords = Array.from(usageRecordsMap.values());
@@ -405,71 +301,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         console.log(
           `Found ${allUsageRecords.length} usage records from Shopify subscriptions`,
         );
-
-        // ✅ Show ALL usage records from Shopify, even if commission records aren't linked yet
-        // Transform usage record IDs for lookup
-        const usageRecordIds = allUsageRecords.map((r) => r.id);
-
-        // Batch fetch all commission records linked to these usage records
-        // This is optional enrichment - we'll show usage records even without commission data
-        const allCommissionRecords =
-          usageRecordIds.length > 0
-            ? await prisma.commission_records.findMany({
-                where: {
-                  shop_id: shop.id,
-                  shopify_usage_record_id: {
-                    in: usageRecordIds,
-                  },
-                  deleted_at: null,
-                },
-                select: {
-                  shopify_usage_record_id: true,
-                  order_id: true,
-                  attributed_revenue: true,
-                },
-              })
-            : [];
-
-        // Group commission records by usage record ID for quick lookup
-        const commissionsByUsageRecord = new Map<
-          string,
-          typeof allCommissionRecords
-        >();
-        allCommissionRecords.forEach((cr) => {
-          if (cr.shopify_usage_record_id) {
-            const existing =
-              commissionsByUsageRecord.get(cr.shopify_usage_record_id) || [];
-            existing.push(cr);
-            commissionsByUsageRecord.set(cr.shopify_usage_record_id, existing);
-          }
-        });
-
-        // ✅ Transform ALL usage records from Shopify (with optional commission linking)
-        usageRecords = allUsageRecords.map((record) => {
-          // Get linked commission records if available (optional enrichment)
-          const commissionRecords =
-            commissionsByUsageRecord.get(record.id) || [];
-
-          // Extract order IDs and calculate total revenue from linked commissions
-          const orderIds = commissionRecords.map((cr) => cr.order_id);
-          const totalRevenue = commissionRecords.reduce(
-            (sum, cr) => sum + Number(cr.attributed_revenue),
-            0,
-          );
-
-          return {
-            id: record.id,
-            date: new Date(record.createdAt).toISOString().split("T")[0],
-            amount: parseFloat(record.price.amount),
-            status: "paid", // Usage records are typically paid when created
-            description: record.description || "Usage charge",
-            type: "usage_record" as const,
-            createdAt: record.createdAt,
-            orderIds: orderIds.length > 0 ? orderIds : undefined,
-            totalRevenue: totalRevenue > 0 ? totalRevenue : undefined,
-            orderCount: orderIds.length,
-          };
-        });
 
         // Sort by date descending
         usageRecords.sort(
@@ -528,8 +359,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
 export default function BillingInvoicesPage() {
   const loaderData = useLoaderData<typeof loader>() as
-    | InvoicesLoaderData
-    | { error: string };
+    InvoicesLoaderData | { error: string };
 
   if ("error" in loaderData) {
     return (

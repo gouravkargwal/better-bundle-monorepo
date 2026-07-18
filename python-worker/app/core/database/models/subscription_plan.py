@@ -6,7 +6,17 @@ Admin-controlled, rarely changes.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Boolean, Index, Enum as SQLEnum
+from decimal import Decimal
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Boolean,
+    Integer,
+    Numeric,
+    Index,
+    Enum as SQLEnum,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
 from .base import BaseModel
@@ -36,8 +46,19 @@ class SubscriptionPlan(BaseModel):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_default = Column(Boolean, default=False, nullable=False, index=True)
 
-    # Commission settings (defaults, can be overridden by pricing tiers)
-    default_commission_rate = Column(String(10), nullable=True)  # e.g., "0.03" for 3%
+    # Flat fee pricing
+    monthly_fee = Column(
+        Numeric(10, 2),
+        nullable=True,
+        default=Decimal("29.00"),
+        comment="Flat monthly fee charged via Shopify AppSubscription",
+    )
+    trial_days = Column(
+        Integer,
+        nullable=True,
+        default=14,
+        comment="Number of free trial days before first charge",
+    )
 
     # Metadata
     plan_metadata = Column(Text, nullable=True)  # JSON string for additional config
@@ -48,9 +69,6 @@ class SubscriptionPlan(BaseModel):
     effective_to = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     # Relationships
-    pricing_tiers = relationship(
-        "PricingTier", back_populates="subscription_plan", cascade="all, delete-orphan"
-    )
     shop_subscriptions = relationship(
         "ShopSubscription", back_populates="subscription_plan"
     )
@@ -65,7 +83,11 @@ class SubscriptionPlan(BaseModel):
     )
 
     def __repr__(self) -> str:
-        return f"<SubscriptionPlan(name={self.name}, type={self.plan_type.value}, active={self.is_active})>"
+        return (
+            f"<SubscriptionPlan(name={self.name}, type={self.plan_type.value}, "
+            f"active={self.is_active}, monthly_fee=${self.monthly_fee or 'N/A'}, "
+            f"trial_days={self.trial_days or 'N/A'})>"
+        )
 
     @property
     def is_currently_active(self) -> bool:

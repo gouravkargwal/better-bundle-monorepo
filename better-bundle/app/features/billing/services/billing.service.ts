@@ -19,7 +19,6 @@ export class BillingService {
           is_active: true,
         },
         include: {
-          pricing_tiers: true,
           subscription_plans: true,
         },
         orderBy: {
@@ -41,7 +40,7 @@ export class BillingService {
       if (isTrialPhase) {
         const trialDays =
           subscription.trial_duration_days ||
-          subscription.pricing_tiers?.trial_days ||
+          subscription.subscription_plans?.trial_days ||
           14;
         const startedAt = subscription.started_at;
         const trialEnd = new Date(
@@ -62,7 +61,7 @@ export class BillingService {
               isActive: true,
               daysRemaining,
               trialDays,
-              currency: subscription.pricing_tiers?.currency || "USD",
+              currency: "USD",
             },
           };
         }
@@ -74,7 +73,7 @@ export class BillingService {
             isActive: false,
             daysRemaining: 0,
             trialDays,
-            currency: subscription.pricing_tiers?.currency || "USD",
+            currency: "USD",
           },
         };
       }
@@ -113,16 +112,15 @@ export class BillingService {
             status: "subscription_active",
             subscriptionData: {
               id: subscription.shopify_subscription_id,
-              status:
-                (subscription.shopify_status as any) || "ACTIVE",
+              status: (subscription.shopify_status as any) || "ACTIVE",
               planName:
                 subscription.subscription_plans?.name || "Flat Fee Plan",
               monthlyFee: Number(
                 subscription.monthly_fee_override ||
-                  subscription.pricing_tiers?.monthly_fee ||
+                  subscription.subscription_plans?.monthly_fee ||
                   29,
               ),
-              currency: subscription.pricing_tiers?.currency || "USD",
+              currency: "USD",
             },
           };
         }
@@ -168,18 +166,13 @@ export class BillingService {
     return {
       id: shopifyStatus.subscriptionId || shopSubscription.id,
       status: shopifyStatus.status as
-        | "PENDING"
-        | "ACTIVE"
-        | "DECLINED"
-        | "CANCELLED"
-        | "EXPIRED",
-      planName:
-        shopSubscription.subscription_plans?.name || "Flat Fee Plan",
+        "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED",
+      planName: shopSubscription.subscription_plans?.name || "Flat Fee Plan",
       monthlyFee:
         shopifyStatus.monthlyFee ||
         Number(
           shopSubscription.monthly_fee_override ||
-            shopSubscription.pricing_tiers?.monthly_fee ||
+            shopSubscription.subscription_plans?.monthly_fee ||
             29,
         ),
       currency: shopifyStatus.currency || "USD",
@@ -196,7 +189,7 @@ export class BillingService {
 
   /**
    * Get real-time Shopify subscription status via GraphQL (flat fee)
-   * Uses AppRecurringPricing instead of AppUsagePricing
+   * Uses AppRecurringPricing
    */
   static async getShopifySubscriptionStatus(
     shopId: string,
@@ -231,16 +224,6 @@ export class BillingService {
                       }
                       interval
                     }
-                    ... on AppUsagePricing {
-                      cappedAmount {
-                        amount
-                        currencyCode
-                      }
-                      balanceUsed {
-                        amount
-                        currencyCode
-                      }
-                    }
                   }
                 }
               }
@@ -266,16 +249,13 @@ export class BillingService {
         const lineItem = subscription.lineItems[0];
         const pricingDetails = lineItem?.plan?.pricingDetails;
 
-        // Extract monthly fee (works for both recurring and usage-based)
+        // Extract monthly fee from recurring pricing
         let monthlyFee: number | undefined;
         let currency: string | undefined;
 
         if (pricingDetails?.__typename === "AppRecurringPricing") {
           monthlyFee = pricingDetails.price?.amount;
           currency = pricingDetails.price?.currencyCode;
-        } else if (pricingDetails?.__typename === "AppUsagePricing") {
-          monthlyFee = pricingDetails.cappedAmount?.amount;
-          currency = pricingDetails.cappedAmount?.currencyCode;
         }
 
         // Sync with database

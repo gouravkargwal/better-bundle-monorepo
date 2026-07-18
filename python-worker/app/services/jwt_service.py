@@ -1,11 +1,30 @@
 import jwt
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from app.core.config.settings import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class TokenValidationResult:
+    """Result of token validation"""
+
+    is_valid: bool
+    payload: Optional[Any] = None
+    error: Optional[str] = None
+
+
+class ShopStatus:
+    """Shop status constants"""
+
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    TRIAL = "trial"
+    UNKNOWN = "unknown"
 
 
 class JWTService:
@@ -14,7 +33,163 @@ class JWTService:
         self.algorithm = "HS256"
         self.access_token_expire = timedelta(minutes=30)  # 30 minutes
         self.refresh_token_expire = timedelta(minutes=90)  # 90 minutes
+        self.shop_token_expire = timedelta(hours=2)  # 2 hours for shop tokens
         self.refresh_threshold = timedelta(minutes=15)  # Refresh 15 min before expiry
+
+    def create_shop_token(
+        self,
+        shop_id: str,
+        shop_domain: str,
+        shop_status: str = "active",
+        subscription_status: str = "unknown",
+        shopify_plus: bool = False,
+        permissions: Optional[List[str]] = None,
+    ) -> str:
+        """
+        Create a comprehensive shop token with embedded shop status and permissions.
+
+        Args:
+            shop_id: Unique shop identifier
+            shop_domain: Shopify shop domain
+            shop_status: Current shop status (active/suspended/trial)
+            subscription_status: Subscription status
+            shopify_plus: Whether the shop is Shopify Plus
+            permissions: List of permissions (e.g., ["read", "write"])
+
+        Returns:
+            Encoded JWT token string
+        """
+        try:
+            now = datetime.utcnow()
+            payload = {
+                "shop_id": shop_id,
+                "shop_domain": shop_domain,
+                "shop_status": shop_status,
+                "subscription_status": subscription_status,
+                "shopify_plus": shopify_plus,
+                "permissions": permissions or ["read"],
+                "token_type": "shop",
+                "exp": now + self.shop_token_expire,
+                "iat": now,
+            }
+
+            return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+        except Exception as e:
+            logger.error(f"Failed to create shop token: {e}")
+            raise ValueError(f"Token creation failed: {str(e)}")
+
+    def validate_shop_token(self, token: str) -> TokenValidationResult:
+        """
+        Validate a shop token and return structured result.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            TokenValidationResult with is_valid, payload, and error fields
+        """
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+
+            if payload.get("token_type") != "shop":
+                return TokenValidationResult(
+                    is_valid=False,
+                    error="Invalid token type",
+                )
+
+            return TokenValidationResult(
+                is_valid=True,
+                payload=payload,
+            )
+
+        except jwt.ExpiredSignatureError:
+            return TokenValidationResult(
+                is_valid=False,
+                error="Token expired",
+            )
+        except jwt.InvalidTokenError:
+            return TokenValidationResult(
+                is_valid=False,
+                error="Invalid token",
+            )
+        except Exception as e:
+            logger.error(f"Token validation error: {e}")
+            return TokenValidationResult(
+                is_valid=False,
+                error="Validation failed",
+            )
+
+    def extract_shop_info(self, token: str) -> Optional[Dict[str, Any]]:
+        """
+        Extract shop information from a token without full validation.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Dictionary with shop info or None if extraction fails
+        """
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+
+            return {
+                "shop_id": payload.get("shop_id", "unknown"),
+                "shop_domain": payload.get("shop_domain"),
+                "shop_status": payload.get("shop_status", "unknown"),
+                "subscription_status": payload.get("subscription_status", "unknown"),
+                "permissions": payload.get("permissions", []),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to extract shop info: {e}")
+            return None
+
+    def get_token_expiration(self, token: str) -> Optional[datetime]:
+        """
+        Get the expiration datetime of a token.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            Datetime when the token expires, or None on error
+        """
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            exp_timestamp = payload.get("exp")
+            if exp_timestamp:
+                return datetime.fromtimestamp(exp_timestamp)
+            return None
+        except Exception as e:
+            logger.debug(f"Error getting token expiration: {e}")
+            return None
+
+    def get_token_remaining_time(self, token: str) -> Optional[timedelta]:
+        """
+        Get the remaining time before a token expires.
+
+        Args:
+            token: JWT token string
+
+        Returns:
+            timedelta representing remaining time, or None on error
+        """
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False})
+            exp_timestamp = payload.get("exp")
+            if not exp_timestamp:
+                return None
+
+            exp_datetime = datetime.fromtimestamp(exp_timestamp)
+            now = datetime.utcnow()
+            remaining = exp_datetime - now
+
+            return remaining if remaining.total_seconds() > 0 else timedelta(0)
+
+        except Exception as e:
+            logger.debug(f"Error getting remaining token time: {e}")
+            return None
 
     def create_access_token(
         self,
@@ -199,8 +374,8 @@ class JWTService:
         new_access_token = self.create_access_token(
             refresh_result["shop_id"],
             refresh_result["shop_domain"],
-            refresh_result["subscription_status"],
-            refresh_result["shopify_plus"],
+            refresh_result.get("is_service_active", True),
+            refresh_result.get("shopify_plus", False),
         )
 
         return {
@@ -231,9 +406,14 @@ class JWTService:
             return None
 
     def is_token_expiring_soon(self, token: str) -> bool:
-        """Check if token expires within refresh threshold"""
+        """
+        Check if token expires within refresh threshold.
+
+        Verifies the signature first to prevent token expiration bypass attacks.
+        """
         try:
-            payload = jwt.decode(token, options={"verify_signature": False})
+            # H3 FIX: Verify signature first, then check expiry
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             exp_timestamp = payload.get("exp")
 
             if not exp_timestamp:
@@ -244,6 +424,13 @@ class JWTService:
 
             return (exp_datetime - now) <= self.refresh_threshold
 
+        except jwt.ExpiredSignatureError:
+            # Token is already expired — treat as expiring
+            return True
+        except jwt.InvalidTokenError:
+            # Token signature is invalid
+            logger.warning("Invalid token when checking expiration")
+            return True
         except Exception as e:
             logger.debug(f"Error checking token expiration: {e}")
             return True  # Treat as expiring on error

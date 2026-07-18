@@ -2,6 +2,14 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import logger from "../utils/logger";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
+import { logSuspensionEvent } from "../services/suspensionAudit.service";
+import { incrementCounter } from "../services/metrics.service";
+import {
+  processPaymentFailure,
+  type DunningInfo,
+  type DunningState,
+} from "../services/dunning.service";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
@@ -24,7 +32,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // Find shop record
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
-      select: { id: true, shop_domain: true },
+      select: { id: true, shop_domain: true, email: true },
     });
 
     if (!shopRecord) {
@@ -38,7 +46,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shop_id: shopRecord.id,
         is_active: true,
       },
-      select: { id: true },
+      select: { id: true, status: true, shop_subscription_metadata: true },
     });
 
     if (!shopSubscription) {
@@ -81,6 +89,136 @@ export async function action({ request }: ActionFunctionArgs) {
         updated_at: new Date(),
       },
       create: invoiceData,
+    });
+
+    // Count failed invoices for this subscription
+    const failedCount = await prisma.billing_invoices.count({
+      where: {
+        shop_subscription_id: shopSubscription.id,
+        status: "FAILED",
+      },
+    });
+
+    // --- Dunning State Machine Integration ---
+
+    // Read existing dunning info from subscription metadata
+    const metadata = shopSubscription.shop_subscription_metadata as Record<
+      string,
+      unknown
+    > | null;
+    const existingDunning: DunningInfo = {
+      state: (metadata?.dunningState as DunningState) || null,
+      startedAt: metadata?.dunningStartedAt
+        ? new Date(metadata.dunningStartedAt as string)
+        : null,
+      failureCount: (metadata?.dunningFailureCount as number) || 0,
+    };
+
+    // Process payment failure through the dunning state machine
+    const dunningResult = processPaymentFailure(existingDunning);
+
+    // Log dunning state transition
+    logger.info(
+      {
+        shop,
+        shopId: shopRecord.id,
+        subscriptionId: shopSubscription.id,
+        failureCount:
+          dunningResult.daysSinceStart === 0 ? failedCount : failedCount,
+        dunningState: dunningResult.newState,
+        shouldSuspend: dunningResult.shouldSuspend,
+        daysSinceStart: dunningResult.daysSinceStart,
+      },
+      `Dunning state transition: ${existingDunning.state || "NONE"} → ${dunningResult.newState}`,
+    );
+
+    // Update subscription metadata with new dunning state
+    await prisma.shop_subscriptions.update({
+      where: { id: shopSubscription.id },
+      data: {
+        shop_subscription_metadata: {
+          ...(metadata || {}),
+          dunningState: dunningResult.newState,
+          dunningStartedAt:
+            metadata?.dunningStartedAt || new Date().toISOString(),
+          dunningFailureCount: failedCount,
+          dunningUpdatedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    // Trigger suspension if the dunning state machine indicates it
+    if (dunningResult.shouldSuspend) {
+      logger.info(
+        {
+          shop,
+          failedCount,
+          subscriptionId: shopSubscription.id,
+          dunningState: dunningResult.newState,
+          daysSinceStart: dunningResult.daysSinceStart,
+        },
+        `Dunning period complete — suspending shop due to unresolved payment failures`,
+      );
+
+      // Update subscription status to SUSPENDED
+      await prisma.shop_subscriptions.update({
+        where: { id: shopSubscription.id },
+        data: {
+          status: "SUSPENDED",
+          is_active: false,
+        },
+      });
+
+      // Suspend the shop
+      await prisma.shops.update({
+        where: { id: shopRecord.id },
+        data: {
+          is_active: false,
+          suspension_reason: "payment_failure",
+          suspended_at: new Date(),
+        },
+      });
+
+      // Log the suspension event to the audit trail
+      await logSuspensionEvent({
+        shopId: shopRecord.id,
+        action: "SUSPENDED",
+        reason: "payment_failure",
+        triggeredBy: "webhook",
+        metadata: {
+          failureCount: failedCount,
+          subscriptionId: shopSubscription.id,
+        },
+      });
+
+      // Invalidate Redis suspension cache so subsequent checks pick up the change
+      await invalidateSuspensionCache(shopRecord.id);
+
+      // Log structured suspension event
+      logger.info(
+        {
+          shop,
+          shopId: shopRecord.id,
+          subscriptionId: shopSubscription.id,
+          failedCount,
+          dunningState: dunningResult.newState,
+          daysSinceStart: dunningResult.daysSinceStart,
+          reason: "payment_failure",
+        },
+        "Shop suspended due to unresolved payment failures after dunning period",
+      );
+
+      incrementCounter("payment_failure.suspension", {
+        shop,
+        subscriptionId: shopSubscription.id,
+        failureCount: failedCount,
+      });
+    }
+
+    incrementCounter("payment_failure.occurred", {
+      shop,
+      subscriptionId: shopSubscription.id,
+      failureCount: failedCount,
     });
 
     return json({ success: true });

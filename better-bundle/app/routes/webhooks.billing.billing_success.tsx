@@ -2,6 +2,9 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import logger from "app/utils/logger";
+import { processSuccessfulPayment } from "../services/dunning.service";
+import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
+import { incrementCounter } from "../services/metrics.service";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
@@ -31,13 +34,13 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: true });
     }
 
-    // Find shop subscription
+    // Find shop subscription (include metadata for dunning check)
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
       where: {
         shop_id: shopRecord.id,
         is_active: true,
       },
-      select: { id: true },
+      select: { id: true, shop_subscription_metadata: true },
     });
 
     if (!shopSubscription) {
@@ -69,7 +72,7 @@ export async function action({ request }: ActionFunctionArgs) {
     };
 
     // ✅ RACE CONDITION PROTECTION: Use upsert to prevent duplicate processing
-    const upsertResult = await prisma.billing_invoices.upsert({
+    await prisma.billing_invoices.upsert({
       where: {
         shopify_invoice_id: invoiceData.shopify_invoice_id,
       },
@@ -84,6 +87,99 @@ export async function action({ request }: ActionFunctionArgs) {
       },
       create: invoiceData as any,
     });
+
+    incrementCounter("payment.success", {
+      shop,
+      subscriptionId: shopSubscription.id,
+      amount,
+      currency,
+    });
+
+    // --- Dunning State Machine: Reset on successful payment ---
+
+    // Check if there's an active dunning period that needs resetting
+    const metadata = shopSubscription.shop_subscription_metadata as Record<
+      string,
+      unknown
+    > | null;
+    const hasActiveDunning =
+      metadata?.dunningState || metadata?.dunningFailureCount;
+
+    if (hasActiveDunning) {
+      processSuccessfulPayment(); // Returns { reset: true }
+
+      // Clear dunning state from subscription metadata
+      await prisma.shop_subscriptions.update({
+        where: { id: shopSubscription.id },
+        data: {
+          shop_subscription_metadata: {
+            ...(metadata || {}),
+            dunningState: null,
+            dunningStartedAt: null,
+            dunningFailureCount: 0,
+            dunningUpdatedAt: null,
+            dunningResetAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      // If the shop was suspended due to payment failure, reactivate it
+      if (shopRecord) {
+        const shopData = await prisma.shops.findUnique({
+          where: { id: shopRecord.id },
+          select: { is_active: true, suspension_reason: true },
+        });
+
+        if (
+          !shopData?.is_active &&
+          shopData?.suspension_reason === "payment_failure"
+        ) {
+          logger.info(
+            {
+              shop,
+              shopId: shopRecord.id,
+              subscriptionId: shopSubscription.id,
+            },
+            "Reactivating shop after successful payment (dunning reset)",
+          );
+
+          await prisma.shops.update({
+            where: { id: shopRecord.id },
+            data: {
+              is_active: true,
+              suspension_reason: null,
+              suspended_at: null,
+            },
+          });
+
+          // Also reactivate the subscription
+          await prisma.shop_subscriptions.update({
+            where: { id: shopSubscription.id },
+            data: {
+              is_active: true,
+              status: "ACTIVE",
+            },
+          });
+
+          // Invalidate suspension cache
+          await invalidateSuspensionCache(shopRecord.id);
+
+          incrementCounter("payment.success.reactivation", {
+            shop,
+            subscriptionId: shopSubscription.id,
+          });
+        }
+      }
+
+      logger.info(
+        {
+          shop,
+          shopId: shopRecord.id,
+          subscriptionId: shopSubscription.id,
+        },
+        "Dunning state reset after successful payment",
+      );
+    }
 
     return json({ success: true });
   } catch (error) {

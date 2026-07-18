@@ -2,6 +2,12 @@
 cache_store = "${GORSE_CACHE_STORE}"
 data_store = "${GORSE_DATA_STORE}"
 
+[database.cluster]
+enable = true
+node_id = "master-0"
+raft_port = 6680
+raft_peer = "http://gorse-master:6680"
+
 [database.mysql]
 isolation_level = "READ-UNCOMMITTED"
 
@@ -86,14 +92,15 @@ negative_feedback_types = [
     "recommendation_declined_similar"
 ]
 
-positive_feedback_ttl = "4320h"
-item_ttl = "8760h"
+positive_feedback_ttl = 4320
+item_ttl = 8760
 
-[recommend.popular]
-popular_window = "168h"
+[[recommend.non-personalized]]
+name = "popular"
+score = "1"
 
 [recommend.collaborative]
-enable_index = true
+type = "mf"
 index_recall = 0.90
 index_fit_epoch = 200
 model_fit_period = "45m"
@@ -109,7 +116,7 @@ enable_model_size_search = true
 [recommend.ranker]
 type = "llm"
 cache_expire = "120h"
-recommenders = ["latest", "collaborative", "popular", "item-to-item/product_embedding"]
+recommenders = ["latest", "collaborative", "non-personalized/popular"]
 fit_period = "45m"
 fit_epoch = 100
 optimize_period = "360m"

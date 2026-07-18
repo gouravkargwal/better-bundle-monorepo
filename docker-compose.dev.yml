@@ -88,29 +88,6 @@ services:
         max-size: "5m"
         max-file: "2"
         labels: "service=kafka-ui,env=dev"
-
-  # ==================== KAFKA REST PROXY ====================
-  rest-proxy:
-    image: confluentinc/cp-kafka-rest:latest
-    depends_on:
-      - kafka_b
-    ports:
-      - "8082:8082"
-    hostname: rest-proxy
-    container_name: rest-proxy-dev
-    env_file:
-      - .env.dev
-    environment:
-      KAFKA_REST_HOST_NAME: rest-proxy
-      KAFKA_REST_BOOTSTRAP_SERVERS: "kafka_b:9093"
-      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "2"
-        labels: "service=rest-proxy,env=dev"
-
   # ==================== REDIS ====================
   redis:
     image: redis/redis-stack:7.2.0-v18
@@ -123,22 +100,6 @@ services:
       - redis_data:/data
     env_file:
       - .env.dev
-    command:
-      [
-        "redis-server",
-        "--requirepass",
-        "${REDIS_PASSWORD:-}",
-        "--appendonly",
-        "yes",
-        "--appendfsync",
-        "everysec",
-        "--maxmemory",
-        "256mb",
-        "--maxmemory-policy",
-        "allkeys-lru",
-        "--protected-mode",
-        "no",
-      ]
     logging:
       driver: json-file
       options:
@@ -194,8 +155,8 @@ services:
     env_file:
       - .env.dev
     command:
-      - -c
-      - /etc/gorse/config.toml
+      - --master-host=gorse-master
+      - --master-port=8086
       - --log-path
       - /var/log/gorse/server.log
       - --cache-path
@@ -226,8 +187,8 @@ services:
     env_file:
       - .env.dev
     command:
-      - -c
-      - /etc/gorse/config.toml
+      - --master-host=gorse-master
+      - --master-port=8086
       - --log-path
       - /var/log/gorse/worker.log
       - --cache-path
@@ -285,37 +246,36 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-
   # ── OpenObserve ──────────────────────────────────────
   openobserve:
     image: openobserve/openobserve:latest
     container_name: betterbundle-openobserve
+    env_file:
+      - .env.dev
     depends_on:
       minio:
         condition: service_healthy
     environment:
-      - ZO_ROOT_USER_EMAIL=admin@betterbundle.io
-      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_ADMIN_PASSWORD:-admin}
       - ZO_S3_BUCKET_NAME=betterbundle-observability
       - ZO_S3_REGION=us-east-1
       - ZO_S3_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - ZO_S3_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
       - ZO_S3_SERVER_URL=http://minio:9000
       - ZO_DATA_DIR=/data
-      - ZO_LOCAL_MODE=false
+      - ZO_LOCAL_MODE=true
       - ZO_TELEMETRY=false
     ports:
       - "5080:5080"
     volumes:
       - openobserve_data:/data
-    networks:
-      - betterbundle-network
     restart: unless-stopped
 
   # ── MinIO (S3-compatible storage for OpenObserve) ───
   minio:
     image: minio/minio:latest
     container_name: betterbundle-minio
+    env_file:
+      - .env.dev
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
@@ -325,8 +285,6 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-    networks:
-      - betterbundle-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -344,7 +302,3 @@ volumes:
   gorse_worker_cache:
   openobserve_data:
   minio_data:
-
-networks:
-  betterbundle-network:
-    driver: bridge

@@ -7,7 +7,7 @@ with recommendations across different extensions.
 
 import logging
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -36,8 +36,6 @@ from ..models.attribution_models import (
     AttributionMetrics,
 )
 from app.domains.ml.adapters.adapter_factory import InteractionEventAdapterFactory
-from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
-from app.core.database.models.enums import BillingPhase
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,6 @@ class AttributionEngine:
         """
         self.session = session
         self.adapter_factory = InteractionEventAdapterFactory()
-        self.commission_service = CommissionServiceV2(session)
         # ✅ INDUSTRY STANDARD: Configurable attribution windows
         self.attribution_windows = {
             "quick": timedelta(hours=24),  # Fast purchases (food, essentials)
@@ -167,11 +164,6 @@ class AttributionEngine:
                 attribution_id = await self._store_attribution_result(
                     result
                 )  # ✅ Store rejected
-                # ✅ FIX: Create commission for timing-adjusted attributions too
-                if attribution_id:
-                    await self._create_commission_for_attribution(
-                        attribution_id=attribution_id, shop_id=context.shop_id
-                    )
                 return result
 
             if not all_interactions:
@@ -242,15 +234,6 @@ class AttributionEngine:
                 f"${result.total_attributed_revenue} across {len(result.attribution_breakdown)} items"
             )
 
-            # ========================================
-            # 🆕 NEW: Step 6 - CREATE COMMISSION RECORD
-            # ========================================
-            # Store returns created attribution id (or existing one)
-            if attribution_id:
-                await self._create_commission_for_attribution(
-                    attribution_id=attribution_id, shop_id=context.shop_id
-                )
-
             return result
 
         except Exception as e:
@@ -258,149 +241,6 @@ class AttributionEngine:
                 f"Error calculating attribution for order {context.order_id}: {e}"
             )
             return self._create_error_attribution(context, str(e))
-
-    async def _create_commission_for_attribution(
-        self, attribution_id: str, shop_id: str
-    ) -> None:
-        """
-        Create commission record for a purchase attribution.
-        This is called automatically after attribution is created.
-
-        Args:
-            attribution_id: Purchase attribution ID
-            shop_id: Shop ID
-        """
-        try:
-            logger.info(f"💰 Creating commission for attribution {attribution_id}")
-
-            # Create commission record (handles both trial and paid phases)
-            commission = await self.commission_service.create_commission_record(
-                purchase_attribution_id=attribution_id, shop_id=shop_id
-            )
-
-            if not commission:
-                logger.error(
-                    f"❌ Failed to create commission for attribution {attribution_id}"
-                )
-                return
-
-            # Check if this is a newly created commission or existing one
-            # by checking if it was created very recently (within last 5 seconds)
-            from app.shared.helpers import now_utc
-
-            # Ensure both datetimes are timezone-aware for comparison
-            now = now_utc()
-            created_at = commission.created_at
-
-            # If created_at is timezone-naive, assume it's UTC
-            if created_at.tzinfo is None:
-                created_at = created_at.replace(tzinfo=timezone.utc)
-
-            time_diff = (now - created_at).total_seconds()
-
-            if time_diff < 5:  # Newly created
-                logger.info(
-                    f"✅ Commission created: ${commission.commission_earned} "
-                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
-                )
-            else:  # Existing commission
-                logger.info(
-                    f"✅ Commission found existing: ${commission.commission_earned} "
-                    f"(phase: {commission.billing_phase.value}, status: {commission.status.value})"
-                )
-
-            # Check if we need to handle trial threshold or cap limits
-            await self._handle_post_commission_checks(commission, shop_id)
-
-        except Exception as e:
-            logger.error(f"❌ Error creating commission: {e}")
-            # Don't fail the entire attribution if commission creation fails
-            # Commission can be created later via reconciliation
-
-    async def _handle_post_commission_checks(self, commission, shop_id: str) -> None:
-        """
-        Handle checks after commission is created:
-        - Trial threshold check
-        - Cap limit check
-        - Warnings
-
-        Design Principle:
-        - Always use billing cycle as source of truth for cap amount
-        - Commission.capped_amount is only for historical reference/reporting
-        - Check against the cycle's current_cap_amount (supports mid-cycle increases)
-
-        Args:
-            commission: Created commission record
-            shop_id: Shop ID
-        """
-        try:
-
-            if commission.billing_phase == BillingPhase.TRIAL:
-                # Check if trial threshold reached
-                logger.info(
-                    f"✅ Trial commission created: ${commission.commission_earned}"
-                )
-
-            elif commission.billing_phase == BillingPhase.PAID:
-                # ✅ DESIGN: Always fetch cap from billing cycle (single source of truth)
-                # Use commission.billing_cycle_id to get the cycle directly
-                from ..repositories.billing_repository_v2 import BillingRepositoryV2
-                from app.repository.BillingCycleRepository import BillingCycleRepository
-
-                async with get_session_context() as session:
-                    billing_cycle_repo = BillingCycleRepository(session)
-
-                    # Get the billing cycle this commission belongs to
-                    if not commission.billing_cycle_id:
-                        logger.warning(
-                            f"⚠️ Commission {commission.id} has no billing_cycle_id"
-                        )
-                        return
-
-                    billing_cycle = await billing_cycle_repo.get_by_id(
-                        commission.billing_cycle_id
-                    )
-
-                    if not billing_cycle:
-                        logger.warning(
-                            f"⚠️ Billing cycle {commission.billing_cycle_id} not found "
-                            f"for commission {commission.id}"
-                        )
-                        return
-
-                    # Use cycle's current_cap_amount (source of truth, supports mid-cycle updates)
-                    cap_amount = billing_cycle.current_cap_amount
-
-                    # Check usage percentage against current cap
-                    usage_percentage = commission.cycle_usage_after / cap_amount * 100
-
-                    # Warning at 75%
-                    if usage_percentage >= 75 and usage_percentage < 90:
-                        logger.warning(
-                            f"⚠️ Usage at {usage_percentage:.1f}% of cap for shop {shop_id} "
-                            f"(${commission.cycle_usage_after} / ${cap_amount})"
-                        )
-                        # TODO: Send notification to merchant
-
-                    # Urgent warning at 90%
-                    elif usage_percentage >= 90 and usage_percentage < 100:
-                        logger.warning(
-                            f"🚨 Usage at {usage_percentage:.1f}% of cap for shop {shop_id}! "
-                            f"Approaching limit (${commission.cycle_usage_after} / ${cap_amount})"
-                        )
-                        # TODO: Send urgent notification to merchant
-
-                    # Cap reached - log warning (suspension handled by billing service)
-                    elif usage_percentage >= 100:
-                        logger.error(
-                            f"🛑 Cap reached for shop {shop_id}! "
-                            f"${commission.cycle_usage_after} >= ${cap_amount}"
-                        )
-                        # Note: Service suspension will be handled by the billing service
-                        # when it processes the commission with CAPPED status
-
-        except Exception as e:
-            logger.error(f"❌ Error in post-commission checks: {e}")
 
     async def _get_relevant_interactions(
         self, context: AttributionContext, attribution_window: timedelta = None

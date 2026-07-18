@@ -54,8 +54,9 @@ export function BillingPage({
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
-                    planId: setupData.planId,
-                    currency: setupData.currency,
+                    planName: setupData.planName,
+                    monthlyFee: setupData.monthlyFee,
+                    trialDays: setupData.trialDays,
                   }),
                 });
 
@@ -96,10 +97,6 @@ export function BillingPage({
           <SubscriptionActive
             subscriptionData={billingState.subscriptionData!}
             shopCurrency={shopCurrency}
-            onIncreaseCap={async () => {
-              // Flat fee pricing — no cap to increase
-              return { success: false, error: "Not applicable for flat fee plans" };
-            }}
           />
         );
 

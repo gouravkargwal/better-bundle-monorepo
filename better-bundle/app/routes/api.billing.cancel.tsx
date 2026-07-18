@@ -4,18 +4,26 @@ import { json, type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import logger from "../utils/logger";
+import { incrementCounter } from "../services/metrics.service";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
+    logger.info({ shop }, "Billing cancellation started");
+
     const shopRecord = await prisma.shops.findUnique({
       where: { shop_domain: shop },
       select: { id: true },
     });
 
     if (!shopRecord) {
+      logger.warn({ shop }, "Billing cancellation failed: shop not found");
+      incrementCounter("billing.cancel.error", {
+        shop,
+        reason: "shop_not_found",
+      });
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
@@ -31,6 +39,14 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     if (!shopSubscription) {
+      logger.warn(
+        { shop },
+        "Billing cancellation failed: no active subscription",
+      );
+      incrementCounter("billing.cancel.validation_error", {
+        shop,
+        reason: "no_active_subscription",
+      });
       return json({
         success: false,
         error: "No active subscription found",
@@ -99,11 +115,10 @@ export async function action({ request }: ActionFunctionArgs) {
       logger.info({ shop }, "No Shopify subscription to cancel");
     }
 
-    // ✅ Clear user-chosen cap and update status since they're starting over
+    // ✅ Update subscription status since they're starting over
     await prisma.shop_subscriptions.update({
       where: { id: shopSubscription.id },
       data: {
-        user_chosen_cap_amount: null,
         shopify_status: "CANCELLED",
         status: "TRIAL_COMPLETED", // Reset to trial completed so they can set up again
         is_active: true, // Reactivate so they can set up billing again
@@ -113,6 +128,7 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     logger.info({ shop }, "Subscription cancelled successfully");
+    incrementCounter("billing.cancel.completed", { shop });
 
     return json({
       success: true,
@@ -120,10 +136,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
   } catch (error) {
     logger.error({ error, shop }, "Error cancelling subscription");
+    incrementCounter("billing.cancel.error", { shop, reason: "exception" });
     return json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: "An internal error occurred. Please try again later.",
       },
       { status: 500 },
     );

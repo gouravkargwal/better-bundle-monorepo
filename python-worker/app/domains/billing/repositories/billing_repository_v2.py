@@ -19,10 +19,8 @@ from app.shared.helpers import now_utc
 from app.core.database.models import (
     Shop,
     SubscriptionPlan,
-    PricingTier,
     ShopSubscription,
     BillingCycle,
-    CommissionRecord,
     SubscriptionStatus,
     BillingCycleStatus,
     SubscriptionType,
@@ -95,92 +93,12 @@ class BillingRepositoryV2:
             logger.error(f"Error getting subscription plan {plan_id}: {e}")
             return None
 
-    # ============= PRICING TIER OPERATIONS =============
-
-    async def get_pricing_tier_for_plan_and_currency(
-        self, plan_id: str, currency: str
-    ) -> Optional[PricingTier]:
-        """Get pricing tier for a plan and currency"""
-        try:
-            query = (
-                select(PricingTier)
-                .where(
-                    and_(
-                        PricingTier.subscription_plan_id == plan_id,
-                        PricingTier.currency == currency,
-                        PricingTier.is_active == True,
-                    )
-                )
-                .order_by(PricingTier.is_default.desc(), PricingTier.created_at.desc())
-            )
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(
-                f"Error getting pricing tier for plan {plan_id} and currency {currency}: {e}"
-            )
-            return None
-
-    async def get_pricing_tier_for_country(
-        self, country_code: str, plan_id: str
-    ) -> Optional[PricingTier]:
-        """Get appropriate pricing tier based on country code"""
-        # Map country codes to currencies
-        currency_map = {
-            "US": "USD",
-            "CA": "CAD",
-            "GB": "GBP",
-            "DE": "EUR",
-            "FR": "EUR",
-            "IN": "INR",
-            "JP": "JPY",
-            "AU": "AUD",
-            "BR": "BRL",
-            "MX": "MXN",
-            "KR": "KRW",
-            "CN": "CNY",
-            "CH": "CHF",
-            "SE": "SEK",
-            "NO": "NOK",
-            "DK": "DKK",
-            "PL": "PLN",
-            "CZ": "CZK",
-            "HU": "HUF",
-            "ZA": "ZAR",
-            "TR": "TRY",
-            "VN": "VND",
-            "ID": "IDR",
-            "PH": "PHP",
-            "TH": "THB",
-            "MY": "MYR",
-            "SG": "SGD",
-            "BD": "BDT",
-            "PK": "PKR",
-            "LK": "LKR",
-            "NP": "NPR",
-        }
-
-        currency = currency_map.get(country_code, "USD")  # Default to USD
-        return await self.get_pricing_tier_for_plan_and_currency(plan_id, currency)
-
-    async def get_pricing_tier(self, pricing_tier_id: str) -> Optional[PricingTier]:
-        """Get pricing tier by ID"""
-        try:
-            query = select(PricingTier).where(PricingTier.id == pricing_tier_id)
-            result = await self.session.execute(query)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            logger.error(f"Error getting pricing tier {pricing_tier_id}: {e}")
-            return None
-
     # ============= UNIFIED SHOP SUBSCRIPTION OPERATIONS =============
 
     async def create_trial_subscription(
         self,
         shop_id: str,
         subscription_plan_id: str,
-        pricing_tier_id: str,
-        trial_threshold_override: Optional[Decimal] = None,
     ) -> Optional[ShopSubscription]:
         """Create a new trial subscription"""
         try:
@@ -189,8 +107,6 @@ class BillingRepositoryV2:
                 subscription_type=SubscriptionType.TRIAL,
                 status=SubscriptionStatus.ACTIVE,
                 subscription_plan_id=subscription_plan_id,
-                pricing_tier_id=pricing_tier_id,
-                trial_threshold_override=trial_threshold_override,
                 started_at=now_utc(),
                 is_active=True,
             )
@@ -212,8 +128,6 @@ class BillingRepositoryV2:
         self,
         shop_id: str,
         subscription_plan_id: str,
-        pricing_tier_id: str,
-        user_chosen_cap_amount: Decimal,
         shopify_subscription_id: str,
         shopify_line_item_id: Optional[str] = None,
         confirmation_url: Optional[str] = None,
@@ -244,8 +158,6 @@ class BillingRepositoryV2:
                 subscription_type=SubscriptionType.PAID,
                 status=SubscriptionStatus.ACTIVE,
                 subscription_plan_id=subscription_plan_id,
-                pricing_tier_id=pricing_tier_id,
-                user_chosen_cap_amount=user_chosen_cap_amount,
                 shopify_subscription_id=shopify_subscription_id,
                 shopify_line_item_id=shopify_line_item_id,
                 confirmation_url=confirmation_url,
@@ -272,8 +184,7 @@ class BillingRepositoryV2:
             query = (
                 select(ShopSubscription)
                 .options(
-                    # Load whatever relationships effective_commission_rate needs
-                    selectinload(ShopSubscription.pricing_tier),
+                    selectinload(ShopSubscription.subscription_plan),
                     joinedload(ShopSubscription.shop),  # if needed
                 )
                 .where(ShopSubscription.shop_id == shop_id)
@@ -294,7 +205,6 @@ class BillingRepositoryV2:
             .where(ShopSubscription.id == subscription_id)
             .options(
                 selectinload(ShopSubscription.subscription_plan),
-                selectinload(ShopSubscription.pricing_tier),
             )
         )
         result = await self.session.execute(query)
@@ -311,111 +221,6 @@ class BillingRepositoryV2:
         )
         result = await self.session.execute(query)
         return result.rowcount > 0
-
-    async def complete_trial_subscription(
-        self, shop_id: str, actual_revenue: Decimal
-    ) -> bool:
-        """Complete trial subscription atomically"""
-        try:
-            # Get current trial subscription
-            trial_subscription = await self.session.execute(
-                select(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.status
-                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Check for TRIAL status, not ACTIVE
-                        ShopSubscription.is_active == True,
-                    )
-                )
-                .options(selectinload(ShopSubscription.pricing_tier))
-            )
-            subscription = trial_subscription.scalar_one_or_none()
-
-            if not subscription:
-                logger.debug(f"No active trial found for shop {shop_id}")
-                return False
-
-            # Check if threshold reached
-            threshold = subscription.effective_trial_threshold
-            if actual_revenue < threshold:
-                logger.debug(
-                    f"Trial threshold not reached: {actual_revenue} < {threshold}"
-                )
-                return False
-
-            # ✅ ATOMIC: Update trial subscription
-            update_result = await self.session.execute(
-                update(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.id == subscription.id,
-                        ShopSubscription.status
-                        == SubscriptionStatus.TRIAL,  # ✅ FIX: Only update if still in TRIAL status
-                    )
-                )
-                .values(
-                    status=SubscriptionStatus.TRIAL_COMPLETED,  # ✅ FIX: Set to TRIAL_COMPLETED, not COMPLETED
-                    completed_at=now_utc(),
-                    updated_at=now_utc(),
-                )
-            )
-
-            # Check if update happened (race condition protection)
-            if update_result.rowcount == 0:
-                logger.debug(
-                    f"Trial {subscription.id} was already completed by another process"
-                )
-                return True
-
-            # ✅ Do NOT deactivate or suspend the shop on trial completion
-            logger.info(
-                f"✅ Trial completed for shop {shop_id}. "
-                f"Revenue: {actual_revenue} >= {threshold} {subscription.currency}. "
-                f"Awaiting user billing setup."
-            )
-
-            await self.session.flush()
-            return True
-
-        except Exception as e:
-            logger.error(f"Error completing trial subscription: {e}")
-            return False
-
-    # ============= TRIAL OPERATIONS (SIMPLIFIED) =============
-
-    async def check_trial_completion(
-        self, shop_id: str, actual_revenue: Decimal
-    ) -> bool:
-        """Check if trial should be completed based on actual revenue - IDEMPOTENT"""
-        try:
-            subscription = await self.get_shop_subscription(shop_id)
-            if not subscription:
-                return False
-
-            # ✅ GUARD: Only check for trial subscriptions
-            if not subscription.subscription_type == SubscriptionType.TRIAL:
-                logger.debug(
-                    f"Subscription {subscription.id} is not a trial, skipping completion check"
-                )
-                return True
-
-            # ✅ GUARD: Check if already completed
-            if (
-                subscription.status != SubscriptionStatus.TRIAL
-            ):  # ✅ FIX: Check for TRIAL status, not ACTIVE
-                logger.debug(
-                    f"Trial {subscription.id} already completed (status: {subscription.status})"
-                )
-                return True
-
-            # Check and complete if threshold reached
-            return await self.complete_trial_subscription(shop_id, actual_revenue)
-
-        except Exception as e:
-            logger.error(f"Error checking trial completion: {e}")
-            return False
 
     # ============= BILLING CYCLE OPERATIONS =============
     # (Keep existing billing cycle methods unchanged)
@@ -482,54 +287,12 @@ class BillingRepositoryV2:
             logger.error(f"Error updating billing cycle usage: {e}")
             return False
 
-    # ============= COMMISSION OPERATIONS =============
-    # (Keep existing commission methods unchanged)
-
-    async def get_commissions_for_cycle(
-        self, billing_cycle_id: str, limit: int = 100
-    ) -> List[CommissionRecord]:
-        """Get commission records for a billing cycle"""
-        try:
-            query = (
-                select(CommissionRecord)
-                .where(CommissionRecord.billing_cycle_id == billing_cycle_id)
-                .order_by(CommissionRecord.created_at.desc())
-                .limit(limit)
-            )
-            result = await self.session.execute(query)
-            return list(result.scalars().all())
-        except Exception as e:
-            logger.error(f"Error getting commissions for cycle: {e}")
-            return []
-
-    async def calculate_trial_revenue(self, shop_id: str) -> Decimal:
-        """Calculate total trial revenue from commission records"""
-        try:
-            # ✅ IMPORTANT: Only count revenue from TRIAL phase commissions
-            # This prevents double-counting during recalculation
-            query = select(
-                func.coalesce(func.sum(CommissionRecord.attributed_revenue), 0)
-            ).where(
-                and_(
-                    CommissionRecord.shop_id == shop_id,
-                    CommissionRecord.billing_phase == BillingPhase.TRIAL,
-                )
-            )
-
-            result = await self.session.execute(query)
-            return Decimal(str(result.scalar_one()))
-
-        except Exception as e:
-            logger.error(f"Error calculating trial revenue: {e}")
-            return Decimal("0")
-
     # ============= FLAT FEE OPERATIONS (NEW) =============
 
     async def create_flat_fee_subscription(
         self,
         shop_id: str,
         subscription_plan_id: str,
-        pricing_tier_id: str,
         shopify_subscription_id: str,
         shopify_line_item_id: Optional[str] = None,
         confirmation_url: Optional[str] = None,
@@ -566,7 +329,6 @@ class BillingRepositoryV2:
                 subscription_type=SubscriptionType.PAID,
                 status=SubscriptionStatus.ACTIVE,
                 subscription_plan_id=subscription_plan_id,
-                pricing_tier_id=pricing_tier_id,
                 monthly_fee_override=monthly_fee_override,
                 shopify_subscription_id=shopify_subscription_id,
                 shopify_line_item_id=shopify_line_item_id,
@@ -589,9 +351,7 @@ class BillingRepositoryV2:
             await self.session.rollback()
             return None
 
-    async def check_trial_expiry_by_time(
-        self, shop_id: str
-    ) -> bool:
+    async def check_trial_expiry_by_time(self, shop_id: str) -> bool:
         """
         Check if trial has expired based on time (not revenue).
         Marks trial as TRIAL_COMPLETED if trial_duration_days have passed.
@@ -607,7 +367,7 @@ class BillingRepositoryV2:
                         ShopSubscription.is_active == True,
                     )
                 )
-                .options(selectinload(ShopSubscription.pricing_tier))
+                .options(selectinload(ShopSubscription.subscription_plan))
             )
             result = await self.session.execute(query)
             subscription = result.scalar_one_or_none()
@@ -615,7 +375,7 @@ class BillingRepositoryV2:
             if not subscription or not subscription.started_at:
                 return False
 
-            trial_days = subscription.effective_trial_days
+            trial_days = subscription.subscription_plan.trial_days
             trial_end = subscription.started_at + timedelta(days=trial_days)
 
             if now_utc() < trial_end:

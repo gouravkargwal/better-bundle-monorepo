@@ -16,6 +16,7 @@ export type BillingStatus =
   | "trial_expired"
   | "subscription_pending"
   | "subscription_active"
+  | "subscription_suspended"
   | "subscription_cancelled";
 
 export interface TrialData {
@@ -47,8 +48,9 @@ export interface BillingError {
 }
 
 export interface BillingSetupData {
-  planId: string;
-  currency: string;
+  planName: string;
+  monthlyFee: number;
+  trialDays: number;
 }
 
 export interface BillingMetrics {

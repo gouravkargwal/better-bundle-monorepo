@@ -60,8 +60,6 @@ services:
     container_name: betterbundle-postgres
     env_file:
       - .env.prod
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -109,9 +107,9 @@ services:
       - -c
       - |
         if [ -n "$$REDIS_PASSWORD" ]; then
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode no --requirepass "$$REDIS_PASSWORD" --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode yes --requirepass "$$REDIS_PASSWORD" --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         else
-          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode no --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
+          exec redis-server --appendonly yes --appendfsync everysec --maxmemory 384mb --maxmemory-policy allkeys-lru --protected-mode yes --loadmodule /opt/redis-stack/lib/redisearch.so --loadmodule /opt/redis-stack/lib/rejson.so --loadmodule /opt/redis-stack/lib/redistimeseries.so
         fi
     healthcheck:
       test:
@@ -162,7 +160,7 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_NUM_PARTITIONS: 4
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_LOG_RETENTION_HOURS: 168
@@ -230,46 +228,6 @@ services:
         reservations:
           cpus: "0.25"
           memory: 256M
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  rest-proxy:
-    image: confluentinc/cp-kafka-rest:latest
-    env_file:
-      - .env.prod
-    depends_on:
-      kafka:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:8082:8082"
-    hostname: rest-proxy
-    container_name: betterbundle-rest-proxy
-    environment:
-      KAFKA_REST_HOST_NAME: rest-proxy
-      KAFKA_REST_BOOTSTRAP_SERVERS: "kafka:29092"
-      KAFKA_REST_LISTENERS: "http://0.0.0.0:8082"
-      KAFKAREST_HEAP_OPTS: "-Xms128m -Xmx256m"
-    networks:
-      - backend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 384M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -441,12 +399,6 @@ services:
       gorse-master:
         condition: service_started
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
     deploy:
       resources:
         limits:

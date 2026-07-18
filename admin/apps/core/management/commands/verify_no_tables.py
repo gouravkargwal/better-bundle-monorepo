@@ -23,7 +23,9 @@ class Command(BaseCommand):
                 )
             )
         else:
-            self.stdout.write(self.style.WARNING("⚠️  MIGRATION_MODULES not configured"))
+            self.stdout.write(
+                self.style.WARNING("⚠️  MIGRATION_MODULES not configured")
+            )
 
         # Check if database routers are configured
         if hasattr(settings, "DATABASE_ROUTERS") and settings.DATABASE_ROUTERS:
@@ -44,18 +46,16 @@ class Command(BaseCommand):
                 )
 
                 # Check if tables exist (should be created by Python worker)
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'public' 
                     AND table_name IN ('shops', 'order_data', 'product_data', 'customer_data', 
-                                      'subscription_plans', 'pricing_tiers', 'shop_subscriptions', 
+                                      'subscription_plans', 'shop_subscriptions', 
                                       'billing_cycles', 'billing_invoices', 'commission_records', 
                                       'purchase_attributions')
                     ORDER BY table_name
-                """
-                )
+                """)
 
                 tables = cursor.fetchall()
 

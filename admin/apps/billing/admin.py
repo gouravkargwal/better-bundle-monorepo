@@ -11,7 +11,6 @@ from datetime import timedelta
 from decimal import Decimal
 from .models import (
     SubscriptionPlan,
-    PricingTier,
     ShopSubscription,
     BillingCycle,
     BillingInvoice,
@@ -32,66 +31,6 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     search_fields = ["name", "description"]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["name"]
-
-
-@admin.register(PricingTier)
-class PricingTierAdmin(admin.ModelAdmin):
-    list_display = [
-        "subscription_plan",
-        "currency",
-        "pricing_model_display",
-        "monthly_fee",
-        "trial_days",
-        "commission_rate",
-        "trial_threshold_amount",
-        "is_active",
-        "is_default",
-        "effective_from",
-    ]
-    list_filter = [
-        "currency", "is_active", "is_default", "subscription_plan",
-    ]
-    search_fields = ["subscription_plan__name", "currency"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    ordering = ["subscription_plan", "currency"]
-    fieldsets = [
-        ("Basic Info", {
-            "fields": ["subscription_plan", "currency", "is_active", "is_default"],
-        }),
-        ("Flat Fee Pricing", {
-            "classes": ["wide"],
-            "fields": ["monthly_fee", "trial_days"],
-            "description": "For flat fee plans: monthly fee and trial duration in days",
-        }),
-        ("Legacy Usage-Based Pricing", {
-            "classes": ["collapse"],
-            "fields": ["commission_rate", "trial_threshold_amount"],
-            "description": "Legacy fields for usage-based billing (historical data)",
-        }),
-        ("Configuration", {
-            "fields": ["minimum_charge", "proration_enabled", "tier_metadata"],
-        }),
-        ("Time Settings", {
-            "fields": ["effective_from", "effective_to"],
-        }),
-    ]
-
-    def pricing_model_display(self, obj):
-        """Show pricing model with colored badge"""
-        if obj.is_flat_fee:
-            return format_html(
-                '<span style="background: #DCFCE7; color: #166534; padding: 2px 8px; '
-                'border-radius: 4px; font-weight: 500;">Flat Fee</span>'
-            )
-        return format_html(
-            '<span style="background: #FEF3C7; color: #92400E; padding: 2px 8px; '
-            'border-radius: 4px; font-weight: 500;">Usage-Based</span>'
-        )
-
-    pricing_model_display.short_description = "Model"
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related("subscription_plan")
 
 
 @admin.register(ShopSubscription)
@@ -115,37 +54,49 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
     actions = ["sync_from_shopify_and_fix"]
 
     fieldsets = [
-        ("Shop & Plan", {
-            "fields": ["shop", "subscription_plan", "pricing_tier"],
-        }),
-        ("Status", {
-            "fields": ["status", "is_active", "auto_renew"],
-        }),
-        ("Dates", {
-            "fields": ["start_date", "end_date", "activated_at", "suspended_at", "cancelled_at"],
-        }),
-        ("Flat Fee Settings", {
-            "classes": ["wide"],
-            "fields": ["monthly_fee_override", "trial_duration_days"],
-            "description": "Override pricing tier defaults for this specific shop",
-        }),
-        ("Legacy Usage-Based Settings", {
-            "classes": ["collapse"],
-            "fields": ["user_chosen_cap_amount"],
-            "description": "Legacy field for usage-based billing cap (historical data)",
-        }),
-        ("Metadata", {
-            "fields": ["subscription_metadata"],
-        }),
+        (
+            "Shop & Plan",
+            {
+                "fields": ["shop", "subscription_plan"],
+            },
+        ),
+        (
+            "Status",
+            {
+                "fields": ["status", "is_active", "auto_renew"],
+            },
+        ),
+        (
+            "Dates",
+            {
+                "fields": [
+                    "start_date",
+                    "end_date",
+                    "activated_at",
+                    "suspended_at",
+                    "cancelled_at",
+                ],
+            },
+        ),
+        (
+            "Flat Fee Settings",
+            {
+                "classes": ["wide"],
+                "fields": ["monthly_fee_override", "trial_duration_days"],
+                "description": "Override plan defaults for this specific shop",
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["subscription_metadata"],
+            },
+        ),
     ]
 
     def get_queryset(self, request):
         """Override to show subscriptions with proper eager loading"""
-        qs = (
-            super()
-            .get_queryset(request)
-            .select_related("shop", "subscription_plan", "pricing_tier")
-        )
+        qs = super().get_queryset(request).select_related("shop", "subscription_plan")
         return qs
 
     def pricing_type_display(self, obj):
@@ -163,7 +114,7 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
     pricing_type_display.short_description = "Type"
 
     def effective_fee_display(self, obj):
-        """Show effective monthly fee or legacy cap"""
+        """Show effective monthly fee"""
         if obj.is_flat_fee:
             fee = obj.effective_monthly_fee
             if fee:
@@ -172,12 +123,6 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
                     f"{fee:.2f}" if isinstance(fee, Decimal) else fee,
                 )
             return "—"
-        # Legacy usage-based: show cap
-        if obj.user_chosen_cap_amount:
-            return format_html(
-                '<span style="color: #92400E;">Cap: ${}</span>',
-                obj.user_chosen_cap_amount,
-            )
         return "—"
 
     effective_fee_display.short_description = "Fee / Cap"
@@ -196,16 +141,16 @@ class ShopSubscriptionAdmin(admin.ModelAdmin):
             elif remaining <= 3:
                 return format_html(
                     '<span style="color: #D97706; font-weight: 600;">{}d / {}d ⚠️</span>',
-                    remaining, total,
+                    remaining,
+                    total,
                 )
             return format_html(
                 '<span style="color: #059669;">{}d / {}d</span>',
-                remaining, total,
+                remaining,
+                total,
             )
         # Legacy trial: show revenue-based status
-        return format_html(
-            '<span style="color: #6B7280;">Revenue-based</span>'
-        )
+        return format_html('<span style="color: #6B7280;">Revenue-based</span>')
 
     trial_status_display.short_description = "Trial Days"
 
@@ -347,25 +292,51 @@ class BillingCycleAdmin(admin.ModelAdmin):
     ordering = ["-start_date"]
 
     fieldsets = [
-        ("Basic Info", {
-            "fields": ["shop_subscription", "cycle_number", "status"],
-        }),
-        ("Dates", {
-            "fields": ["start_date", "end_date", "activated_at", "completed_at", "cancelled_at"],
-        }),
-        ("Flat Fee", {
-            "classes": ["wide"],
-            "fields": ["period_fee"],
-            "description": "For flat fee cycles: the flat fee charged for this period",
-        }),
-        ("Legacy Usage-Based", {
-            "classes": ["collapse"],
-            "fields": ["initial_cap_amount", "current_cap_amount", "usage_amount", "commission_count"],
-            "description": "Legacy fields for usage-based billing cycles (historical data)",
-        }),
-        ("Metadata", {
-            "fields": ["cycle_metadata"],
-        }),
+        (
+            "Basic Info",
+            {
+                "fields": ["shop_subscription", "cycle_number", "status"],
+            },
+        ),
+        (
+            "Dates",
+            {
+                "fields": [
+                    "start_date",
+                    "end_date",
+                    "activated_at",
+                    "completed_at",
+                    "cancelled_at",
+                ],
+            },
+        ),
+        (
+            "Flat Fee",
+            {
+                "classes": ["wide"],
+                "fields": ["period_fee"],
+                "description": "For flat fee cycles: the flat fee charged for this period",
+            },
+        ),
+        (
+            "Legacy Usage-Based",
+            {
+                "classes": ["collapse"],
+                "fields": [
+                    "initial_cap_amount",
+                    "current_cap_amount",
+                    "usage_amount",
+                    "commission_count",
+                ],
+                "description": "Legacy fields for usage-based billing cycles (historical data)",
+            },
+        ),
+        (
+            "Metadata",
+            {
+                "fields": ["cycle_metadata"],
+            },
+        ),
     ]
 
     def cycle_type_display(self, obj):
@@ -385,9 +356,7 @@ class BillingCycleAdmin(admin.ModelAdmin):
     def usage_percentage_display(self, obj):
         """Display usage percentage with color coding (legacy only)"""
         if obj.is_flat_fee_cycle:
-            return format_html(
-                '<span style="color: #9CA3AF;">N/A</span>'
-            )
+            return format_html('<span style="color: #9CA3AF;">N/A</span>')
         percentage = obj.usage_percentage
         color = "red" if percentage > 90 else "orange" if percentage > 75 else "green"
         return format_html('<span style="color: {};">{:.1f}%</span>', color, percentage)

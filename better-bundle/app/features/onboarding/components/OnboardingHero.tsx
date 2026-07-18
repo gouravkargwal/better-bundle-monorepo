@@ -7,7 +7,7 @@ import { Form } from "@remix-run/react";
 interface OnboardingHeroProps {
   isLoading: boolean;
   error?: OnboardingError;
-  pricingTier?: {
+  subscriptionPlan?: {
     symbol: string;
     monthly_fee: number;
     trial_days: number;
@@ -18,12 +18,12 @@ interface OnboardingHeroProps {
 export function OnboardingHero({
   isLoading,
   error,
-  pricingTier,
+  subscriptionPlan,
 }: OnboardingHeroProps) {
-  const monthlyFee = pricingTier?.monthly_fee ?? 29;
-  const trialDays = pricingTier?.trial_days ?? 14;
-  const currencySymbol = pricingTier?.symbol ?? "$";
-  const planName = pricingTier?.plan_name ?? "Pro";
+  const monthlyFee = subscriptionPlan?.monthly_fee ?? 29;
+  const trialDays = subscriptionPlan?.trial_days ?? 14;
+  const currencySymbol = subscriptionPlan?.symbol ?? "$";
+  const planName = subscriptionPlan?.plan_name ?? "Pro";
 
   return (
     <div
@@ -138,7 +138,8 @@ export function OnboardingHero({
               variant="bodyLg"
               style={{ color: "rgba(255,255,255,0.9)" }}
             >
-              {currencySymbol}{monthlyFee}/month After Trial
+              {currencySymbol}
+              {monthlyFee}/month After Trial
             </Text>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -211,7 +212,9 @@ export function OnboardingHero({
               marginBottom: "20px",
             }}
           >
-            {currencySymbol}{monthlyFee}/month • {trialDays}-day free trial • No hidden fees • Cancel anytime
+            {currencySymbol}
+            {monthlyFee}/month • {trialDays}-day free trial • No hidden fees •
+            Cancel anytime
           </Text>
 
           <Badge

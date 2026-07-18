@@ -244,17 +244,30 @@ class Migration(migrations.Migration):
                 ("end_date", models.DateTimeField()),
                 (
                     "initial_cap_amount",
-                    models.DecimalField(decimal_places=2, max_digits=10),
+                    models.DecimalField(
+                        decimal_places=2, max_digits=10, null=True, blank=True
+                    ),
                 ),
                 (
                     "current_cap_amount",
-                    models.DecimalField(decimal_places=2, max_digits=10),
+                    models.DecimalField(
+                        decimal_places=2, max_digits=10, null=True, blank=True
+                    ),
                 ),
                 (
                     "usage_amount",
-                    models.DecimalField(decimal_places=2, default=0, max_digits=10),
+                    models.DecimalField(
+                        decimal_places=2,
+                        default=0,
+                        max_digits=10,
+                        null=True,
+                        blank=True,
+                    ),
                 ),
-                ("commission_count", models.IntegerField(default=0)),
+                (
+                    "commission_count",
+                    models.IntegerField(default=0, null=True, blank=True),
+                ),
                 (
                     "status",
                     models.CharField(

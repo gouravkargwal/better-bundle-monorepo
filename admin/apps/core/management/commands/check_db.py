@@ -27,18 +27,16 @@ class Command(BaseCommand):
                 )
 
                 # Check if tables exist (created by Python worker)
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'public' 
                     AND table_name IN ('shops', 'order_data', 'product_data', 'customer_data', 
-                                      'subscription_plans', 'pricing_tiers', 'shop_subscriptions', 
-                                      'billing_cycles', 'billing_invoices', 'commission_records', 
+                                      'subscription_plans', 'shop_subscriptions', 
+                                      'billing_cycles', 'billing_invoices', 
                                       'purchase_attributions')
                     ORDER BY table_name
-                """
-                )
+                """)
 
                 tables = cursor.fetchall()
 
@@ -56,15 +54,13 @@ class Command(BaseCommand):
                     )
 
                 # Check Django auth tables
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT table_name 
                     FROM information_schema.tables 
                     WHERE table_schema = 'public' 
                     AND table_name LIKE 'auth_%'
                     ORDER BY table_name
-                """
-                )
+                """)
 
                 auth_tables = cursor.fetchall()
 

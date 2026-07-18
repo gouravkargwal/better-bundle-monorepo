@@ -54,12 +54,6 @@ openobserve:
     ZO_DATA_DIR: /data
     ZO_DATA_WAL_DIR: /data/wal
   restart: unless-stopped
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:5080/health"]
-    interval: 30s
-    timeout: 10s
-    retries: 5
-    start_period: 30s
   logging:
     driver: json-file
     options:
@@ -84,11 +78,6 @@ minio:
     MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
   command: server /data --console-address ":9001"
-  healthcheck:
-    test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
 ```
 
 #### Add volumes

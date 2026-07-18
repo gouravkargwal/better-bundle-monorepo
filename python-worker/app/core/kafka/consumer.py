@@ -83,7 +83,6 @@ class KafkaConsumer:
             self._is_initialized = False
             raise
 
-    @async_trace_func()
     async def consume(self, timeout_ms: int = 1000) -> AsyncIterator[Dict[str, Any]]:
         """Consume messages with industry-standard error handling"""
         if not self._consumer:
