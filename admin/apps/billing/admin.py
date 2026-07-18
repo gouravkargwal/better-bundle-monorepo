@@ -22,8 +22,12 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     list_display = [
         "name",
         "plan_type",
+        "monthly_fee",
+        "discount_percentage",
+        "effective_monthly_fee_display",
         "is_active",
         "is_default",
+        "trial_days",
         "effective_from",
         "effective_to",
     ]
@@ -31,6 +35,17 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
     search_fields = ["name", "description"]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["name"]
+
+    def effective_monthly_fee_display(self, obj):
+        """Show effective monthly fee after discount"""
+        if not obj.monthly_fee:
+            return "—"
+        fee = Decimal(obj.monthly_fee)
+        if obj.discount_percentage:
+            fee = fee * (1 - Decimal(obj.discount_percentage) / 100)
+        return f"${fee:.2f}"
+
+    effective_monthly_fee_display.short_description = "Effective Fee"
 
 
 @admin.register(ShopSubscription)

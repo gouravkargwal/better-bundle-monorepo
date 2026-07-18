@@ -33,10 +33,17 @@ class SubscriptionPlan(BaseModel):
         decimal_places=2,
         null=True,
         blank=True,
-        help_text="Flat monthly fee for the plan",
+        help_text="Full monthly fee for the plan (before any discount)",
     )
     trial_days = models.IntegerField(
         null=True, blank=True, help_text="Number of days for free trial"
+    )
+    discount_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Promotional discount percentage applied to monthly_fee (e.g. 50.00 = 50% off)",
     )
     plan_metadata = models.TextField(null=True, blank=True)
     effective_from = models.DateTimeField()
@@ -120,12 +127,17 @@ class ShopSubscription(BaseModel):
 
     @property
     def effective_monthly_fee(self):
-        """Return the effective monthly fee (override > plan default)"""
+        """Return the effective monthly fee (override > plan fee after discount)"""
         if self.monthly_fee_override:
             return self.monthly_fee_override
         if self.subscription_plan and self.subscription_plan.monthly_fee:
-            return self.subscription_plan.monthly_fee
-        return 0
+            fee = Decimal(str(self.subscription_plan.monthly_fee))
+            if self.subscription_plan.discount_percentage:
+                fee = fee * (
+                    1 - Decimal(str(self.subscription_plan.discount_percentage)) / 100
+                )
+            return fee
+        return Decimal("149.50")  # Default: $299 with 50% discount
 
     @property
     def effective_trial_days(self):

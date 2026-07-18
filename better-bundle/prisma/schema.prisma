@@ -29,7 +29,6 @@ model billing_cycles {
   shop_subscriptions   shop_subscriptions        @relation(fields: [shop_subscription_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([shop_subscription_id, status], map: "ix_billing_cycle_unique_active")
-  @@unique([shop_subscription_id, cycle_number], map: "uq_billing_cycles_subscription_cycle")
   @@index([shop_subscription_id, status], map: "ix_billing_cycle_active")
   @@index([start_date, end_date], map: "ix_billing_cycle_dates")
   @@index([cycle_number], map: "ix_billing_cycle_number")
@@ -612,6 +611,7 @@ model sessions {
   @@index([shop], map: "ix_sessions_shop")
 }
 
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model shop_subscriptions {
   subscription_type          subscription_type_enum
   status                     subscription_status_enum
@@ -638,14 +638,14 @@ model shop_subscriptions {
   subscription_plans         subscription_plans       @relation(fields: [subscription_plan_id], references: [id], onUpdate: NoAction)
 
   @@index([cancelled_at], map: "ix_shop_subscriptions_cancelled_at")
-  @@index([is_active], map: "ix_shop_subscriptions_is_active")
-  @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
-  @@index([status], map: "ix_shop_subscriptions_status")
-  @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
   @@index([completed_at], map: "ix_shop_subscriptions_completed_at")
   @@index([expires_at], map: "ix_shop_subscriptions_expires_at")
+  @@index([is_active], map: "ix_shop_subscriptions_is_active")
+  @@index([shop_id], map: "ix_shop_subscriptions_shop_id")
   @@index([shopify_subscription_id], map: "ix_shop_subscriptions_shopify_subscription_id")
   @@index([started_at], map: "ix_shop_subscriptions_started_at")
+  @@index([status], map: "ix_shop_subscriptions_status")
+  @@index([subscription_plan_id], map: "ix_shop_subscriptions_subscription_plan_id")
   @@index([subscription_type], map: "ix_shop_subscriptions_subscription_type")
 }
 
@@ -653,7 +653,6 @@ model shops {
   shop_domain                String                       @unique(map: "shop_domain_unique") @db.VarChar(255)
   custom_domain              String?                      @db.VarChar(255)
   access_token               String                       @db.VarChar(1000)
-  /// @deprecated Use `shop_subscriptions.subscription_plan.plan_type` instead. This column is scheduled for removal in Phase 4.
   plan_type                  String                       @db.VarChar(50)
   currency_code              String?                      @db.VarChar(10)
   money_format               String?                      @db.VarChar(100)
@@ -698,21 +697,23 @@ model shops {
   @@index([shopify_plus], map: "ix_shops_shopify_plus")
 }
 
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model subscription_plans {
-  name               String                      @unique(map: "ix_subscription_plans_name") @db.VarChar(100)
-  description        String?
-  plan_type          subscription_plan_type_enum
-  is_active          Boolean
-  is_default         Boolean
-  monthly_fee        Decimal?                    @db.Decimal(10, 2)
-  trial_days         Int?
-  plan_metadata      String?
-  effective_from     DateTime                    @db.Timestamptz(6)
-  effective_to       DateTime?                   @db.Timestamptz(6)
-  id                 String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
-  created_at         DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  updated_at         DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
-  shop_subscriptions shop_subscriptions[]
+  name                String                      @unique(map: "ix_subscription_plans_name") @db.VarChar(100)
+  description         String?
+  plan_type           subscription_plan_type_enum
+  is_active           Boolean
+  is_default          Boolean
+  monthly_fee         Decimal?                    @db.Decimal(10, 2)
+  trial_days          Int?
+  discount_percentage Decimal?                    @db.Decimal(5, 2)
+  plan_metadata       String?
+  effective_from      DateTime                    @db.Timestamptz(6)
+  effective_to        DateTime?                   @db.Timestamptz(6)
+  id                  String                      @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at          DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at          DateTime                    @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_subscriptions  shop_subscriptions[]
 
   @@index([is_active], map: "ix_subscription_plan_active")
   @@index([is_default], map: "ix_subscription_plan_default")
@@ -724,6 +725,21 @@ model subscription_plans {
   @@index([is_active], map: "ix_subscription_plans_is_active")
   @@index([is_default], map: "ix_subscription_plans_is_default")
   @@index([plan_type], map: "ix_subscription_plans_plan_type")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model suspension_audit_log {
+  id            BigInt   @id @default(autoincrement())
+  shop_id       String   @db.VarChar
+  action        String   @db.VarChar(50)
+  reason        String?
+  triggered_by  String   @default("system") @db.VarChar(50)
+  metadata_json String?
+  created_at    DateTime @default(dbgenerated("'2026-07-18 10:50:35.292616+00'::timestamp with time zone")) @db.Timestamptz(6)
+
+  @@index([created_at], map: "idx_suspension_audit_log_created_at")
+  @@index([shop_id], map: "idx_suspension_audit_log_shop_id")
+  @@index([shop_id], map: "ix_suspension_audit_log_shop_id")
 }
 
 model user_features {
@@ -824,32 +840,17 @@ model user_sessions {
   user_interactions     user_interactions[]
   shops                 shops                   @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
-  @@index([client_id], map: "ix_user_sessions_client_id")
-  @@index([customer_id], map: "ix_user_sessions_customer_id")
-  @@index([expires_at], map: "ix_user_sessions_expires_at")
-  @@index([shop_id], map: "ix_user_sessions_shop_id")
-  @@index([status], map: "ix_user_sessions_status")
   @@index([created_at], map: "ix_created_at")
   @@index([customer_id], map: "ix_customer_id")
   @@index([expires_at], map: "ix_expires_at")
   @@index([shop_id], map: "ix_shop_id")
   @@index([shop_id, status], map: "ix_shop_status")
   @@index([status], map: "ix_status")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model suspension_audit_log {
-  id            BigInt   @id @default(autoincrement())
-  shop_id       String   @db.VarChar
-  action        String   @db.VarChar(50)
-  reason        String?
-  triggered_by  String   @default("system") @db.VarChar(50)
-  metadata_json String?
-  created_at    DateTime @default(dbgenerated("'2026-07-18 10:19:54.558704+00'::timestamp with time zone")) @db.Timestamptz(6)
-
-  @@index([created_at], map: "idx_suspension_audit_log_created_at")
-  @@index([shop_id], map: "idx_suspension_audit_log_shop_id")
-  @@index([shop_id], map: "ix_suspension_audit_log_shop_id")
+  @@index([client_id], map: "ix_user_sessions_client_id")
+  @@index([customer_id], map: "ix_user_sessions_customer_id")
+  @@index([expires_at], map: "ix_user_sessions_expires_at")
+  @@index([shop_id], map: "ix_user_sessions_shop_id")
+  @@index([status], map: "ix_user_sessions_status")
 }
 
 enum billing_cycle_status_enum {

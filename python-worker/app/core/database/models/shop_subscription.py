@@ -111,14 +111,16 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     @property
     def effective_monthly_fee(self) -> Decimal:
-        """Get the effective monthly fee from subscription plan or override"""
+        """Get the effective monthly fee (override > plan fee after discount)"""
         if self.monthly_fee_override:
             return self.monthly_fee_override
-        return (
-            self.subscription_plan.monthly_fee
-            if self.subscription_plan and self.subscription_plan.monthly_fee
-            else Decimal("29.00")
-        )
+        plan = self.subscription_plan
+        if plan and plan.monthly_fee:
+            fee = Decimal(str(plan.monthly_fee))
+            if plan.discount_percentage:
+                fee = fee * (1 - Decimal(str(plan.discount_percentage)) / 100)
+            return fee
+        return Decimal("149.50")  # Default: $299 with 50% discount
 
     @property
     def effective_trial_days(self) -> int:

@@ -50,14 +50,20 @@ class SubscriptionPlan(BaseModel):
     monthly_fee = Column(
         Numeric(10, 2),
         nullable=True,
-        default=Decimal("29.00"),
-        comment="Flat monthly fee charged via Shopify AppSubscription",
+        default=Decimal("299.00"),
+        comment="Full monthly fee charged via Shopify AppSubscription",
     )
     trial_days = Column(
         Integer,
         nullable=True,
         default=14,
         comment="Number of free trial days before first charge",
+    )
+    discount_percentage = Column(
+        Numeric(5, 2),
+        nullable=True,
+        default=Decimal("50.00"),
+        comment="Promotional discount percentage applied to monthly_fee (e.g. 50.00 = 50% off)",
     )
 
     # Metadata
@@ -86,7 +92,8 @@ class SubscriptionPlan(BaseModel):
         return (
             f"<SubscriptionPlan(name={self.name}, type={self.plan_type.value}, "
             f"active={self.is_active}, monthly_fee=${self.monthly_fee or 'N/A'}, "
-            f"trial_days={self.trial_days or 'N/A'})>"
+            f"trial_days={self.trial_days or 'N/A'}, "
+            f"discount={self.discount_percentage or 0}%)>"
         )
 
     @property

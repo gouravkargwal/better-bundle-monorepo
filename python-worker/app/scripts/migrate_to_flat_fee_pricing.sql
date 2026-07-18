@@ -6,8 +6,9 @@ BEGIN;
 
 -- ===================== 1. Add columns to subscription_plans =====================
 ALTER TABLE subscription_plans
-  ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC(10,2) DEFAULT 29.00,
-  ADD COLUMN IF NOT EXISTS trial_days INTEGER DEFAULT 14;
+  ADD COLUMN IF NOT EXISTS monthly_fee NUMERIC(10,2) DEFAULT 299.00,
+  ADD COLUMN IF NOT EXISTS trial_days INTEGER DEFAULT 14,
+  ADD COLUMN IF NOT EXISTS discount_percentage NUMERIC(5,2) DEFAULT 50.00;
 
 -- ===================== 2. Migrate existing pricing tier data =====================
 -- For plans that have a USD pricing tier, copy the monthly_fee and trial_days

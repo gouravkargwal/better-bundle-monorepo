@@ -1,8 +1,11 @@
 """
-Seed script for default subscription plans and pricing tiers.
+Seed script for the default subscription plan.
 
-This script creates the default subscription plan and pricing tiers
-that will be used by shops when they sign up.
+Creates a single flat-rate plan at $299/mo with a 50% promotional discount.
+Run this once per environment (dev/staging/prod).
+
+Usage:
+    python -m app.scripts.seed_subscription_plans [--env dev|prod]
 """
 
 import asyncio
@@ -52,7 +55,6 @@ for env_file in env_files:
 # Build DATABASE_URL from env vars or use DATABASE_URL directly
 env_db_url = os.environ.get("DATABASE_URL", "")
 if env_db_url:
-    # Ensure asyncpg driver is used
     DATABASE_URL = env_db_url.replace("postgresql://", "postgresql+asyncpg://")
 else:
     DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle"
@@ -66,58 +68,55 @@ from app.core.database.models import (
     SubscriptionPlanType,
 )
 from app.core.config.settings import settings
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+PLAN_NAME = "Flat Fee Standard"
+
 
 async def seed_subscription_plans(session: AsyncSession) -> None:
-    """Seed default subscription plans and pricing tiers"""
-
+    """Seed the default subscription plan"""
     try:
-        logger.info("🌱 Starting subscription plans seeding...")
+        logger.info("🌱 Starting subscription plan seeding...")
 
-        # 1. Check if subscription plan already exists
-        from sqlalchemy import select
-
-        existing_plan_query = select(SubscriptionPlan).where(
-            SubscriptionPlan.name == "Flat Rate Standard"
+        # Check if plan already exists
+        result = await session.execute(
+            select(SubscriptionPlan).where(SubscriptionPlan.name == PLAN_NAME)
         )
-        existing_plan_result = await session.execute(existing_plan_query)
-        existing_plan = existing_plan_result.scalar_one_or_none()
+        existing = result.scalar_one_or_none()
 
-        if existing_plan:
-            logger.info(
-                f"✅ Subscription plan already exists: {existing_plan.name} (ID: {existing_plan.id})"
-            )
-            default_plan = existing_plan
-        else:
-            # Create default subscription plan
-            default_plan = SubscriptionPlan(
-                name="Flat Rate Standard",
-                description="Standard flat-fee subscription plan with monthly pricing",
-                plan_type=SubscriptionPlanType.FLAT_RATE,
-                monthly_fee=Decimal("29.00"),
-                trial_days=14,
-                is_active=True,
-                is_default=True,
-                plan_metadata='{"features": ["shopify_subscription", "bundle_attribution", "analytics"]}',
-                effective_from=datetime.now(UTC),
-            )
+        if existing:
+            logger.info(f"✅ Plan already exists: {existing.name} (ID: {existing.id})")
+            return
 
-            session.add(default_plan)
-            await session.flush()  # Get the ID
+        plan = SubscriptionPlan(
+            name=PLAN_NAME,
+            description="Standard flat-fee plan with promotional discount",
+            plan_type=SubscriptionPlanType.FLAT_RATE,
+            monthly_fee=Decimal("299.00"),
+            discount_percentage=Decimal("50.00"),
+            trial_days=14,
+            is_active=True,
+            is_default=True,
+            plan_metadata='{"features": ["shopify_subscription", "bundle_attribution", "analytics"]}',
+            effective_from=datetime.now(UTC),
+        )
 
-            logger.info(
-                f"✅ Created subscription plan: {default_plan.name} (ID: {default_plan.id})"
-            )
+        session.add(plan)
+        await session.flush()
+        logger.info(
+            f"✅ Created plan: {plan.name} (ID: {plan.id}) — "
+            f"${plan.monthly_fee}/mo with {plan.discount_percentage}% discount"
+        )
 
         await session.commit()
-        logger.info("🎉 Successfully seeded subscription plans and pricing tiers!")
+        logger.info("🎉 Successfully seeded subscription plan!")
 
     except Exception as e:
         await session.rollback()
-        logger.error(f"❌ Error seeding subscription plans: {e}")
+        logger.error(f"❌ Error seeding subscription plan: {e}")
         raise
 
 
@@ -127,7 +126,6 @@ async def main():
     # Log database URL (without password) for debugging
     db_url = settings.database.DATABASE_URL
     if db_url:
-        # Mask password in URL for logging
         try:
             from urllib.parse import urlparse, urlunparse
 
@@ -139,11 +137,10 @@ async def main():
             else:
                 logger.info(f"🔌 Connecting to database: {db_url}")
         except Exception:
-            logger.info(f"🔌 Connecting to database: [URL configured]")
+            logger.info("🔌 Connecting to database: [URL configured]")
     else:
         logger.warning("⚠️  DATABASE_URL not set, using default connection")
 
-    # Use the project's database connection method
     async with get_session_context() as session:
         await seed_subscription_plans(session)
 
