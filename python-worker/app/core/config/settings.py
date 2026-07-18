@@ -120,7 +120,7 @@ class MLSettings(BaseSettings):
         default="gemini-embedding-001", env="AI_EMBEDDING_MODEL"
     )
     AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
-    AI_CHAT_MODEL: str = Field(default="gemini-3.1-flash-lite", env="AI_CHAT_MODEL")
+    AI_CHAT_MODEL: str = Field(default="gemini-2.0-flash-lite", env="AI_CHAT_MODEL")
     AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
 
 

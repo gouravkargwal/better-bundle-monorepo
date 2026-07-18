@@ -48,12 +48,11 @@ class GorseCollectionTransformer:
                 "ItemId": f"shop_{shop_id}_collection_{collection_id}",
                 "IsHidden": False,
                 "Categories": categories,
-                # Wrapped under "tags" (not a bare list) so Gorse's item-to-item
-                # `column = "item.Labels.embedding"` expression - evaluated against
-                # every Gorse item, collections included - sees a JSON object rather
-                # than erroring on a list. Collections don't get an "embedding" key;
-                # they're just shaped consistently with product items.
-                "Labels": {"tags": labels},
+                # Labels is a JSON object consistent with product items: labels are
+                # under "labels". Collections don't get an "embedding" key, but the
+                # object shape must match so Gorse doesn't error when evaluating
+                # `item.Labels.embedding` (it'll just be nil for collections).
+                "Labels": {"labels": labels},
                 "Timestamp": (
                     collection_dict.get("last_computed_at", now_utc()).isoformat()
                     if hasattr(collection_dict.get("last_computed_at"), "isoformat")

@@ -292,9 +292,27 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # ==================== VECTOR DATABASE (Qdrant) ====================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: betterbundle-qdrant-dev
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=qdrant,env=dev"
+
 volumes:
   postgres_data:
   redis_data:
+  qdrant_data:
   kafka_data:
   gorse_logs:
   gorse_cache:

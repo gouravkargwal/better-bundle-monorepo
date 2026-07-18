@@ -1,12 +1,7 @@
 [database]
 cache_store = "${GORSE_CACHE_STORE}"
 data_store = "${GORSE_DATA_STORE}"
-
-[database.cluster]
-enable = true
-node_id = "master-0"
-raft_port = 6680
-raft_peer = "http://gorse-master:6680"
+vector_store = "qdrant://qdrant:6334"
 
 [database.mysql]
 isolation_level = "READ-UNCOMMITTED"
@@ -98,6 +93,19 @@ item_ttl = 8760
 [[recommend.non-personalized]]
 name = "popular"
 score = "1"
+
+[[recommend.item-to-item]]
+name = "neighbors"
+# Embedding similarity via Gemini vectors stored in Labels.embedding.
+# Gorse indexes these vectors in Qdrant (configured via database.vector_store)
+# for approximate nearest-neighbor (ANN) search.
+type = "embedding"
+column = "item.Labels.embedding"
+
+[[recommend.user-to-user]]
+name = "neighbors"
+# Use common-items similarity.
+type = "items"
 
 [recommend.collaborative]
 type = "mf"

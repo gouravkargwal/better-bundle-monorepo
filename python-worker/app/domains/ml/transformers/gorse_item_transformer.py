@@ -67,12 +67,14 @@ class GorseItemTransformer:
                 "ItemId": f"shop_{shop_id}_{product_id}",
                 "IsHidden": product_dict.get("is_hidden", False),
                 "Categories": categories,
-                # Labels is a flat []string for Gorse compatibility. Embeddings are
-                # cached separately in Redis for the Python worker's own similarity
-                # computations; they are NOT attached here because Gorse's
-                # item-to-item `column = "item.Labels.embedding"` expression requires
-                # Labels to be a JSON object, which breaks Gorse's internal Go model.
-                "Labels": labels,
+                # Labels is a JSON object with a "labels" key for categorical tags
+                # and an "embedding" key (filled in later by attach_embeddings).
+                # Gorse's item-to-item `type = "embedding"` reads the "embedding"
+                # field for vector similarity; the tag-based "neighbors" type reads
+                # the "labels" field. Both live under Labels as a JSON object so
+                # Gorse's Go model resolves both `item.Labels.embedding` and
+                # `item.Labels.labels` correctly.
+                "Labels": {"labels": labels},
                 "Timestamp": (
                     product_dict.get("last_computed_at", now_utc()).isoformat()
                     if hasattr(product_dict.get("last_computed_at"), "isoformat")
@@ -107,20 +109,20 @@ class GorseItemTransformer:
         shop_id: str,
     ) -> List[Dict[str, Any]]:
         """
-        Compute an embedding vector per item and cache it in Redis for the Python
-        worker's own similarity computations. Also replaces the placeholder Comment
-        with real product text, since the LLM reranker's document_template renders
-        from Comment.
+        Compute an embedding vector per item and attach it to Labels.embedding.
+        Also replaces the placeholder Comment with real product text for the
+        LLM reranker's document_template.
 
-        Labels is kept as a flat []string (Gorse compatibility), so embeddings are
-        NOT attached to Labels; they remain in Redis keyed by
-        item_embedding:{shop_id}:{product_id}:{text_hash}.
+        Embeddings are stored in Labels.embedding so Gorse's item-to-item
+        `type = "embedding"` recommender can use them for similarity search via
+        Qdrant/SQLite. The categorical tags remain in Labels.labels.
 
         Args:
             gorse_items: items already produced by transform_(batch_)to_gorse_item,
                 mutated and returned in place.
             product_texts: raw product_id -> embeddable text (e.g. title + description).
-            shop_id: used to namespace the embedding cache key.
+            shop_id: used to namespace the embedding cache key (still cached in Redis
+                to avoid re-computing on every sync cycle).
         """
         if not gorse_items:
             return gorse_items
@@ -165,11 +167,18 @@ class GorseItemTransformer:
                     f"Failed to compute item embeddings for shop {shop_id}: {str(e)}"
                 )
 
-        for item, text, _embedding in zip(gorse_items, texts, embeddings):
-            # Embeddings are NOT attached to Labels (flat []string). They remain
-            # cached in Redis for the Python worker's own similarity computations.
+        for item, text, embedding in zip(gorse_items, texts, embeddings):
             if text:
                 item["Comment"] = text
+            # Attach embedding to Labels so Gorse can index it in Qdrant/SQLite
+            if embedding is not None:
+                # Labels is already a JSON object {"labels": [...]} after the
+                # transform_to_gorse_item refactoring; set the embedding key.
+                if isinstance(item.get("Labels"), dict):
+                    item["Labels"]["embedding"] = embedding
+                else:
+                    # Defensive: if Labels somehow still a list, wrap it
+                    item["Labels"] = {"labels": item.get("Labels", []), "embedding": embedding}
 
         return gorse_items
 

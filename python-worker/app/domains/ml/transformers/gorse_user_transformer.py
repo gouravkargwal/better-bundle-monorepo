@@ -41,7 +41,10 @@ class GorseUserTransformer:
 
             user_object = {
                 "UserId": f"shop_{shop_id}_{customer_id}",
-                "Labels": labels,
+                # Labels is a JSON object for consistency with item transformer.
+                # Users don't get embeddings, but the object shape must match so
+                # Gorse doesn't error when reading Labels across different entity types.
+                "Labels": {"labels": labels},
                 "Comment": f"Customer: {customer_id} (using CustomerBehaviorFeatureGenerator features)",
             }
 

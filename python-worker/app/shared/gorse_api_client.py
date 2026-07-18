@@ -619,12 +619,24 @@ class GorseApiClient:
             response.raise_for_status()
 
             result = response.json()
-            return {
-                "success": True,
-                "neighbors": result,
-                "user_id": user_id,
-                "count": len(result) if isinstance(result, list) else 0,
-            }
+
+            if isinstance(result, list):
+                return {
+                    "success": True,
+                    "neighbors": result,
+                    "user_id": user_id,
+                    "count": len(result),
+                }
+            else:
+                logger.warning(
+                    f"Unexpected response format for user neighbors: {result}"
+                )
+                return {
+                    "success": False,
+                    "error": "Unexpected response format",
+                    "neighbors": [],
+                    "count": 0,
+                }
 
         except httpx.HTTPStatusError as e:
             logger.error(
@@ -689,57 +701,3 @@ class GorseApiClient:
         except Exception as e:
             logger.error(f"Failed to get session recommendations: {str(e)}")
             return {"success": False, "error": str(e), "recommendations": []}
-
-    async def get_user_neighbors(self, user_id: str, n: int = 10) -> Dict[str, Any]:
-        """
-        Get similar users (user neighbors) for collaborative filtering
-
-        Args:
-            user_id: User ID to find neighbors for
-            n: Number of neighbors to return
-
-        Returns:
-            Dict with success status and neighbor user data
-        """
-        try:
-            logger.debug(f"Getting user neighbors for user {user_id}")
-
-            url = f"{self.base_url}/api/user/{user_id}/neighbors"
-            params = {"n": n}
-
-            client = await self._get_client()
-            response = await client.get(url, params=params, headers=self._get_headers())
-            response.raise_for_status()
-
-            result = response.json()
-
-            # Gorse returns a list of user IDs with scores
-            if isinstance(result, list):
-                return {
-                    "success": True,
-                    "neighbors": result,
-                    "count": len(result),
-                }
-            else:
-                logger.warning(
-                    f"Unexpected response format for user neighbors: {result}"
-                )
-                return {
-                    "success": False,
-                    "error": "Unexpected response format",
-                    "neighbors": [],
-                    "count": 0,
-                }
-
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"HTTP error getting user neighbors: {e.response.status_code} - {e.response.text}"
-            )
-            return {
-                "success": False,
-                "error": f"HTTP {e.response.status_code}: {e.response.text}",
-                "neighbors": [],
-            }
-        except Exception as e:
-            logger.error(f"Failed to get user neighbors: {str(e)}")
-            return {"success": False, "error": str(e), "neighbors": []}

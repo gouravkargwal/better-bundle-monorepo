@@ -264,6 +264,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     deploy:
       resources:
         limits:
@@ -290,14 +292,13 @@ services:
     ports:
       - "127.0.0.1:8089:8089"
     command:
-      - -c
-      - /etc/gorse/config.toml
+      - --master-host=gorse-master
+      - --master-port=8086
       - --log-path
       - /var/log/gorse/server.log
       - --cache-path
       - /var/lib/gorse/server
     volumes:
-      - ./config.toml:/etc/gorse/config.toml:ro
       - gorse_logs:/var/log/gorse
       - gorse_server_cache:/var/lib/gorse/server
     networks:
@@ -335,14 +336,13 @@ services:
       - .env.prod
     # No public ports
     command:
-      - -c
-      - /etc/gorse/config.toml
+      - --master-host=gorse-master
+      - --master-port=8086
       - --log-path
       - /var/log/gorse/worker.log
       - --cache-path
       - /var/lib/gorse/worker
     volumes:
-      - ./config.toml:/etc/gorse/config.toml:ro
       - gorse_logs:/var/log/gorse
       - gorse_worker_cache:/var/lib/gorse/worker
     networks:
@@ -363,6 +363,32 @@ services:
         reservations:
           cpus: "1.0"
           memory: 1G
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service,container"
+
+  # ==================== VECTOR DATABASE (Qdrant) ====================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: betterbundle-qdrant
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -546,6 +572,7 @@ volumes:
   gorse_cache:
   gorse_server_cache:
   gorse_worker_cache:
+  qdrant_data:
   npm_data:
   npm_letsencrypt:
   openobserve_data:
