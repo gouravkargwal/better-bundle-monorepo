@@ -117,24 +117,6 @@ class DataCollectionKafkaConsumer:
             logger.exception(f"Failed to process data collection message: {e}")
             raise
 
-    def can_handle(self, event_type: str) -> bool:
-        """Indicate which event types this consumer can handle"""
-        return event_type in [
-            "data_collection",
-            "product_updated",
-            "product_created",
-            "product_deleted",
-            "collection_updated",
-            "collection_created",
-            "collection_deleted",
-            "order_paid",
-            "order_updated",
-            "refund_created",
-            "customer_created",
-            "customer_updated",
-            "inventory_updated",
-        ]
-
     async def _resolve_shop_data(self, event: Dict[str, Any]) -> Dict[str, Any] | None:
         """Resolve shop data for any event type"""
         event_type = event.get("event_type")

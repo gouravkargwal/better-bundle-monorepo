@@ -60,6 +60,9 @@ export interface ProductRecommendation {
   url?: string;
   variant_id?: string;
   variants?: any[];
+  // Attached by the serve path. Required to report an outcome against this
+  // recommendation; absent only when impression logging failed.
+  impression_id?: string;
 }
 
 export interface RecommendationResponse {

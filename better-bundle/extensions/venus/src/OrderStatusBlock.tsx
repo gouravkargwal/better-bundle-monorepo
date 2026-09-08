@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import {
   BlockStack,
   reactExtension,
@@ -28,7 +27,6 @@ function OrderStatusWithRecommendations() {
     products,
     error,
     trackRecommendationClick,
-    trackRecommendationView,
     columnConfig,
   } = useRecommendations({
     context: "order_status",
@@ -43,24 +41,23 @@ function OrderStatusWithRecommendations() {
     },
   });
 
-  // Track when recommendations come into view
-  useEffect(() => {
-    if (!products.length || loading) return;
-    trackRecommendationView();
-  }, [products, loading, trackRecommendationView]);
+  // No view reporting: the impression row is written server-side the moment
+  // recommendations are served, so the client has nothing to add.
 
   // Override trackRecommendationClick to include navigation
   const handleShopNow = async (
     productId: string,
     position: number,
     productUrl: string,
+    impressionId?: string,
   ) => {
-    const urlWithAttribution = await trackRecommendationClick(
+    const url = await trackRecommendationClick(
       productId,
       position,
       productUrl,
+      impressionId,
     );
-    navigate(urlWithAttribution);
+    navigate(url);
   };
 
   if (loading) {

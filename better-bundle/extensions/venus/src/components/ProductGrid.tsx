@@ -27,6 +27,7 @@ interface ProductGridProps {
     productId: string,
     position: number,
     productUrl: string,
+    impressionId?: string,
   ) => Promise<void>;
   columns?: {
     extraSmall?: number;

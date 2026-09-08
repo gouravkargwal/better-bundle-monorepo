@@ -3,6 +3,7 @@ interface ProductRecommendationAPI {
   title: string;
   handle: string;
   url: string;
+  impression_id?: string; // For incrementality tracking outcome callback
   price: {
     amount: string;
     currency_code: string;
@@ -145,6 +146,10 @@ interface CombinedAPIResponse {
   session_data: SessionData;
   recommendations: ProductRecommendation[];
   recommendation_count: number;
+  holdout?: {
+    is_control: boolean;
+    holdout_percent: number;
+  };
 }
 
 type ExtensionContext =

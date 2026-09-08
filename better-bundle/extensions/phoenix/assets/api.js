@@ -17,7 +17,7 @@ class RecommendationAPI {
 
   async fetchRecommendations(productIds, customerId, limit = 4) {
     try {
-      const context = window.context || 'homepage';
+      const context = window.context || 'product_page';
       const shopDomain = window.shopDomain || '';
       if (!shopDomain) {
         this.logger.error('❌ API: Shop domain is required but not provided');
@@ -44,39 +44,23 @@ class RecommendationAPI {
         limit: limit
       };
 
-      // Add context-specific fields
-      if (context === 'product_page' && window.productId) {
+      // The product being viewed is the whole query key: edges are looked up
+      // from it. Without it there is nothing to recommend against.
+      if (window.productId) {
         requestBody.product_id = String(window.productId);
-      }
-      if (context === 'product_page_similar' && window.productId) {
-        requestBody.product_id = String(window.productId);
-      }
-      if (context === 'product_page_frequently_bought' && window.productId) {
-        requestBody.product_id = String(window.productId);
-      }
-      if (context === 'product_page_customers_viewed' && window.productId) {
-        requestBody.product_id = String(window.productId);
-      }
-      if (context === 'collection_page' && window.collectionId) {
-        requestBody.collection_id = String(window.collectionId);
-      }
-
-      // Add homepage-specific visitor strategy
-      if (context === 'homepage' && window.visitorStrategy) {
-        requestBody.metadata = requestBody.metadata || {};
-        requestBody.metadata.visitor_strategy = window.visitorStrategy;
       }
 
       // Add optional fields if available
       if (productIds) requestBody.product_ids = productIds.map(id => String(id)); // Convert all product IDs to strings
       if (customerId) requestBody.user_id = String(customerId); // Convert to string as backend expects string
 
-      // Get session_id from sessionStorage (unified across all extensions)
-      const unifiedSessionId = sessionStorage.getItem('unified_session_id');
-      if (unifiedSessionId) {
-        requestBody.session_id = unifiedSessionId;
-      } else if (window.sessionId) {
-        requestBody.session_id = String(window.sessionId); // Fallback to window.sessionId
+      // Consent-gated visitor id, used only to keep this shopper in a stable
+      // holdout bucket. Null when the shopper has not accepted measurement
+      // processing, in which case nothing is sent and the backend serves
+      // recommendations without bucketing them into the experiment.
+      const visitorId = window.bbGetVisitorId ? window.bbGetVisitorId() : null;
+      if (visitorId) {
+        requestBody.session_id = visitorId;
       }
 
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;

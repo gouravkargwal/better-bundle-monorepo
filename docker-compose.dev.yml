@@ -112,104 +112,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # ==================== GORSE MASTER ====================
-  gorse-master:
-    image: zhenghaoz/gorse-master:latest
-    container_name: betterbundle-gorse-master-dev
-    restart: unless-stopped
-    ports:
-      - "8086:8086"
-      - "8088:8088"
-    env_file:
-      - .env.dev
-    command:
-      - -c
-      - /etc/gorse/config.toml
-      - --log-path
-      - /var/log/gorse/master.log
-      - --cache-path
-      - /var/lib/gorse/master
-    volumes:
-      - ./config.toml:/etc/gorse/config.toml
-      - gorse_logs:/var/log/gorse
-      - gorse_cache:/var/lib/gorse
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service=gorse-master,env=dev"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
-  # ==================== GORSE SERVER ====================
-  gorse-server:
-    image: zhenghaoz/gorse-server:latest
-    container_name: betterbundle-gorse-server-dev
-    restart: unless-stopped
-    ports:
-      - "8089:8089"
-    env_file:
-      - .env.dev
-    command:
-      - --master-host=gorse-master
-      - --master-port=8086
-      - --log-path
-      - /var/log/gorse/server.log
-      - --cache-path
-      - /var/lib/gorse/server
-    volumes:
-      - ./config.toml:/etc/gorse/config.toml
-      - gorse_logs:/var/log/gorse
-      - gorse_server_cache:/var/lib/gorse/server
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service=gorse-server,env=dev"
-    depends_on:
-      gorse-master:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  # ==================== GORSE WORKER ====================
-  gorse-worker:
-    image: zhenghaoz/gorse-worker:latest
-    container_name: betterbundle-gorse-worker-dev
-    restart: unless-stopped
-    env_file:
-      - .env.dev
-    command:
-      - --master-host=gorse-master
-      - --master-port=8086
-      - --log-path
-      - /var/log/gorse/worker.log
-      - --cache-path
-      - /var/lib/gorse/worker
-    volumes:
-      - ./config.toml:/etc/gorse/config.toml
-      - gorse_logs:/var/log/gorse
-      - gorse_worker_cache:/var/lib/gorse/worker
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service=gorse-worker,env=dev"
-    depends_on:
-      gorse-master:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 
   # ==================== PYTHON WORKER ====================
   python-worker:
@@ -231,8 +134,6 @@ services:
         condition: service_healthy
       kafka_b:
         condition: service_healthy
-      gorse-master:
-        condition: service_started
     restart: unless-stopped
     logging:
       driver: json-file
@@ -314,9 +215,5 @@ volumes:
   redis_data:
   qdrant_data:
   kafka_data:
-  gorse_logs:
-  gorse_cache:
-  gorse_server_cache:
-  gorse_worker_cache:
   openobserve_data:
   minio_data:

@@ -41,6 +41,9 @@ class Shop(BaseModel):
     # Contact information
     email = Column(String(255), nullable=True)
 
+    # Holdout testing (incrementality)
+    holdout_disabled = Column(Boolean, default=False, nullable=False)
+
     # Analysis tracking
     last_analysis_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
@@ -48,17 +51,8 @@ class Shop(BaseModel):
     collection_data = relationship(
         "CollectionData", back_populates="shop", cascade="all, delete-orphan"
     )
-    collection_features = relationship(
-        "CollectionFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
-    customer_behavior_features = relationship(
-        "CustomerBehaviorFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
     customer_data = relationship(
         "CustomerData", back_populates="shop", cascade="all, delete-orphan"
-    )
-    interaction_features = relationship(
-        "InteractionFeatures", back_populates="shop", cascade="all, delete-orphan"
     )
     order_data = relationship(
         "OrderData", back_populates="shop", cascade="all, delete-orphan"
@@ -66,32 +60,12 @@ class Shop(BaseModel):
     product_data = relationship(
         "ProductData", back_populates="shop", cascade="all, delete-orphan"
     )
-    product_features = relationship(
-        "ProductFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
-    product_pair_features = relationship(
-        "ProductPairFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
-    search_product_features = relationship(
-        "SearchProductFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
-    session_features = relationship(
-        "SessionFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
-    user_features = relationship(
-        "UserFeatures", back_populates="shop", cascade="all, delete-orphan"
-    )
     purchase_attributions = relationship(
         "PurchaseAttribution", back_populates="shop", cascade="all, delete-orphan"
     )
-    user_interactions = relationship(
-        "UserInteraction", back_populates="shop", cascade="all, delete-orphan"
+    offer_impressions = relationship(
+        "OfferImpression", back_populates="shop", cascade="all, delete-orphan"
     )
-    user_sessions = relationship(
-        "UserSession", back_populates="shop", cascade="all, delete-orphan"
-    )
-    # Legacy billing_plans relationship removed - using new subscription system
-    # billing_invoices = relationship("BillingInvoice", back_populates="shop", cascade="all, delete-orphan")  # REMOVED
     shop_subscriptions = relationship(
         "ShopSubscription", back_populates="shop", cascade="all, delete-orphan"
     )

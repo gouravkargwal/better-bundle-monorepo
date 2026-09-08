@@ -1,16 +1,8 @@
-"""
-User Session Models for Unified Analytics
+from __future__ import annotations
 
-Handles session management across all extensions with proper validation
-and type safety.
-"""
-
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, validator
 from enum import Enum
-
-from app.shared.helpers import now_utc
+from typing import Optional, List
+from datetime import datetime
 
 
 class SessionStatus(str, Enum):
@@ -21,109 +13,48 @@ class SessionStatus(str, Enum):
     TERMINATED = "terminated"
 
 
-class UserSession(BaseModel):
-    """User session model for unified analytics tracking"""
+class UserSession:
+    """User session model — minimal constructor-based class.
 
-    id: str = Field(..., description="Unique session identifier")
-    shop_id: str = Field(..., description="Shop identifier")
-    customer_id: Optional[str] = Field(
-        None, description="Customer identifier (null for anonymous)"
-    )
-    client_id: Optional[str] = None  # ✅ NEW
-    browser_session_id: Optional[str] = Field(
-        None, description="Browser's session identifier (fallback only)"
-    )
-    status: SessionStatus = Field(
-        default=SessionStatus.ACTIVE, description="Session status"
-    )
+    Replaces the deleted Pydantic model from the old analytics domain.
+    """
 
-    # Timestamps
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Session creation time"
-    )
-    last_active: datetime = Field(
-        default_factory=datetime.utcnow, description="Last activity time"
-    )
-    expires_at: Optional[datetime] = Field(None, description="Session expiration time")
-
-    # Metadata
-    user_agent: Optional[str] = Field(None, description="User agent string")
-    ip_address: Optional[str] = Field(None, description="IP address")
-    referrer: Optional[str] = Field(None, description="Referrer URL")
-
-    # Extension tracking
-    extensions_used: List[str] = Field(
-        default_factory=list, description="Extensions that used this session"
-    )
-    total_interactions: int = Field(
-        default=0, description="Total interactions in this session"
-    )
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    def __init__(
+        self,
+        id: str,
+        shop_id: str,
+        customer_id: Optional[str] = None,
+        client_id: Optional[str] = None,
+        browser_session_id: Optional[str] = None,
+        status: SessionStatus = SessionStatus.ACTIVE,
+        created_at: Optional[datetime] = None,
+        last_active: Optional[datetime] = None,
+        expires_at: Optional[datetime] = None,
+        user_agent: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        referrer: Optional[str] = None,
+        extensions_used: Optional[List[str]] = None,
+        total_interactions: int = 0,
+    ):
+        self.id = id
+        self.shop_id = shop_id
+        self.customer_id = customer_id
+        self.client_id = client_id
+        self.browser_session_id = browser_session_id
+        self.status = status
+        self.created_at = created_at
+        self.last_active = last_active
+        self.expires_at = expires_at
+        self.user_agent = user_agent
+        self.ip_address = ip_address
+        self.referrer = referrer
+        self.extensions_used = extensions_used or []
+        self.total_interactions = total_interactions
 
 
-class SessionCreate(BaseModel):
-    """Model for creating a new user session"""
-
-    shop_id: str = Field(..., description="Shop identifier")
-    customer_id: Optional[str] = Field(None, description="Customer identifier")
-    client_id: Optional[str] = None  # ✅ NEW
-    browser_session_id: Optional[str] = Field(
-        None, description="Browser session identifier"
-    )
-    user_agent: Optional[str] = Field(None, description="User agent string")
-    ip_address: Optional[str] = Field(None, description="IP address")
-    referrer: Optional[str] = Field(None, description="Referrer URL")
-    session_duration_hours: int = Field(
-        default=24, description="Session duration in hours"
-    )
-
-    @validator("session_duration_hours")
-    def validate_session_duration(cls, v):
-        if v < 1 or v > 168:  # 1 hour to 1 week
-            raise ValueError("Session duration must be between 1 and 168 hours")
-        return v
-
-    def get_expires_at(self) -> datetime:
-        """Calculate expiration time based on session duration"""
-        return now_utc() + timedelta(hours=self.session_duration_hours)
+class SessionUpdate:
+    pass
 
 
-class SessionUpdate(BaseModel):
-    """Model for updating an existing user session"""
-
-    customer_id: Optional[str] = Field(None, description="Customer identifier")
-    client_id: Optional[str] = None  # ✅ NEW
-    status: Optional[SessionStatus] = Field(None, description="New session status")
-    last_active: Optional[datetime] = Field(None, description="Update last active time")
-    extensions_used: Optional[List[str]] = Field(
-        None, description="Update extensions used"
-    )
-    total_interactions: Optional[int] = Field(
-        None, description="Update total interactions"
-    )
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
-
-
-class SessionQuery(BaseModel):
-    """Model for querying user sessions"""
-
-    shop_id: str = Field(..., description="Shop identifier")
-    customer_id: Optional[str] = Field(None, description="Customer identifier")
-    client_id: Optional[str] = None  # ✅ NEW
-    browser_session_id: Optional[str] = Field(
-        None, description="Browser session identifier"
-    )
-    status: Optional[SessionStatus] = Field(None, description="Session status filter")
-    created_after: Optional[datetime] = Field(
-        None, description="Filter sessions created after this time"
-    )
-    created_before: Optional[datetime] = Field(
-        None, description="Filter sessions created before this time"
-    )
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}
+class SessionCreate:
+    pass

@@ -171,7 +171,6 @@ class ProductCardManager {
   updateProductCards(
     recommendations,
     analyticsApi = null,
-    sessionId,
     context = "cart",
     trackRecommendationView = null,
   ) {
@@ -221,7 +220,6 @@ class ProductCardManager {
             product,
             index,
             analyticsApi,
-            sessionId,
             context,
           );
 
@@ -295,11 +293,10 @@ class ProductCardManager {
     product,
     index,
     analyticsApi = null,
-    sessionId,
     context = "cart",
   ) {
     if (this.renderer) {
-      return this.renderer.createProductSlide(product, index, analyticsApi, sessionId, context);
+      return this.renderer.createProductSlide(product, index, analyticsApi, context);
     } else {
       this.logger.error('❌ ProductCardRenderer not loaded');
       return null;
@@ -422,47 +419,35 @@ class ProductCardManager {
     }
   }
 
-  // Handle product click with unified analytics tracking
-  handleProductClick(productId, position, productUrl, sessionId) {
-    if (window.analyticsApi && sessionId) {
-      // Track click interaction using unified analytics
-      const shopDomain = window.shopDomain;
-      const customerId = window.customerId;
-
-      window.analyticsApi
-        .trackRecommendationClick(
-          shopDomain,
-          "cart",
-          productId,
-          position,
-          customerId,
-          { source: "cart_recommendation" }
-        )
-        .catch((error) => {
-          this.logger.error("Failed to track product click:", error);
-        });
+  // Handle a click through to the recommended product's own page.
+  //
+  // This is the path the stamp cannot cover: the shopper will add the product
+  // using the theme's own button on a page Phoenix does not control. Reporting
+  // the click is the last observation available, and the backend reconciles it
+  // against the order later by checking whether this exact product was bought.
+  //
+  // The report is deliberately not awaited. Navigation follows immediately and
+  // the request carries `keepalive` so it survives the unload.
+  handleProductClick(productId, position, productUrl, impressionId) {
+    if (window.phoenixAttribution && impressionId) {
+      window.phoenixAttribution.reportClick(impressionId);
     }
 
-    // Navigate to product page with attribution
-    if (productUrl && window.analyticsApi && sessionId) {
-      const urlWithAttribution = window.analyticsApi.addAttributionToUrl(
-        productUrl,
-        productId,
-        position,
-        sessionId,
-      );
-      window.location.href = urlWithAttribution;
-    } else if (productUrl) {
+    if (productUrl) {
       window.location.href = productUrl;
     }
   }
 
-  // Handle add to cart with analytics tracking and order attributes
-  async handleAddToCart(productId, variantId, position, sessionId, context) {
+  // Handle add to cart: stamp the line, then report the acceptance.
+  async handleAddToCart(productId, variantId, position, context) {
     // Get the selected variant and quantity
     const productCard = document
       .querySelector(`[data-product-id="${productId}"]`)
       .closest(".product-card");
+
+    // The impression this card was served from. Without it the add cannot be
+    // attributed, so it is read from the card rather than passed around.
+    const impressionId = productCard ? productCard.dataset.impressionId : "";
     const variantSelect = productCard.querySelector(".variant-selector");
     const qtyInput = productCard.querySelector(".qty-input");
 
@@ -498,43 +483,30 @@ class ProductCardManager {
       addToCartButton.innerHTML =
         '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>';
 
-      // Build per-item attribution properties (hidden from customer display)
-      const itemProperties = {
-        "_bb_rec_session_id": sessionId || "",
-        "_bb_rec_product_id": productId || "",
-        "_bb_rec_extension": "phoenix",
-        "_bb_rec_context": context || "cart",
-        "_bb_rec_position": String(position || ""),
-        "_bb_rec_quantity": String(selectedQuantity || 1), // ✅ Add quantity to attributes
-        "_bb_rec_timestamp": new Date().toISOString(),
-        "_bb_rec_source": "betterbundle",
-      };
-
-
-      if (window.analyticsApi && sessionId) {
-        const shopDomain = window.shopDomain;
-        const customerId = window.customerId;
-
-
-        // Use sendBeacon for reliable delivery even during page navigation
-        const trackingPromise = window.analyticsApi.trackAddToCart(
-          shopDomain,
-          context,
-          productId,
-          selectedVariantId,
-          position,
-          customerId,
-          {
-            source: "cart_recommendation",
-            variant_id: selectedVariantId,
+      // Stamp the impression onto the cart line. Shopify promotes line item
+      // properties to the order, so this survives checkout and is what the
+      // backend attributes on — no session correlation involved.
+      const itemProperties = window.phoenixAttribution
+        ? window.phoenixAttribution.cartProperties({
+            impressionId: impressionId,
+            productId: productId,
+            context: context,
+            position: position,
             quantity: selectedQuantity,
-          }
-        );
+          })
+        : {};
 
-        // Don't await the tracking - let it complete in background
-        trackingPromise.catch((error) => {
-          this.logger.warn('Analytics tracking failed (non-blocking):', error);
-        });
+
+      // Report the acceptance. Not awaited: the stamp on the cart line is the
+      // authoritative record, so a failed report costs a dashboard update, not
+      // the attribution itself.
+      if (window.phoenixAttribution && impressionId) {
+        const productData = this.productDataStore[productId] || {};
+        const unitPrice = Number(productData.price_amount || productData.price || 0);
+        window.phoenixAttribution.reportAccepted(
+          impressionId,
+          unitPrice * selectedQuantity,
+        );
       }
 
       // Add to cart via Shopify API with line item properties

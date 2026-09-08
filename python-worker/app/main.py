@@ -4,12 +4,13 @@ Main application for BetterBundle Python Worker
 
 import asyncio
 import signal
+import time
+from contextlib import asynccontextmanager
+
 import uvicorn
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from contextlib import asynccontextmanager
-import time
 
 from app.core.config.settings import settings
 from app.core.logging import get_logger
@@ -28,19 +29,11 @@ from app.domains.shopify.services import (
 from app.core.kafka.consumer_manager import KafkaConsumerManager
 
 
-from app.api.v1.unified_gorse import router as unified_gorse_router
-from app.api.v1.ai_rerank import router as ai_rerank_router
-from app.api.v1.attribution_backfill import router as attribution_backfill_router
-from app.api.v1.customer_linking import router as customer_linking_router
 from app.api.v1.recommendations import router as recommendations_router
-from app.api.v1.fbt_status import router as fbt_status_router
-from app.api.v1.logs import router as logs_router
-from app.api.v1.data_collection import router as data_collection_router
+from app.api.v1.edges_status import router as edges_status_router
 from app.domains.billing.api.billing_api import router as billing_api_router
 from app.routes.auth_routes import router as auth_router
-from app.routes.session_routes import router as session_router
-from app.routes.interaction_routes import router as interaction_router
-from app.routes.recommendation_routes import router as recommendation_router
+from app.api.v1.outcome import router as outcome_router
 
 logger = get_logger(__name__)
 
@@ -111,19 +104,11 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 FastAPIInstrumentor.instrument_app(app)
 
 # Include API routers
-app.include_router(unified_gorse_router)
-app.include_router(ai_rerank_router)
-app.include_router(attribution_backfill_router)
-app.include_router(customer_linking_router)
 app.include_router(recommendations_router)
-app.include_router(fbt_status_router)
-app.include_router(logs_router)
-app.include_router(data_collection_router)
+app.include_router(edges_status_router)
 app.include_router(billing_api_router)
 app.include_router(auth_router)
-app.include_router(session_router)
-app.include_router(interaction_router)
-app.include_router(recommendation_router)
+app.include_router(outcome_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -319,7 +304,6 @@ async def redis_health_check():
 @app.post("/api/kafka/events/publish")
 async def publish_kafka_event(
     request: Request,
-    background_tasks: BackgroundTasks,
 ):
     """Generic endpoint to publish events to any Kafka topic"""
     try:
@@ -526,25 +510,4 @@ async def global_exception_handler(request, exc):
     )
 
 
-def setup_signal_handlers():
-    """Setup signal handlers for graceful shutdown"""
 
-    def signal_handler(signum, frame):
-        logger.info(f"🛑 Received signal {signum}, initiating graceful shutdown...")
-        # The lifespan manager will handle the actual cleanup
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-
-if __name__ == "__main__":
-    # Setup signal handlers for graceful shutdown
-    setup_signal_handlers()
-
-    uvicorn.run(
-        "app.main:app",
-        host=settings.HOST,
-        port=settings.PORT,
-        reload=settings.DEBUG,
-        log_level="info",
-    )

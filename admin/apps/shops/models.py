@@ -55,6 +55,7 @@ class Shop(BaseModel):
     suspension_reason = models.CharField(max_length=255, null=True, blank=True)
     service_impact = models.CharField(max_length=50, null=True, blank=True)
     email = models.CharField(max_length=255, null=True, blank=True)
+    holdout_disabled = models.BooleanField(default=False)
     last_analysis_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:

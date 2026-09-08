@@ -29,32 +29,13 @@ class RecommendationCarousel {
       showArrows: window.showArrows || true,
       showPagination: window.showPagination || true,
       limit: window.recommendationLimit || 4,
-      context: window.context || 'homepage' // Use context from block system
+      context: window.context || 'product_page' // set by the block
     };
   }
 
-  // Track recommendation view when user actually views them
-  async trackRecommendationView(productIds) {
-    if (!this.analyticsApi || !productIds || productIds.length === 0) {
-      return;
-    }
-
-    try {
-      await this.analyticsApi.trackRecommendationView(
-        this.config.shopDomain || '',
-        this.config.context,
-        this.config.customerId ? String(this.config.customerId) : undefined,
-        productIds,
-        {
-          source: 'phoenix_theme_extension',
-          cart_product_count: this.config.productIds?.length || 0,
-          recommendation_count: productIds.length
-        }
-      );
-    } catch (error) {
-      this.logger.error('❌ Phoenix: Failed to track recommendation view:', error);
-    }
-  }
+  // No view reporting: the impression row is written server-side at the moment
+  // recommendations are served, so the client has nothing to add. Only terminal
+  // outcomes (clicked, accepted) are reported, by PhoenixAttribution.
 
   // Initialize the recommendation carousel
   async init() {
@@ -78,24 +59,6 @@ class RecommendationCarousel {
       const loadingTimeout = setTimeout(() => {
         this.hideCarousel();
       }, 15000); // 15 second timeout
-
-      // Get or create session ID from analytics API with better error handling
-      let sessionId;
-      if (this.analyticsApi && this.config.shopDomain) {
-        try {
-          sessionId = await this.analyticsApi.getOrCreateSession(
-            this.config.shopDomain,
-            this.config.customerId ? String(this.config.customerId) : undefined
-          );
-        } catch (error) {
-          this.logger.error('❌ Phoenix: Failed to get session from analytics API:', error);
-          // Try fallback session ID from window or generate one
-          sessionId = window.sessionId || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        }
-      } else {
-        this.logger.warn('⚠️ Phoenix: Analytics API not available, using fallback session');
-        sessionId = window.sessionId || `fallback_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      }
 
       // Show skeleton loading before API call
       if (window.productCardManager) {
@@ -121,7 +84,7 @@ class RecommendationCarousel {
         }
 
         // Update product cards with real recommendations and analytics tracking
-        this.cardManager.updateProductCards(recommendations, this.analyticsApi, sessionId, this.config.context, this.trackRecommendationView.bind(this));
+        this.cardManager.updateProductCards(recommendations, this.analyticsApi, this.config.context);
       } else {
         this.logger.error('❌ Phoenix: No recommendations available, hiding carousel');
         this.hideCarousel();
@@ -306,8 +269,8 @@ document.addEventListener('DOMContentLoaded', async function () {
       }
 
       // Set up Analytics API with JWT authentication
-      if (window.analyticsApi && window.phoenixJWT) {
-        window.analyticsApi.setPhoenixJWT(window.phoenixJWT);
+      if (window.phoenixAttribution && window.phoenixJWT) {
+        window.phoenixAttribution.setPhoenixJWT(window.phoenixJWT);
       }
 
       // Initialize when page loads

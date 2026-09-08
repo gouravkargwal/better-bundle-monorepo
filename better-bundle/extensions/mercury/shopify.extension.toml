@@ -15,9 +15,18 @@ uid = "34e44979-d598-a499-7508-40b2e380a1c7d16d41bf"
 # and the file that contains your extension’s source code. Learn more:
 # https://shopify.dev/docs/api/checkout-ui-extensions/latest/extension-targets-overview
 
+# Checkout block — SHOPIFY PLUS ONLY. Checkout UI extensions for the
+# information, shipping and payment steps are restricted to Plus plans.
 [[extensions.targeting]]
 module = "./src/Checkout.jsx"
 target = "purchase.checkout.block.render"
+
+# Thank You page block — available on EVERY plan, with no vaulted-card
+# requirement. This is the widest-reach surface the app has, and the only
+# post-purchase one that renders for every order.
+[[extensions.targeting]]
+module = "./src/ThankYou.jsx"
+target = "purchase.thank-you.block.render"
 
 [extensions.capabilities]
 # Gives your extension access to directly query Shopify’s storefront API.

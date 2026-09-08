@@ -1,14 +1,4 @@
-import { formatCurrency } from "app/utils/currency";
-
-interface OverviewHeroProps {
-  totalRevenueGenerated?: number;
-  currency?: string;
-}
-
-export function OverviewHero({
-  totalRevenueGenerated,
-  currency,
-}: OverviewHeroProps) {
+export function OverviewHero(): JSX.Element {
   return (
     <div
       style={{

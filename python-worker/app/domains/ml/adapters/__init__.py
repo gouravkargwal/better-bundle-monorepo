@@ -1,1 +1,0 @@
-# Interaction Event Adapters

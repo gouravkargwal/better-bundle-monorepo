@@ -1,12 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { getRecommendations } from "../api/recommendations";
-import {
-  getOrCreateSession,
-  trackRecommendationView,
-  trackRecommendationClick,
-} from "../api/analytics";
+import { recordOfferOutcome } from "../api/analytics";
 import { logger } from "../utils/logger";
-import { STORAGE_KEYS } from "../config/constants";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount, currencyCode) => {
@@ -57,48 +52,12 @@ export function useRecommendations({
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [error, setError] = useState(null);
-  const [sessionId, setSessionId] = useState(null);
   const hasFetchedRecommendations = useRef(false);
   const previousCartItemsRef = useRef([]); // Track previous cart items to detect real changes
 
-  // Initialize session
-  useEffect(() => {
-    if (!storage || !shopDomain) {
-      return;
-    }
-
-    const initializeSession = async () => {
-      try {
-        // 1. Try reading from storage first (fastest) - with expiration check
-        const cachedSessionId = await storage.read(STORAGE_KEYS.SESSION_ID);
-        const cachedExpiry = await storage.read(STORAGE_KEYS.SESSION_EXPIRES_AT);
-
-        if (cachedSessionId && cachedExpiry && Date.now() < parseInt(cachedExpiry)) {
-          setSessionId(cachedSessionId);
-          return;
-        }
-
-        // 2. If not in storage, fetch from backend API
-        const sessionId = await getOrCreateSession(
-          storage,
-          shopDomain,
-          customerId,
-        );
-
-        // Store session with expiration (30 minutes like Atlas)
-        const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
-        await storage.write(STORAGE_KEYS.SESSION_ID, sessionId);
-        await storage.write(STORAGE_KEYS.SESSION_EXPIRES_AT, expiresAt.toString());
-
-        setSessionId(sessionId);
-      } catch (err) {
-        logger.error("Failed to initialize session:", err);
-        setError("Failed to initialize session");
-      }
-    };
-
-    initializeSession();
-  }, [storage, shopDomain, customerId]);
+  // No session bootstrap: `/api/session/get-or-create-session` was removed
+  // with the behaviour-tracking pipeline. Recommendations are keyed on the cart
+  // contents, and holdout bucketing uses the customer id, which checkout has.
 
   // Memoize cart data to prevent infinite re-renders
   const memoizedCartData = useMemo(() => ({
@@ -107,76 +66,30 @@ export function useRecommendations({
     checkoutStep: checkoutStep || "order_summary",
   }), [cartItems, cartValue, checkoutStep]);
 
+  // Report a click-through, then hand back the URL to navigate to.
+  //
+  // Used where the shopper leaves for the product's own page rather than
+  // adding in place — the Thank You surface, where the order is already
+  // complete and no cart write is possible.
   const trackRecommendationClickHandler = async (
     productId,
     position,
     productUrl,
+    impressionId,
   ) => {
-    try {
-      if (!sessionId || !storage) {
-        return productUrl;
-      }
-
-      const success = await trackRecommendationClick(
-        storage,
-        shopDomain,
-        context,
-        productId,
-        position,
-        sessionId,
-        customerId,
-        { source: `${context}_recommendation` },
-      );
-
-      if (!success) {
-        // If tracking failed, clear cached session
-        await storage.remove(STORAGE_KEYS.SESSION_ID);
-        setSessionId(null);
-      }
-    } catch (error) {
-      logger.error(`Failed to track ${context} click:`, error);
-      // Clear cached session on error
-      await storage.remove(STORAGE_KEYS.SESSION_ID);
-      setSessionId(null);
+    if (impressionId) {
+      await recordOfferOutcome(impressionId, "clicked");
     }
-
     return productUrl;
   };
 
-  // Track recommendation view when user actually views them
-  const trackRecommendationViewHandler = async () => {
-    if (products.length === 0 || !sessionId || !storage) {
-      return;
-    }
-
-    try {
-      const productIds = products.map((product) => product.id);
-      const success = await trackRecommendationView(
-        storage,
-        shopDomain,
-        context,
-        sessionId,
-        customerId,
-        productIds,
-        { source: `${context}_page` },
-      );
-
-      if (!success) {
-        await storage.remove(STORAGE_KEYS.SESSION_ID);
-        setSessionId(null);
-      }
-    } catch (error) {
-      logger.error(`Failed to track recommendation view:`, error);
-      // Clear cached session on error
-      await storage.remove(STORAGE_KEYS.SESSION_ID);
-      setSessionId(null);
-    }
-  };
+  // No view reporting: the impression row is written server-side the moment
+  // recommendations are served, so the client has nothing to add.
 
   // Fetch recommendations
   // ✅ Only refetch if cart items actually changed (new items added), not just cart value
   useEffect(() => {
-    if (!storage || !sessionId) {
+    if (!storage) {
       return;
     }
 
@@ -205,7 +118,6 @@ export function useRecommendations({
           context,
           limit,
           user_id: customerId,
-          session_id: sessionId,
           ...(shopDomain && { shop_domain: shopDomain }),
           // Pass cart data for better recommendations
           cart_items: memoizedCartData.cartItems,
@@ -222,6 +134,14 @@ export function useRecommendations({
         });
 
         if (response.success && response.recommendations) {
+          // Check holdout — control group gets empty recommendations without error
+          if (response.holdout?.is_control === true) {
+            setProducts([]);
+            hasFetchedRecommendations.current = true;
+            setLoading(false);
+            return;
+          }
+
           // Transform API response to component format
           const transformedProducts = response.recommendations.map(
             (rec) => ({
@@ -229,10 +149,12 @@ export function useRecommendations({
               title: rec.title,
               handle: rec.handle,
               price: formatPrice(rec.price.amount, rec.price.currency_code),
+              price_amount: parseFloat(rec.price.amount), // numeric price for outcome tracking
               image: rec.image,
               images: rec.images,
               inStock: rec.available ?? true,
               url: rec.url,
+              impression_id: rec.impression_id, // for incrementality outcome callback
               // Transform variants to have 'id' instead of 'variant_id'
               variants: (rec.variants || []).map(variant => ({
                 id: variant.variant_id,
@@ -266,13 +188,12 @@ export function useRecommendations({
 
     // ✅ Fetch recommendations (only if cart items changed or first load)
     fetchRecommendations();
-  }, [customerId, context, limit, sessionId, shopDomain, memoizedCartData, storage]);
+  }, [customerId, context, limit, shopDomain, memoizedCartData, storage]);
 
   return {
     loading,
     products,
     error,
     trackRecommendationClick: trackRecommendationClickHandler,
-    trackRecommendationView: trackRecommendationViewHandler,
   };
 }

@@ -4,14 +4,9 @@ import {
   type ProductRecommendation,
   type ExtensionContext,
 } from "../api/recommendations";
-import {
-  getOrCreateSession,
-  trackRecommendationView as trackRecommendationViewAPI,
-  trackRecommendationClick as trackRecommendationClickAPI,
-} from "../api/analytics";
+import { reportClick } from "../api/attribution";
 import { useApi } from "@shopify/ui-extensions-react/customer-account";
 import { logger } from "../utils/logger";
-import { STORAGE_KEYS } from "../config/constants";
 
 // Format price using the same logic as the Remix app
 const formatPrice = (amount: string, currencyCode: string): string => {
@@ -66,6 +61,7 @@ interface Product {
   inStock: boolean;
   url: string;
   variant_id?: string;
+  impressionId?: string;
 }
 
 interface UseRecommendationsProps {
@@ -92,153 +88,42 @@ export function useRecommendations({
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Initialize session
-  useEffect(() => {
-    if (!storage || !shopDomain) {
-      return;
-    }
-
-    const initializeSession = async () => {
-      try {
-        // 1. Try reading from storage first (fastest) - with expiration check
-        const cachedSessionId = await storage.read(STORAGE_KEYS.SESSION_ID);
-        const cachedExpiry = await storage.read(
-          STORAGE_KEYS.SESSION_EXPIRES_AT,
-        );
-
-        if (
-          cachedSessionId &&
-          cachedExpiry &&
-          Date.now() < parseInt(cachedExpiry as string)
-        ) {
-          setSessionId(cachedSessionId as string);
-          return;
-        }
-
-        // 2. If not in storage, fetch from backend API
-        const sessionId = await getOrCreateSession(
-          storage,
-          shopDomain,
-          customerId,
-        );
-
-        // Store session with expiration (30 minutes like Atlas/Mercury)
-        const expiresAt = Date.now() + 30 * 60 * 1000; // 30 minutes from now
-        await storage.write(STORAGE_KEYS.SESSION_ID, sessionId);
-        await storage.write(
-          STORAGE_KEYS.SESSION_EXPIRES_AT,
-          expiresAt.toString(),
-        );
-
-        setSessionId(sessionId);
-      } catch (err) {
-        logger.error(
-          {
-            error: err instanceof Error ? err.message : String(err),
-            shop_domain: shopDomain,
-          },
-          "Failed to initialize session",
-        );
-        setError("Failed to initialize session");
-      }
-    };
-
-    initializeSession();
-  }, [storage, shopDomain, customerId]);
+  // No session bootstrap.
+  //
+  // The endpoint that backed it is gone, and nothing here needs it. Holdout
+  // bucketing keys on `customerId`, which a customer account extension always
+  // has because the shopper is signed in — so unlike the storefront there is
+  // no anonymous visitor to identify and no device storage to consent to.
+  //
+  // Attribution keys on the impression id returned with each recommendation.
 
   // Memoized column configuration
   const memoizedColumnConfig = useMemo(() => columnConfig, [columnConfig]);
 
+  // Report a click-through, then hand back the URL to navigate to.
+  //
+  // Venus has no cart, so this is the only outcome it can observe: the shopper
+  // will add the product on its own page using the theme's button. The backend
+  // reconciles the click against the order later by checking whether this
+  // exact product was bought inside the attribution window.
   const trackRecommendationClick = async (
     productId: string,
     position: number,
     productUrl: string,
+    impressionId?: string,
   ): Promise<string> => {
-    try {
-      if (!sessionId || !storage) {
-        return productUrl;
-      }
-
-      const success = await trackRecommendationClickAPI(
-        storage,
-        shopDomain,
-        context,
-        productId,
-        position,
-        sessionId,
-        customerId,
-        { source: `${context}_recommendation` },
-      );
-
-      // Note: We don't delete session on tracking failure
-      // - Network errors don't invalidate the session
-      // - Session recovery is handled by trackUnifiedInteraction
-      // - Session will expire naturally after 30 minutes
-      if (!success) {
-        // Just log - session may still be valid for next request
-        logger.warn(
-          "Recommendation click tracking failed, but keeping session",
-        );
-      }
-    } catch (error) {
-      logger.error(
-        {
-          error: error instanceof Error ? error.message : String(error),
-          shop_domain: shopDomain,
-        },
-        "Failed to track recommendation click",
-      );
-      // Don't delete session on error - might be network issue
-      // Session recovery will happen automatically if needed
+    if (storage && impressionId) {
+      // Not awaited beyond the call itself; navigation follows immediately and
+      // the request is sent with keepalive.
+      await reportClick(storage, impressionId);
     }
-
     return productUrl;
-  };
-
-  // Track recommendation view when user actually views them
-  const trackRecommendationViewHandler = async () => {
-    if (products.length === 0 || !sessionId || !storage) {
-      return;
-    }
-
-    try {
-      const productIds = products.map((product) => product.id);
-      const success = await trackRecommendationViewAPI(
-        storage,
-        shopDomain,
-        context,
-        sessionId,
-        customerId,
-        productIds,
-        { source: `${context}_page` },
-      );
-
-      // Note: We don't delete session on tracking failure
-      // - Network errors don't invalidate the session
-      // - Session recovery is handled by trackUnifiedInteraction
-      // - Session will expire naturally after 30 minutes
-      if (!success) {
-        // Just log - session may still be valid for next request
-        logger.warn("Recommendation view tracking failed, but keeping session");
-      }
-    } catch (error) {
-      logger.error(
-        {
-          error: error instanceof Error ? error.message : String(error),
-          shop_domain: shopDomain,
-        },
-        "Failed to track recommendation view",
-      );
-      // Don't delete session on error - might be network issue
-      // Session recovery will happen automatically if needed
-    }
   };
 
   // Fetch recommendations
   useEffect(() => {
-    if (!storage || !sessionId) {
+    if (!storage) {
       return;
     }
 
@@ -251,7 +136,6 @@ export function useRecommendations({
           context,
           limit,
           user_id: customerId,
-          session_id: sessionId,
           shop_domain: shopDomain,
         });
 
@@ -272,6 +156,8 @@ export function useRecommendations({
                   ? `https://${shopDomain}/products/${rec.handle}`
                   : rec.handle),
               variants: rec.variants || [],
+              // Returned by the serve path; required to attribute a click.
+              impressionId: rec.impression_id,
             }),
           );
 
@@ -294,14 +180,13 @@ export function useRecommendations({
     };
 
     fetchRecommendations();
-  }, [customerId, context, limit, sessionId, shopDomain, storage]);
+  }, [customerId, context, limit, shopDomain, storage]);
 
   return {
     loading,
     products,
     error,
     trackRecommendationClick,
-    trackRecommendationView: trackRecommendationViewHandler,
     columnConfig: memoizedColumnConfig,
   };
 }

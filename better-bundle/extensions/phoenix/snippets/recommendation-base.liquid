@@ -17,44 +17,19 @@
   window.shopDomain = {{ shop.permanent_domain | json }};
   window.customerId = {{ customer.id | json }};
   window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
-  // Smart context detection - override block context if needed
-  {% assign detected_context = context %}
+  // The caller passes the context; there is only one block and one context.
+  window.context = '{{ context }}';
 
-  {% comment %} Auto-detect context based on page type if context is 'cart' {% endcomment %}
-  {% if context == 'cart' %}
-    {% if template.name == 'index' or template.name == 'page' %}
-      {% assign detected_context = 'homepage' %}
-    {% elsif template.name == 'product' %}
-      {% assign detected_context = 'product_page' %}
-    {% elsif template.name == 'collection' %}
-      {% assign detected_context = 'collection_page' %}
-    {% endif %}
-  {% endif %}
+  // Passed by the block, which only renders when a product is in scope.
+  window.productId = {{ product_id | json }};
 
-  window.context = '{{ detected_context }}';
-
-  // Add context-specific data from blocks
-  {% if detected_context == 'homepage' %}
-    window.visitorStrategy = '{{ block.settings.visitor_strategy | default: "auto" }}';
-  {% endif %}
-
-  {% if detected_context == 'product_page' %}
-    window.productId = {{ product.id | json }};
-  {% endif %}
-
-  {% if detected_context == 'collection_page' %}
-    window.collectionId = {{ collection.id | json }};
-  {% endif %}
-
-  {% if product_id %}
-    window.productId = {{ product_id | json }};
-  {% endif %}
-
-  {% if collection_id %}
-    window.collectionId = {{ collection_id | json }};
-  {% endif %}
-
-  // Extract session ID from cart attributes
+  // Session id from cart attributes.
+  //
+  // No longer used for attribution — that travels on the cart line item now.
+  // It is still sent with the recommendation request because HoldoutService
+  // hashes it to assign the control/treatment bucket, and an anonymous shopper
+  // must stay in the same bucket across page loads or the incrementality
+  // measurement is meaningless. Do not remove.
   {% assign session_id = null %}
   {% for attribute in cart.attributes %}
     {% if attribute.first == 'bb_recommendation_session_id' %}
@@ -67,7 +42,8 @@
 
 <!-- Load our custom JavaScript files in correct order -->
 <script src="{{ 'config.js' | asset_url }}" defer></script>
-<script src="{{ 'analytics.js' | asset_url }}" defer></script>
+<script src="{{ 'visitor-id.js' | asset_url }}" defer></script>
+<script src="{{ 'attribution.js' | asset_url }}" defer></script>
 <!-- JWT Authentication (load synchronously before others) -->
 <script src="{{ 'jwtTokenManager.js' | asset_url }}"></script>
 <script src="{{ 'api.js' | asset_url }}" defer></script>

@@ -103,25 +103,3 @@ export function getBillingNotifications(
 
   return notifications;
 }
-
-/**
- * Generate a notification when the trial is about to expire.
- * Call this separately with trial days-remaining data.
- */
-export function getTrialExpiryNotification(
-  daysRemaining: number,
-): NotificationMessage | null {
-  if (daysRemaining <= 0) return null;
-
-  if (daysRemaining <= 3) {
-    return {
-      id: "trial_expiring_soon",
-      type: "warning",
-      title: "Trial Expiring Soon",
-      message: `Your free trial ends in ${daysRemaining} day${daysRemaining === 1 ? "" : "s"}. Set up billing to avoid interruption.`,
-      action: { label: "Set Up Billing", url: "/app/billing" },
-    };
-  }
-
-  return null;
-}

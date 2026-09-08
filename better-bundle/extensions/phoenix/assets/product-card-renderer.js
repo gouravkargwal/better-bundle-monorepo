@@ -31,7 +31,7 @@ class ProductCardRenderer {
   }
 
   // Create product slide from recommendation data
-  createProductSlide(product, index, analyticsApi = null, sessionId, context = "cart") {
+  createProductSlide(product, index, analyticsApi = null, context = "cart") {
     const slide = document.createElement("div");
     slide.className = "swiper-slide";
 
@@ -86,7 +86,7 @@ class ProductCardRenderer {
     const mainImage = images[0] || { url: "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAwIiBoZWlnaHQ9IjQwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjY2NjY2NjIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIyNCIgZmlsbD0iIzY2NjY2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg==", alt_text: "No Image" };
 
     slide.innerHTML = `
-      <div class="product-card" data-product-id="${product.id}" data-images='${JSON.stringify(images)}'>
+      <div class="product-card" data-product-id="${product.id}" data-impression-id="${product.impression_id || ''}" data-images='${JSON.stringify(images)}'>
         <div class="product-card__image-container">
           <img
             class="product-card__image"
@@ -96,7 +96,7 @@ class ProductCardRenderer {
             data-product-id="${product.id}"
             data-product-index="${index + 1}"
             data-product-url="${product.url || ''}"
-            data-session-id="${sessionId || ''}"
+            data-impression-id="${product.impression_id || ''}"
           >
           ${images.length > 1 ? `
             <div class="mobile-hint">Tap to see more</div>
@@ -124,7 +124,7 @@ class ProductCardRenderer {
           <!-- ✅ Backend ensures defaultVariant is in-stock, so button is always enabled initially -->
           <button class="product-card__btn" type="button" 
             data-product-id="${product.id}"
-            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variant_id || ""}', ${index + 1}, '${sessionId || ""}', '${context}')">
+            onclick="event.stopPropagation(); productCardManager.handleAddToCart('${product.id}', '${defaultVariant?.variant_id || ""}', ${index + 1}, '${context}')">
             Add to cart
           </button>
         </div>

@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { useRecommendations } from "./hooks/useRecommendations.js";
-import { trackAddToCart, getOrCreateSession } from "./api/analytics.js";
+import { recordOfferOutcome } from "./api/analytics.js";
 import { ProductCard } from "./components/ProductCard.jsx";
 import { getOptionValueFromVariant } from "./utils/productUtils.js";
 import { logger } from "./utils/logger.js";
@@ -60,7 +60,7 @@ function Extension() {
     return parseFloat(amount ? String(amount) : "0");
   }, [cost.totalAmount?.value?.amount]);
 
-  const { loading, products, error, trackRecommendationView } =
+  const { loading, products, error } =
     useRecommendations({
       context: "checkout_page",
       limit: 3,
@@ -72,17 +72,9 @@ function Extension() {
       checkoutStep: "order_summary",
     });
 
-  useEffect(() => {
-    if (
-      products &&
-      products.length > 0 &&
-      !loading &&
-      !hasTrackedView.current
-    ) {
-      hasTrackedView.current = true;
-      trackRecommendationView();
-    }
-  }, [products, loading, trackRecommendationView]);
+  // No view reporting: the impression row is written server-side the moment
+  // recommendations are served.
+
 
   // Auto-select default variants when products load
   useEffect(() => {
@@ -145,10 +137,26 @@ function Extension() {
 
       const quantity = quantities[productId] || 1;
 
+      // Stamp the impression onto the line itself, in addition to reporting
+      // the outcome below. The callback can be lost to a dropped connection
+      // mid-checkout; a line attribute cannot, because Shopify promotes it to
+      // the order. Two independent records of the same acceptance, and the
+      // backend deduplicates them by impression id.
+      const stamped = products?.find((p) => p.id === productId);
       const result = await shopify.applyCartLinesChange({
         type: "addCartLine",
         merchandiseId: merchandiseId,
         quantity: quantity,
+        ...(stamped?.impression_id
+          ? {
+              attributes: [
+                {
+                  key: "_bb_rec_impression_id",
+                  value: String(stamped.impression_id),
+                },
+              ],
+            }
+          : {}),
       });
 
       if (result.type === "success") {
@@ -157,16 +165,6 @@ function Extension() {
         const product = products?.find((p) => p.id === productId);
         const productName = product?.title || "Product";
         setSuccessMessage(`${productName} added to cart successfully`);
-
-        const sessionId = await getOrCreateSession(
-          storage,
-          shopDomain,
-          customerId,
-          null,
-          null,
-          null,
-          null,
-        );
 
         const allAddedProducts = Array.from(addedProducts);
         const productsArray = allAddedProducts.map((addedProductId) => ({
@@ -196,14 +194,6 @@ function Extension() {
         await shopify.applyMetafieldChange({
           type: "updateMetafield",
           namespace: "bb_recommendation",
-          key: "session_id",
-          value: sessionId,
-          valueType: "string",
-        });
-
-        await shopify.applyMetafieldChange({
-          type: "updateMetafield",
-          namespace: "bb_recommendation",
           key: "context",
           value: "checkout_page",
           valueType: "string",
@@ -225,22 +215,12 @@ function Extension() {
           valueType: "json_string",
         });
 
-        await trackAddToCart(
-          storage,
-          shopDomain,
-          "checkout_page",
-          productId,
-          variantId,
-          position,
-          customerId,
-          {
-            source: "mercury_recommendation",
-            cart_product_count: cartItems.length,
-            quantity: quantity,
-            checkout_step: "order_summary",
-            cart_value: cartValue,
-          },
-        );
+        // Record outcome for incrementality tracking
+        const product = products?.find((p) => p.id === productId);
+        if (product?.impression_id) {
+          const revenue = (product.price_amount || 0) * quantity;
+          recordOfferOutcome(product.impression_id, "accepted", revenue);
+        }
       }
     } catch (err) {
       logger.error({

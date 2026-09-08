@@ -3,13 +3,13 @@ import { useLocation } from "@remix-run/react";
 import NavItem from "./NavItem";
 
 interface EnhancedNavMenuProps {
-  isOnboarded: boolean; // ⬅️ PROP ACCEPT KAR
+  isOnboarded: boolean;
 }
 
 export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
   const location = useLocation();
 
-  // ⬅️ AGAR ONBOARDED NAHI HAI
+  // Not onboarded → show minimal nav
   if (!isOnboarded) {
     return (
       <NavMenu>
@@ -32,15 +32,15 @@ export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
     );
   }
 
-  // ⬅️ AGAR ONBOARDED HAI - FULL MENU
+  // Onboarded → show full menu
   return (
     <NavMenu>
       <NavItem
-        to="/app/dashboard"
-        isActive={location.pathname === "/app/dashboard"}
+        to="/app/impact"
+        isActive={location.pathname.startsWith("/app/impact")}
         prefetch="intent"
       >
-        Dashboard
+        Impact
       </NavItem>
 
       <NavItem

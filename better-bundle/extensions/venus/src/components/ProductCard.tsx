@@ -34,6 +34,8 @@ interface Product {
     price: string;
     available: boolean;
   }>;
+  // Impression this card was served from, reported when the card is pressed.
+  impressionId?: string;
 }
 
 interface ProductCardProps {
@@ -43,6 +45,7 @@ interface ProductCardProps {
     productId: string,
     position: number,
     productUrl: string,
+    impressionId?: string,
   ) => Promise<void>;
 }
 
@@ -136,7 +139,12 @@ export function ProductCard({
           kind="primary"
           onPress={async () => {
             try {
-              await onShopNow(product.id, position, product.url);
+              await onShopNow(
+                product.id,
+                position,
+                product.url,
+                product.impressionId,
+              );
             } catch (error) {
               logger.error(
                 {

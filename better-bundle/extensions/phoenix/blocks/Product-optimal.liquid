@@ -8,20 +8,17 @@
 %}
 
 {% comment %}
-  Smart Product Block - Auto-detects context based on page type
-  Can be used on any page and will automatically use the correct context
+  Product page only.
+
+  Recommendations are keyed on the product being viewed, so this block needs a
+  product in scope. Placed on any other template there is nothing to recommend
+  against, and the backend has no surface registered for those contexts — so it
+  renders nothing rather than firing a request that would be rejected.
 {% endcomment %}
 
-{% assign block_context = 'product_page' %}
-{% if template.name == 'index' or template.name == 'page' %}
-  {% assign block_context = 'homepage' %}
-{% elsif template.name == 'cart' %}
-  {% assign block_context = 'cart' %}
-{% elsif template.name == 'collection' %}
-  {% assign block_context = 'collection_page' %}
+{% if product and product.id %}
+  {% render 'recommendation-base', context: 'product_page', product_id: product.id, dummy_data: dummy_data %}
 {% endif %}
-
-{% render 'recommendation-base', context: block_context, product_id: product.id, dummy_data: dummy_data %}
 
 {% schema %}
 {
@@ -59,7 +56,7 @@
       ],
       "default": "center"
     },
-    { "type": "color", "id": "heading_color", "label": "Heading Color", "default": "#1e293b" },
+    { "type": "color", "id": "heading_color", "label": "Heading Color" },
     { "type": "checkbox", "id": "show_heading", "label": "Show Heading", "default": true },
 
     { "type": "header", "content": "Recommendations" },
@@ -74,6 +71,7 @@
     },
 
     { "type": "header", "content": "Card Styles" },
+    { "type": "paragraph", "content": "Leave colours empty to inherit your theme's own colours and fonts. Set one only where you want to override." },
     {
       "type": "range",
       "id": "card_border_radius",
@@ -83,11 +81,11 @@
       "step": 1,
       "default": 8
     },
-    { "type": "color", "id": "card_bg", "label": "Card Background", "default": "#ffffff" },
-    { "type": "color", "id": "title_color", "label": "Title Color", "default": "#1a202c" },
-    { "type": "color", "id": "price_color", "label": "Price Color", "default": "#2d3748" },
-    { "type": "color", "id": "button_bg", "label": "Button Background", "default": "#000000" },
-    { "type": "color", "id": "button_text", "label": "Button Text Color", "default": "#ffffff" },
+    { "type": "color", "id": "card_bg", "label": "Card Background" },
+    { "type": "color", "id": "title_color", "label": "Title Color" },
+    { "type": "color", "id": "price_color", "label": "Price Color" },
+    { "type": "color", "id": "button_bg", "label": "Button Background" },
+    { "type": "color", "id": "button_text", "label": "Button Text Color" },
     {
       "type": "range",
       "id": "button_border_radius",
@@ -101,7 +99,7 @@
     { "type": "header", "content": "Controls" },
     { "type": "checkbox", "id": "show_arrows", "label": "Show Arrows", "default": true },
     { "type": "checkbox", "id": "show_pagination", "label": "Show Pagination", "default": true },
-    { "type": "color", "id": "pagination_color", "label": "Pagination Color", "default": "#000000" },
+    { "type": "color", "id": "pagination_color", "label": "Pagination Color" },
     { "type": "checkbox", "id": "enable_autoplay", "label": "Enable Autoplay", "default": true },
     {
       "type": "range",

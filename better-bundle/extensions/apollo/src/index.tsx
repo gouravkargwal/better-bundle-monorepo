@@ -43,7 +43,9 @@ extend(
         },
       );
 
-      const shouldRender = result.success && result.recommendations?.length > 0;
+      // Check holdout status — if control group, don't render any offers
+      const isControl = result.holdout?.is_control === true;
+      const shouldRender = result.success && result.recommendations?.length > 0 && !isControl;
 
       if (shouldRender) {
         // Validate session data exists

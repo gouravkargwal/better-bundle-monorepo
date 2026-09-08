@@ -52,9 +52,3 @@ export interface BillingSetupData {
   monthlyFee: number;
   trialDays: number;
 }
-
-export interface BillingMetrics {
-  totalRevenue: number;
-  attributedRevenue: number;
-  currency: string;
-}

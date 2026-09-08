@@ -136,81 +136,80 @@ class NormalizationKafkaConsumer:
                     shop_id, data_type
                 )
 
-                # Trigger FBT model retraining for order-related data
-                await self._trigger_fbt_retraining_if_needed(shop_id, data_type)
+                # Keep recommendation edges in step with the new data
+                await self._refresh_edges_if_needed(shop_id, data_type)
             else:
                 logger.error(f"❌ Normalization failed for {data_type}")
         except Exception as e:
             logger.error(f"Normalization failed: {e}")
             raise
 
-    async def _trigger_fbt_retraining_if_needed(self, shop_id: str, data_type: str):
-        """
-        Trigger FBT model retraining for order-related data changes
+    async def _refresh_edges_if_needed(self, shop_id: str, data_type: str):
+        """Keep `product_edges` in step with newly normalized data.
 
-        This ensures FBT recommendations stay up-to-date with latest purchase data
+        Two different refreshes, because the two halves of an edge score come
+        from different places:
+
+        - order data changes what customers actually bought together, so the
+          co-purchase LLR is re-mined.
+        - product data changes the catalog, so the affected products are
+          re-embedded, re-enriched and re-resolved into fresh priors. This is
+          the incremental path: adding five products costs one LLM call, not a
+          full catalog pass.
+
+        Both run detached. A slow refresh must never hold up normalization, and
+        a failed one must never fail it either — the edges simply stay at their
+        previous values until the next event or the nightly batch.
         """
+        import asyncio
+
         try:
-            # Only retrain FBT for order-related data types
-            order_related_types = [
-                "orders",  # Main data type from normalization
-                "order",
-                "order_data", 
-                "line_item",
-                "line_item_data",
-                "order_paid",
-                "order_updated",
-                "order_created",
-            ]
+            kind = (data_type or "").lower()
 
-            if data_type.lower() not in order_related_types:
-                return  # Skip FBT retraining for non-order data
+            order_types = {
+                "orders", "order", "order_data", "line_item", "line_item_data",
+                "order_paid", "order_updated", "order_created",
+            }
+            product_types = {
+                "products", "product", "product_data",
+                "product_created", "product_updated",
+            }
 
-            logger.info(
-                f"🔄 Triggering FBT retraining for {data_type} in shop {shop_id}"
-            )
-
-            # Import FBT service
-            from app.recommandations.frequently_bought_together import (
-                FrequentlyBoughtTogetherService,
-            )
-
-            fbt_service = FrequentlyBoughtTogetherService()
-
-            # Trigger FBT model retraining in background
-            # This is non-blocking to avoid slowing down normalization
-            import asyncio
-
-            asyncio.create_task(
-                self._retrain_fbt_model(fbt_service, shop_id, data_type)
-            )
+            if kind in order_types:
+                logger.info(f"🔄 Re-mining co-purchases for shop {shop_id} ({kind})")
+                self._detach(self._mine_copurchases(shop_id), "co-purchase mining")
+            elif kind in product_types:
+                logger.info(f"🔄 Refreshing catalog priors for shop {shop_id} ({kind})")
+                self._detach(self._refresh_catalog(shop_id), "catalog refresh")
 
         except Exception as e:
-            logger.error(f"Failed to trigger FBT retraining: {e}")
-            # Don't raise - this shouldn't break normalization flow
+            logger.error(f"Failed to schedule edge refresh: {e}")
+            # Never raise: normalization succeeded and must not be rolled back.
 
-    async def _retrain_fbt_model(self, fbt_service, shop_id: str, data_type: str):
-        """
-        Background task to retrain FBT model
-        """
-        try:
-            logger.info(
-                f"🧠 Starting FBT model retraining for shop {shop_id} (triggered by {data_type})"
-            )
+    def _detach(self, coro, label: str):
+        """Fire and forget, but surface the failure if there is one."""
+        import asyncio
 
-            # Train FP-Growth model
-            result = await fbt_service.train_fp_growth_model(shop_id)
+        task = asyncio.create_task(coro)
+        task.add_done_callback(
+            lambda t: logger.error(f"❌ {label} failed: {t.exception()}")
+            if not t.cancelled() and t.exception()
+            else None
+        )
 
-            if result.get("success"):
-                logger.info(
-                    f"✅ FBT model retrained successfully for shop {shop_id}: "
-                    f"{result.get('association_rules', 0)} rules generated"
-                )
-            else:
-                logger.warning(
-                    f"⚠️ FBT model retraining failed for shop {shop_id}: "
-                    f"{result.get('error', 'Unknown error')}"
-                )
+    async def _mine_copurchases(self, shop_id: str):
+        from app.recommandations.edges.cooccurrence import CoPurchaseMiner
 
-        except Exception as e:
-            logger.error(f"❌ FBT model retraining error for shop {shop_id}: {e}")
+        result = await CoPurchaseMiner().run(shop_id)
+        logger.info(
+            f"✅ Co-purchase mining for shop {shop_id}: "
+            f"{result.get('pairs', 0)} pairs over "
+            f"{result.get('total_orders', 0)} orders"
+        )
+
+    async def _refresh_catalog(self, shop_id: str):
+        from app.recommandations.edges.install import EdgeInstallPipeline
+
+        report = await EdgeInstallPipeline().run(shop_id)
+        logger.info(f"✅ Catalog refresh for shop {shop_id}: {report.as_dict()}")
+

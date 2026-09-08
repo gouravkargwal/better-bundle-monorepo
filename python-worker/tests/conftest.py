@@ -1,7 +1,5 @@
 import os
 
-# Set required env vars before any app imports trigger Settings validation
-os.environ.setdefault("GORSE_BASE_URL", "http://localhost:8088")
 
 import pytest
 

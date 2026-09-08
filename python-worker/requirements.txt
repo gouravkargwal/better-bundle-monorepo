@@ -42,6 +42,10 @@ pandas==2.1.4
 gensim==4.3.2
 numpy==1.24.3
 
+# Cross-encoder / bi-encoder for semantic product similarity (Phase 1)
+sentence-transformers==3.4.1
+pgvector==0.3.6
+
 # Google Gemini / Vertex AI (Gorse LLM reranking + item embeddings)
 google-genai==1.9.0
 

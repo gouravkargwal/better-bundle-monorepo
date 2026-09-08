@@ -9,14 +9,10 @@ from app.core.logging import get_logger
 
 # Import all Kafka consumers
 from app.consumers.kafka.normalization_consumer import NormalizationKafkaConsumer
-from app.consumers.kafka.feature_computation_consumer import (
-    FeatureComputationKafkaConsumer,
-)
 from app.consumers.kafka.data_collection_consumer import DataCollectionKafkaConsumer
 from app.consumers.kafka.purchase_attribution_consumer import (
     PurchaseAttributionKafkaConsumer,
 )
-from app.consumers.kafka.customer_linking_consumer import CustomerLinkingKafkaConsumer
 from app.consumers.kafka.billing_consumer import BillingKafkaConsumer
 
 logger = get_logger(__name__)
@@ -48,9 +44,7 @@ class KafkaConsumerManager:
                     shopify_service=self.shopify_service
                 ),
                 "normalization": NormalizationKafkaConsumer(),
-                "feature_computation": FeatureComputationKafkaConsumer(),
                 "purchase_attribution": PurchaseAttributionKafkaConsumer(),
-                "customer_linking": CustomerLinkingKafkaConsumer(),
                 "billing": BillingKafkaConsumer(),
             }
 
@@ -215,6 +209,3 @@ class KafkaConsumerManager:
             logger.exception(f"❌ Failed to restart {consumer_name} consumer: {e}")
             raise
 
-
-# Global consumer manager instance
-consumer_manager = KafkaConsumerManager()

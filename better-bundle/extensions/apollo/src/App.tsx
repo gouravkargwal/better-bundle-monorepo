@@ -6,6 +6,7 @@ import {
   trackRecommendationClick,
   trackAddToOrder,
   trackRecommendationDecline,
+  recordOfferOutcome,
 } from "./api/analytics";
 import { ImageCarousel } from "./components/ImageCarousel";
 import {
@@ -200,7 +201,13 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
 
   // Handle declining an offer - show next product or complete
   const handleDecline = useCallback(async () => {
-    // Track decline
+    // Track decline for incrementality
+    const declineImpressionId = currentProduct?.impression_id;
+    if (declineImpressionId) {
+      await recordOfferOutcome(declineImpressionId, "declined");
+    }
+
+    // Track decline (legacy)
     if (shopDomain && sessionId && currentProduct && customerId) {
       await trackRecommendationDecline(
         shopDomain,
@@ -208,7 +215,7 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
         currentProduct.id,
         currentOfferIndex + 1,
         customerId,
-        currentProduct, // Pass full product data
+        currentProduct,
         {
           source: "apollo_post_purchase",
           customer_id: customerId,
@@ -554,6 +561,15 @@ function App({ storage, calculateChangeset, applyChangeset, done }: any) {
                 applyResult.calculatedPurchase?.totalPriceSet?.shopMoney
                   ?.amount,
             },
+          );
+        }
+
+        // Record outcome for incrementality tracking
+        if (product.impression_id) {
+          await recordOfferOutcome(
+            product.impression_id,
+            "accepted",
+            Number(selectedVariant.price) * quantity,
           );
         }
 

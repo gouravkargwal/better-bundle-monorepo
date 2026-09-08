@@ -1,5 +1,5 @@
 import { BACKEND_URL } from "../config/constants";
-import type { ProductRecommendation, CombinedAPIResponse } from "../types";
+import type { ProductRecommendation } from "../types";
 import { logger } from "../utils/logger";
 import { makeAuthenticatedRequest } from "../utils/jwt";
 
@@ -64,29 +64,33 @@ export const getSessionAndRecommendations = async (
 
   const promise = (async () => {
     try {
-      const url = `${BACKEND_URL}/api/session/get-session-and-recommendations`;
+      // The combined session+recommendations endpoint was removed with the
+      // behaviour-tracking pipeline. Recommendations now come from the standard
+      // serve path, keyed on what was just purchased.
+      //
+      // The session id below is generated client-side rather than fetched. Its
+      // only remaining job is holdout bucket stability, and the interstitial
+      // renders exactly once per order — there is no second page load for a
+      // stored id to stay consistent with. Bucketing prefers `customer_id`
+      // anyway, which a completed order carries whenever the buyer has an
+      // account.
+      const url = `${BACKEND_URL}/api/v1/recommendations`;
+      const clientSessionId =
+        typeof crypto !== "undefined" && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `apollo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 
       const payload = {
         shop_domain: shopDomain,
-        customer_id: customerId ? String(customerId) : null,
-        browser_session_id: undefined,
-        client_id: undefined,
-        user_agent:
-          typeof navigator !== "undefined" ? navigator.userAgent : undefined,
-        ip_address: undefined,
-        referrer:
-          typeof document !== "undefined" ? document.referrer : undefined,
-        page_url:
-          typeof window !== "undefined" ? window.location.href : undefined,
-
-        // Recommendation fields
-        order_id: orderId ? String(orderId) : null,
-        purchased_products: purchasedProductIds || [],
+        context: "post_purchase",
+        product_ids: purchasedProductIds || [],
+        user_id: customerId ? String(customerId) : undefined,
+        session_id: clientSessionId,
         limit: Math.min(Math.max(limit, 1), 3),
-        extension_type: "apollo",
-        // Additional metadata
         metadata: {
           source: "apollo_post_purchase",
+          order_id: orderId ? String(orderId) : null,
+          extension_type: "apollo",
           ...metadata,
         },
       };
@@ -121,7 +125,7 @@ export const getSessionAndRecommendations = async (
         );
       }
 
-      const result: CombinedAPIResponse = await response.json();
+      const result = await response.json();
 
       if (!result.success) {
         logger.error(
@@ -137,22 +141,8 @@ export const getSessionAndRecommendations = async (
         throw new Error(result.message || "API returned success: false");
       }
 
-      if (!result.session_data || !result.session_data.session_id) {
-        logger.error(
-          {
-            error: new Error("Invalid response: missing session data"),
-            shop_domain: shopDomain,
-            customerId,
-            orderId,
-            purchasedProductIds,
-          },
-          "Invalid response: missing session data",
-        );
-        throw new Error("Invalid response: missing session data");
-      }
-
       const finalResult = {
-        sessionId: result.session_data.session_id,
+        sessionId: clientSessionId,
         recommendations: result.recommendations || [],
         success: true,
       };

@@ -139,3 +139,11 @@ Thumbs.db
 .local/
 local/
 generated_data/
+# outreach: secrets and merchant contact data (PII) — code is tracked, data is not
+outreach/.env.dev
+outreach/outreach.db
+outreach/outreach.db-shm
+outreach/outreach.db-wal
+outreach/prospects.csv
+outreach/processed_log.csv
+outreach/__pycache__/

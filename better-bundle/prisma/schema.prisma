@@ -664,6 +664,7 @@ model shops {
   suspension_reason          String?                      @db.VarChar(255)
   service_impact             String?                      @db.VarChar(50)
   email                      String?                      @db.VarChar(255)
+  holdout_disabled           Boolean                      @default(false)
   last_analysis_at           DateTime?                    @db.Timestamptz(6)
   id                         String                       @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   created_at                 DateTime                     @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
@@ -897,6 +898,32 @@ enum subscription_status_enum {
   SUSPENDED
   CANCELLED
   EXPIRED
+}
+
+model offer_impressions {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id             String    @db.VarChar
+  session_id          String?   @db.VarChar(255)
+  customer_id         String?   @db.VarChar
+  surface             String    @db.VarChar(20)
+  offer_type          String    @db.VarChar(20)
+  offer_id            String?   @db.VarChar(255)
+  variant_id          String?   @db.VarChar(255)
+  is_control          Boolean
+  outcome             String    @db.VarChar(20)
+  outcome_at          DateTime? @db.Timestamptz(6)
+  revenue_added       Decimal?  @db.Decimal(10, 2)
+  metadata            Json?
+  impression_group_id String?   @db.VarChar
+  created_at          DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at          DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops               shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([shop_id, created_at], map: "ix_oi_shop_date")
+  @@index([shop_id, surface, created_at], map: "ix_oi_funnel")
+  @@index([shop_id, is_control, created_at], map: "ix_oi_control")
+  @@index([shop_id, offer_id, outcome], map: "ix_oi_offers")
+  @@index([impression_group_id], map: "ix_oi_impression_group")
 }
 
 enum subscription_type_enum {

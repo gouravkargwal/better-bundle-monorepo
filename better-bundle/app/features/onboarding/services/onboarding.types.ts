@@ -13,18 +13,3 @@ export interface OnboardingData {
 export interface OnboardingError {
   error: string;
 }
-
-export interface ShopData {
-  id: string;
-  name: string;
-  myshopifyDomain: string;
-  primaryDomain: {
-    host: string;
-    url: string;
-  };
-  email: string;
-  currencyCode: string;
-  plan: {
-    displayName: string;
-  };
-}

@@ -16,8 +16,8 @@ from app.core.database.models import (
     OrderData,
     LineItemData,
     UserSession,
-    UserInteraction,
 )
+from app.core.database.models.offer_impression import OfferImpression
 from app.domains.billing.services.billing_service_v2 import BillingServiceV2
 from app.domains.billing.models import PurchaseEvent
 from app.core.logging import get_logger
@@ -251,20 +251,20 @@ class PurchaseAttributionKafkaConsumer:
                             for k, v in order_metafields.items()
                         ]
 
-                # ✅ UPDATED: Check for tracking data in addition to UserInteraction records
-                # This ensures orders with line item properties or metafields (Apollo)
-                # are processed even if UserInteraction records don't exist
+                # Line-item properties / Apollo metafields are checked as well
+                # as impressions, so an order carrying extension tracking data
+                # is still processed if the impression row is missing.
                 has_tracking_data = self._has_tracking_data_from_extensions(
                     products, order_metafields_list
                 )
-                has_interactions = await self._has_extension_interactions(
+                has_impressions = await self._has_offer_impressions(
                     session, shop_id, customer_id, user_session
                 )
 
-                # Process if we have either tracking data OR interactions
-                if not has_tracking_data and not has_interactions:
+                # Process if we have either tracking data OR a shown offer
+                if not has_tracking_data and not has_impressions:
                     logger.debug(
-                        f"⏭️ Skipping order {order_id} - no tracking data or interactions found"
+                        f"⏭️ Skipping order {order_id} - no tracking data or offers shown"
                     )
                     return
 
@@ -295,49 +295,49 @@ class PurchaseAttributionKafkaConsumer:
             logger.error("Failed to process purchase attribution", error=str(e))
             raise
 
-    async def _has_extension_interactions(
+    async def _has_offer_impressions(
         self, session, shop_id: str, customer_id: str, user_session
     ) -> bool:
-        """
-        Check if customer has any extension interactions that could drive attribution.
-        Only processes orders from customers who have interacted with our extensions.
+        """Whether we showed this shopper an offer that could be attributed.
+
+        A cheap pre-filter so attribution does not run for every order in the
+        store — only for shoppers we actually put an offer in front of.
+
+        Reads `offer_impressions`, which is the only table that records offers
+        shown. The old implementation queried `user_interactions`; that table
+        has had no writer since the behaviour-tracking pipeline was removed, so
+        the check returned False for every order and silently suppressed all
+        attribution.
+
+        Control impressions are excluded: a held-out shopper saw no offer, so
+        nothing about their order is attributable.
         """
         try:
-            # Check for interactions in the last 30 days
             cutoff_time = now_utc() - timedelta(days=30)
 
-            # Build query conditions
-            query_conditions = [
-                UserInteraction.shop_id == shop_id,
-                UserInteraction.created_at >= cutoff_time,
-                UserInteraction.extension_type.in_(
-                    [
-                        "apollo",
-                    ]
-                ),  # Attribution-eligible extensions
+            conditions = [
+                OfferImpression.shop_id == shop_id,
+                OfferImpression.created_at >= cutoff_time,
+                OfferImpression.is_control.is_(False),
             ]
 
-            # Add customer or session filter
             if customer_id:
-                query_conditions.append(UserInteraction.customer_id == customer_id)
-            elif user_session and hasattr(user_session, "id"):
-                query_conditions.append(UserInteraction.session_id == user_session.id)
+                conditions.append(OfferImpression.customer_id == customer_id)
+            elif user_session and getattr(user_session, "id", None):
+                conditions.append(OfferImpression.session_id == user_session.id)
+            else:
+                # Nothing to join on. The attribution engine would attribute
+                # zero anyway, so skip the work rather than scanning the shop.
+                return False
 
-            # Check for any interactions from attribution-eligible extensions
-            interactions_query = (
-                select(UserInteraction).where(and_(*query_conditions)).limit(1)
-            )  # We only need to know if any exist
-
-            interactions_result = await session.execute(interactions_query)
-            interactions = interactions_result.scalars().all()
-
-            has_interactions = len(interactions) > 0
-
-            return has_interactions
+            query = select(OfferImpression.id).where(and_(*conditions)).limit(1)
+            result = await session.execute(query)
+            return result.scalar_one_or_none() is not None
 
         except Exception as e:
-            logger.error(f"Error checking extension interactions: {e}")
-            # If we can't check, err on the side of processing to avoid missing attributions
+            logger.error(f"Error checking offer impressions: {e}")
+            # Err toward processing: the engine attributes zero when there is
+            # nothing to find, so a false positive costs a query, not money.
             return True
 
     def _has_tracking_data_from_extensions(

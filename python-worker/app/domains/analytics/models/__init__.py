@@ -1,37 +1,9 @@
-"""
-Unified Analytics Models for BetterBundle
+from enum import Enum
 
-This module contains all the data models for the unified analytics system
-that tracks user interactions across all extensions (Atlas, Apollo, Mercury).
-"""
 
-from .session import (
-    UserSession,
-    SessionCreate,
-    SessionUpdate,
-    SessionQuery,
-    SessionStatus,
-)
-from .interaction import UserInteraction, InteractionCreate, InteractionType
-from .attribution import PurchaseAttribution, AttributionCreate, AttributionWeight
-from .extension import ExtensionType, ExtensionContext
+class ExtensionType(str, Enum):
+    """Extension types in the BetterBundle ecosystem"""
 
-__all__ = [
-    # Session models
-    "UserSession",
-    "SessionCreate",
-    "SessionUpdate",
-    "SessionQuery",
-    "SessionStatus",
-    # Interaction models
-    "UserInteraction",
-    "InteractionCreate",
-    "InteractionType",
-    # Attribution models
-    "PurchaseAttribution",
-    "AttributionCreate",
-    "AttributionWeight",
-    # Extension models
-    "ExtensionType",
-    "ExtensionContext",
-]
+    ATLAS = "atlas"
+    APOLLO = "apollo"
+    MERCURY = "mercury"

@@ -93,12 +93,6 @@ class ShopifySettings(BaseSettings):
 class MLSettings(BaseSettings):
     """Machine Learning configuration settings"""
 
-    # Gorse Integration
-    ENABLE_GORSE_SYNC: bool = Field(default=False, env="ENABLE_GORSE_SYNC")
-    GORSE_BASE_URL: str = Field(..., env="GORSE_BASE_URL")
-    GORSE_API_KEY: str = Field(default="", env="GORSE_API_KEY")
-    GORSE_MASTER_KEY: str = Field(default="", env="GORSE_MASTER_KEY")
-
     # Training Configuration
     MIN_ORDERS_FOR_TRAINING: int = Field(default=1, env="MIN_ORDERS_FOR_TRAINING")
     MIN_PRODUCTS_FOR_TRAINING: int = Field(default=20, env="MIN_PRODUCTS_FOR_TRAINING")
@@ -110,6 +104,14 @@ class MLSettings(BaseSettings):
     PRICE_TIER_LOW_MAX: float = Field(default=20.0, env="PRICE_TIER_LOW_MAX")
     PRICE_TIER_HIGH_MIN: float = Field(default=100.0, env="PRICE_TIER_HIGH_MIN")
     TIME_DECAY_LAMBDA: float = Field(default=0.07, env="TIME_DECAY_LAMBDA")
+
+    # Cross-encoder / bi-encoder settings (Phase 1 — semantic similarity)
+    CROSS_ENCODER_ENABLED: bool = Field(default=True, env="CROSS_ENCODER_ENABLED")
+    BI_ENCODER_MODEL: str = Field(default="all-MiniLM-L6-v2", env="BI_ENCODER_MODEL")
+    CROSS_ENCODER_MODEL: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2", env="CROSS_ENCODER_MODEL"
+    )
+    ENABLE_HEAVY_RERANK: bool = Field(default=False, env="ENABLE_HEAVY_RERANK")
 
     # Google AI (Gemini / Vertex AI) - Gorse LLM reranking + item embeddings
     # Gated separately from AI_PROVIDER since embedding calls cost money per item;
@@ -123,7 +125,7 @@ class MLSettings(BaseSettings):
         default="gemini-embedding-001", env="AI_EMBEDDING_MODEL"
     )
     AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
-    AI_CHAT_MODEL: str = Field(default="gemini-2.0-flash-lite", env="AI_CHAT_MODEL")
+    AI_CHAT_MODEL: str = Field(default="gemini-2.5-flash-lite", env="AI_CHAT_MODEL")
     AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
 
 
@@ -265,7 +267,6 @@ class Settings(BaseSettings):
     COMPLETION_RESULTS_STREAM: str = "completion-results"
     COMPLETION_EVENTS_STREAM: str = "completion-events"
     BEHAVIORAL_EVENTS_STREAM: str = "behavioral-events"
-    GORSE_SYNC_STREAM: str = "gorse-sync"
 
     # Worker Configuration (Direct access for backward compatibility)
     @property

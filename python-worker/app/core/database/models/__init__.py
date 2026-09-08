@@ -1,23 +1,10 @@
 """
 SQLAlchemy models for BetterBundle Python Worker
-
-This module contains all SQLAlchemy models based on the Prisma schema.
-Models are organized by functionality and include proper relationships,
-indexes, and constraints.
 """
 
 # Import all models for easy access
 from .base import Base
 from .enums import (
-    RawSourceType,
-    RawDataFormat,
-    BillingPlanType,
-    BillingPlanStatus,
-    BillingCycle,
-    InvoiceStatus,
-    ExtensionType,
-    AppBlockTarget,
-    # New enums for redesigned billing system
     SubscriptionPlanType,
     SubscriptionStatus,
     BillingCycleStatus,
@@ -46,28 +33,17 @@ from .raw_data import (
     RawCollection,
 )
 
-# Feature models
-from .features import (
-    UserFeatures,
-    ProductFeatures,
-    CollectionFeatures,
-    CustomerBehaviorFeatures,
-    InteractionFeatures,
-    SessionFeatures,
-    ProductPairFeatures,
-    SearchProductFeatures,
-)
-
-# Identity models
-from .identity import UserIdentityLink
-
-# Session and interaction models
+# Session and tracking
 from .user_session import UserSession
-from .user_interaction import UserInteraction
 from .purchase_attribution import PurchaseAttribution
 
-# Billing models (legacy - removed)
-# Old billing models have been replaced with new subscription system
+# Product vectors (cross-encoder / bi-encoder embeddings)
+from .identity import UserIdentityLink
+from .product_vector import ProductVector
+from .product_edge import ProductEdge, EDGE_TYPES, RECOMMENDABLE_EDGE_TYPES
+
+# Offer tracking
+from .offer_impression import OfferImpression
 
 # New redesigned billing models
 from .subscription_plan import SubscriptionPlan
@@ -77,24 +53,9 @@ from .billing_cycle import BillingCycle
 # Suspension audit log
 from .suspension_audit_log import SuspensionAuditLog
 
-# Trial configuration models
-
-# Extension models
-
 # Export all models
 __all__ = [
-    # Base
     "Base",
-    # Enums
-    "RawSourceType",
-    "RawDataFormat",
-    "BillingPlanType",
-    "BillingPlanStatus",
-    "BillingCycle",
-    "InvoiceStatus",
-    "ExtensionType",
-    "AppBlockTarget",
-    # New enums for redesigned billing system
     "SubscriptionPlanType",
     "SubscriptionStatus",
     "BillingCycleStatus",
@@ -105,7 +66,6 @@ __all__ = [
     "CommissionStatus",
     "ChargeType",
     "SubscriptionType",
-    # Core models
     "Shop",
     "Session",
     "OrderData",
@@ -113,31 +73,20 @@ __all__ = [
     "ProductData",
     "CustomerData",
     "CollectionData",
-    # Raw data models
     "RawOrder",
     "RawProduct",
     "RawCustomer",
     "RawCollection",
-    # Feature models
-    "UserFeatures",
-    "ProductFeatures",
-    "CollectionFeatures",
-    "CustomerBehaviorFeatures",
-    "InteractionFeatures",
-    "SessionFeatures",
-    "ProductPairFeatures",
-    "SearchProductFeatures",
-    # Identity
-    "UserIdentityLink",
-    # Session and interaction
     "UserSession",
-    "UserInteraction",
     "PurchaseAttribution",
-    # New redesigned billing models
+    "OfferImpression",
+    "UserIdentityLink",
+    "ProductVector",
+    "ProductEdge",
+    "EDGE_TYPES",
+    "RECOMMENDABLE_EDGE_TYPES",
     "SubscriptionPlan",
     "ShopSubscription",
     "BillingCycle",
     "SuspensionAuditLog",
-    # Trial configuration models
-    # Extension models
 ]
