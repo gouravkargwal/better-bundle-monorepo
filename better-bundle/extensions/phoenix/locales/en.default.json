@@ -1,0 +1,17 @@
+{
+  "recommendations": {
+    "title": "You might also like",
+    "addToCart": "Add to Cart",
+    "productModal": {
+      "title": "Select Options",
+      "size": "Size",
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large",
+      "color": "Color",
+      "quantity": "Quantity",
+      "cancel": "Cancel",
+      "addToCart": "Add to Cart"
+    }
+  }
+}
