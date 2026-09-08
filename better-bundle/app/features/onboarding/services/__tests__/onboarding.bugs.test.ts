@@ -57,7 +57,9 @@ function defaultPlan() {
     is_active: true,
     is_default: true,
     monthly_fee: 29,
-    trial_days: 14,
+    commission_rate: 0.03,
+    cap_amount: 299,
+    trial_revenue_threshold: 1000,
   };
 }
 
@@ -171,22 +173,23 @@ describe("OnboardingService — BUG TESTS", () => {
     });
   });
 
-  // ─── BUG 4: Missing trial_duration_days in trial subscription ──────
+  // ─── BUG 4: trial must not carry a day count ──────────────────────────
 
-  describe("BUG 4: Trial subscription should set trial_duration_days from plan", () => {
-    it("should set trial_duration_days from plan trial_days", async () => {
+  describe("BUG 4: Trial subscription is revenue-gated, not time-gated", () => {
+    it("creates the trial without any duration", async () => {
       const admin = mockAdminWebPixelSuccess();
       const session = defaultSession();
       const mockTx = setupFullOnboardingMocks();
 
       await service.completeOnboarding(session, admin);
 
-      // BUG (fixed): flat fee trial subscription should set trial_duration_days
-      expect(mockTx.shop_subscriptions.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          trial_duration_days: 14, // From defaultPlan().trial_days
-        }),
-      });
+      // The trial ends when attributed revenue reaches the plan threshold.
+      // Writing a day count here would reintroduce an expiry that charges a
+      // merchant we have not yet sold anything for.
+      const arg = mockTx.shop_subscriptions.create.mock.calls[0][0];
+      expect(arg.data).not.toHaveProperty("trial_duration_days");
+      expect(arg.data.subscription_type).toBe("TRIAL");
+      expect(arg.data.status).toBe("TRIAL");
     });
   });
 

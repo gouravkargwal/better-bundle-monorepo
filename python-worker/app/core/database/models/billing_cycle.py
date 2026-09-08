@@ -102,6 +102,9 @@ class BillingCycle(BaseModel):
     shop_subscription = relationship(
         "ShopSubscription", back_populates="billing_cycles"
     )
+    commission_records = relationship(
+        "CommissionRecord", back_populates="billing_cycle"
+    )
 
     # Indexes
     __table_args__ = (

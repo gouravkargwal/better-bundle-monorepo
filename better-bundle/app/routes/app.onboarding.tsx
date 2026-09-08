@@ -60,7 +60,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await onboardingService.completeOnboarding(session, admin);
 
     // Go straight to the analytics dashboard — SSE will stream AI progress
-    return redirect("/app/dashboard");
+    return redirect("/app/overview");
   } catch (error) {
     logger.error(
       { error, shop: session.shop },

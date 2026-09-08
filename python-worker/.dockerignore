@@ -1,0 +1,38 @@
+# Build context hygiene.
+#
+# Without this the context was 143MB, of which `logs/` alone was 136MB — shipped
+# to the Docker daemon on every single build.
+
+# Runtime output — the biggest offender by far
+logs/
+*.log
+
+# Python artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local environment — secrets must never enter an image layer
+.env
+.env.*
+!.env.example
+
+# Docs and dev-only material
+docs/
+tests/
+*.md
+
+# Editor / OS noise
+.DS_Store
+.idea/
+.vscode/

@@ -41,11 +41,28 @@ class InteractionType(str, Enum):
 
 
 class ExtensionType(str, Enum):
-    """Extension types"""
+    """Extension types.
 
-    APOLLO = "apollo"
-    ATLAS = "atlas"
-    MERCURY = "mercury"  # Shopify Plus checkout extensions
+    These must cover every value `offer_impressions.surface` can hold, because
+    the attribution engine maps surface -> extension and silently drops an
+    impression whose surface it does not recognise. Only apollo and mercury
+    were listed, so every phoenix (product page), venus (order status) and
+    thank-you-page sale was logged as "Unknown surface" and attributed nothing
+    — the widest-reach surfaces were the ones that could never be billed.
+
+    One entry per *extension*, not per placement. The thank-you block ships
+    inside mercury, so it maps to MERCURY rather than getting its own value.
+    """
+
+    APOLLO = "apollo"  # Post-purchase interstitial
+    MERCURY = "mercury"  # One extension, two placements:
+    #                      purchase.checkout.block.render (Plus only) and
+    #                      purchase.thank-you.block.render (all plans).
+    #                      The placement is recorded in offer_impressions.surface;
+    #                      this enum names the extension that earned the revenue.
+    PHOENIX = "phoenix"  # Theme app extension (product page)
+    VENUS = "venus"  # Customer account order status
+    ATLAS = "atlas"  # Retired behaviour tracker; kept for historical rows
 
 
 class UserInteraction(BaseModel):

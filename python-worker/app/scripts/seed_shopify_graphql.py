@@ -854,14 +854,63 @@ class ShopifyGraphQLSeeder:
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
-        # Create orders (40 orders for comprehensive ML training)
-        for i in range(1, 41):
+        # Baskets are deliberate, not random.
+        #
+        # This used to be `random.sample(product_list, 2)`, which produced
+        # pairings like "Yoga Mat + LED String Lights". The co-purchase miner
+        # then computed a perfectly correct LLR over meaningless data, so the
+        # observed half of every edge score was noise and there was no way to
+        # tell a real recommendation from a bad one.
+        #
+        # Products are named by title rather than list index. The previous
+        # curated configs in OrderGenerator used indices, and when the catalog
+        # grew past 8 clothing items every index after that shifted — the
+        # comments still said "Earbuds, Smart Watch" while pointing at
+        # "Silk Scarf, Leather Belt". A title cannot drift.
+        baskets = self.order_generator.realistic_baskets()
+        by_title = {p.get("title"): p for p in product_list if p.get("title")}
+
+        missing = sorted(
+            {t for basket in baskets for t in basket if t not in by_title}
+        )
+        if missing:
+            print(f"  ⚠️ Baskets reference {len(missing)} unknown products: {missing}")
+
+        resolved = [
+            [by_title[t] for t in basket if t in by_title] for basket in baskets
+        ]
+        resolved = [b for b in resolved if len(b) >= 2]
+        if not resolved:
+            print("  ⚠️ No basket could be resolved; falling back to random pairs")
+            resolved = [
+                random.sample(product_list, min(2, len(product_list)))
+                for _ in range(40)
+            ]
+
+        # Enough orders that every basket clears the blend's minimum.
+        #
+        # `blend()` gives observed data zero weight below
+        # BLEND_MIN_OBSERVATIONS (5) and full weight at
+        # BLEND_FULL_OBSERVATIONS (50). At the old flat 40 orders each pairing
+        # was seen 2-3 times, so the observed half of every score was gated off
+        # and only the priors were ever exercised — the co-purchase path could
+        # not be tested at all. Repeating each basket 8 times puts every pair
+        # comfortably over the minimum and part-way up the ramp.
+        repeats_per_basket = 8
+        order_count = len(resolved) * repeats_per_basket
+        print(
+            f"  → {order_count} orders across {len(resolved)} baskets "
+            f"({repeats_per_basket} observations per pairing)"
+        )
+
+        for i in range(1, order_count + 1):
             try:
-                # Pick random customer and products
                 customer_id = random.choice(customer_ids)
-                selected_products = random.sample(
-                    product_list, min(2, len(product_list))
-                )
+                # Cycle the baskets so each pairing is bought several times.
+                # One observation per pair would sit under the blend's minimum
+                # and contribute nothing, which is what made the seeded data
+                # untestable in the first place.
+                selected_products = resolved[(i - 1) % len(resolved)]
 
                 # Create line items using product variants
                 line_items = []

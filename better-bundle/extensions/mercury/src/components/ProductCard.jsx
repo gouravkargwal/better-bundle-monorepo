@@ -1,134 +1,98 @@
-import { QuantitySelector } from "./QuantitySelector.jsx";
-import { ProductOptions } from "./ProductOptions.jsx";
-import { ProductImageGallery } from "./ProductImageGallery.jsx";
 import {
-  getProductImages,
-  getAvailableOptions,
   getPrimaryImageUrl,
   getSelectedVariant,
-  hasValidVariantSelected,
   isVariantInStock,
 } from "../utils/productUtils.js";
 
 /**
- * Main product card component
+ * A single recommended product, rendered to match Shopify's own cart line.
+ *
+ * The block sits directly beneath "Items in cart" in the order summary, so it
+ * copies that row's anatomy exactly: square thumbnail, title with the variant
+ * underneath, price aligned right. A cross-sell that reads as part of checkout
+ * gets considered; one that reads as an advert gets distrusted and skipped, and
+ * checkout is the least forgiving place to look out of place.
+ *
+ * `s-product-thumbnail` rather than `s-image`: it is the component Shopify's
+ * cart lines use, it is always square at a fixed size, and it renders its own
+ * placeholder when `src` is missing. A plain `s-box` with only padding — the
+ * first attempt — collapsed to a thin grey strip instead of a square.
+ *
+ * What this replaced, and why:
+ *   - a full-width 16:9 hero image. ~170px at order-summary width, and three
+ *     cards made an ~800px wall in the column the shopper scrolls to reach
+ *     "Pay now".
+ *   - a variant picker per card. Asking someone to choose a size five seconds
+ *     before paying costs conversions. The default in-stock variant is added
+ *     and its name shown, so the choice is visible rather than hidden.
+ *   - a quantity stepper. The cart lines above already do that.
+ *   - a collapsible gallery. Nobody browses photos at checkout.
+ *
+ * No colours, radii or spacing beyond Shopify's own tokens: checkout inherits
+ * the merchant's Branding API settings, so anything hardcoded here would be
+ * wrong on some stores and cannot be right for all.
  */
 export function ProductCard({
   product,
   index,
   selectedVariants,
-  quantities,
-  selectedImageIndex,
-  expandedGalleries,
   adding,
-  onOptionChange,
-  onQuantityChange,
-  onImageSelect,
-  onGalleryToggle,
   onAddToCart,
 }) {
-  const images = getProductImages(product);
-  const hasMultipleImages = images.length > 1;
-  const availableOptions = getAvailableOptions(
-    product,
-    selectedVariants[product.id] || {},
-  );
-  const primaryImageUrl = getPrimaryImageUrl(product, selectedImageIndex);
-  const quantity = quantities[product.id] || 1;
   const isAdding = adding[product.id] || false;
+  const variantId = getSelectedVariant(product, selectedVariants);
+  const inStock = isVariantInStock(product, selectedVariants);
 
-  const handleAddToCart = () => {
-    const variantId = getSelectedVariant(product, selectedVariants);
-    onAddToCart(variantId, product.id, index);
-  };
-
-  const handleGalleryToggle = (e) => {
-    if (!e || !e.currentTarget) return;
-    const isOpen = "open" in e.currentTarget ? e.currentTarget.open : false;
-    onGalleryToggle(product.id, isOpen);
-  };
+  // Shown only when it says something the title does not — "Default Title" is
+  // Shopify's placeholder for a product with no options and would be noise.
+  const variant = product.variants?.find((v) => v.id === variantId);
+  const variantLabel =
+    variant?.title && variant.title !== "Default Title" ? variant.title : null;
 
   return (
-    <s-stack direction="block" gap="small-200">
-      {/* 🎯 MAIN PRODUCT CARD */}
-      <s-box
-        padding="base"
-        border="base"
-        borderRadius="base"
-        borderWidth="base"
-      >
-        <s-stack direction="block" gap="small-200">
-          {/* PRODUCT IMAGE - Landscape */}
-          {primaryImageUrl && (
-            <s-image
-              src={primaryImageUrl}
-              alt={product.title}
-              aspectRatio="16/9"
-              borderRadius="base"
-              objectFit="cover"
-            />
-          )}
-
-          {/* ROW 1: Title and Price */}
-          <s-stack direction="inline" justifyContent="space-between">
-            <s-text>{product.title}</s-text>
-            <s-text type="strong">{product.price}</s-text>
-          </s-stack>
-
-          {/* ROW 2: Options (full width) */}
-          <ProductOptions
-            options={availableOptions}
-            productId={product.id}
-            selectedOptions={selectedVariants[product.id] || {}}
-            onOptionChange={onOptionChange}
-          />
-
-          {/* ROW 3: Quantity and Cart Button (inline, cart button fills remaining space) */}
-          <s-stack
-            direction="inline"
-            gap="base"
-            alignItems="center"
-            justifyContent="space-between"
-          >
-            <QuantitySelector
-              productId={product.id}
-              quantity={quantity}
-              onDecrement={() => onQuantityChange(product.id, quantity - 1)}
-              onIncrement={() => onQuantityChange(product.id, quantity + 1)}
-              disabled={isAdding}
-            />
-
-            {/* Wrapper box to allow button to expand - using percentage to fill remaining space */}
-            <s-box minInlineSize="0" inlineSize="60%">
-              <s-button
-                onClick={handleAddToCart}
-                loading={isAdding}
-                disabled={
-                  isAdding ||
-                  !hasValidVariantSelected(product, selectedVariants) ||
-                  !isVariantInStock(product, selectedVariants)
-                }
-                variant="primary"
-                inlineSize="fill"
-              >
-                <s-icon type="cart" />
-              </s-button>
-            </s-box>
-          </s-stack>
-
-          {/* 🎯 COLLAPSIBLE IMAGE GALLERY */}
-          {hasMultipleImages && (
-            <ProductImageGallery
-              product={product}
-              images={images}
-              selectedImageIndex={selectedImageIndex}
-              expanded={expandedGalleries?.[product.id] || false}
-              onImageSelect={onImageSelect}
-              onToggle={handleGalleryToggle}
-            />
+    // Two groups with space-between, not three children in one row.
+    //
+    // The price has to sit flush against the container edge, the way the cart
+    // line above puts "$24.17" there. The first attempt gave the middle column
+    // `inlineSize="fill"` to absorb the spare width, but `fill` is not a valid
+    // s-box value — Box takes px, % , 0 or auto, and `fill` only exists on
+    // Button and Image. The invalid value was ignored, the box never grew, and
+    // the price ended up floating mid-row with dead space to its right.
+    <s-stack
+      direction="inline"
+      gap="base"
+      alignItems="center"
+      justifyContent="space-between"
+    >
+      {/* Left group: thumbnail and text stay adjacent. */}
+      <s-stack direction="inline" gap="base" alignItems="center">
+        <s-product-thumbnail
+          src={getPrimaryImageUrl(product, 0) || undefined}
+          alt={product.title}
+          size="base"
+        />
+        <s-stack direction="block" gap="small-500">
+          <s-text>{product.title}</s-text>
+          {variantLabel && (
+            <s-text color="subdued" type="small">
+              {variantLabel}
+            </s-text>
           )}
         </s-stack>
-      </s-box>
+      </s-stack>
+
+      {/* Right group: pushed to the edge by space-between. */}
+      <s-stack direction="block" gap="small-500" alignItems="end">
+        <s-text type="strong">{product.price}</s-text>
+        <s-button
+          onClick={() => onAddToCart(variantId, product.id, index)}
+          loading={isAdding}
+          disabled={isAdding || !variantId || !inStock}
+          variant="secondary"
+        >
+          {inStock ? "Add" : "Sold out"}
+        </s-button>
+      </s-stack>
     </s-stack>
   );
 }

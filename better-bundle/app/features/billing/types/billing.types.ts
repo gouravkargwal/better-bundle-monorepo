@@ -1,6 +1,11 @@
 /**
  * Billing feature types
- * Flat fee pricing types for subscription management
+ *
+ * Pay-as-you-go: the shop is charged `commissionRate` of the revenue attributed
+ * to recommendations, never more than `cappedAmount` in a 30-day cycle. The
+ * trial ends when attributed revenue reaches `trialThreshold`. There is no
+ * elapsed-time gate: a shop that has not been sold that much has not received
+ * what it was promised.
  */
 
 export interface BillingState {
@@ -21,8 +26,13 @@ export type BillingStatus =
 
 export interface TrialData {
   isActive: boolean;
-  daysRemaining: number;
-  trialDays: number; // Total trial days (e.g., 14)
+  /** Attributed revenue earned so far during the trial. */
+  revenueEarned: number;
+  /** Attributed revenue the shop gets free before the first charge. */
+  trialThreshold: number;
+  /** The terms that take effect once the trial ends, for the copy. */
+  commissionRate: number;
+  cappedAmount: number;
   currency: string;
 }
 
@@ -30,7 +40,14 @@ export interface SubscriptionData {
   id: string;
   status: "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED";
   planName: string;
-  monthlyFee: number;
+  /** Share of attributed revenue charged, e.g. 0.03 for 3%. */
+  commissionRate: number;
+  /** Maximum chargeable per 30-day cycle — what the merchant approved. */
+  cappedAmount: number;
+  /** Charged so far in the current cycle. */
+  usageThisCycle: number;
+  /** Attributed revenue in the current cycle, which usage is derived from. */
+  attributedThisCycle: number;
   currency: string;
   confirmationUrl?: string;
   billingCycle?: {
@@ -47,8 +64,11 @@ export interface BillingError {
   actionUrl?: string;
 }
 
+/**
+ * What the client sends to start billing — the plan name and nothing else.
+ * Rate and cap are read from the plan server-side; accepting them from the
+ * browser would let a merchant name their own price.
+ */
 export interface BillingSetupData {
   planName: string;
-  monthlyFee: number;
-  trialDays: number;
 }

@@ -77,9 +77,19 @@ TRACKING_NAMESPACE = "bb_recommendation"
 LINE_ITEM_IMPRESSION_KEY = "_bb_rec_impression_id"
 
 # `offer_impressions.surface` is already the extension name.
+# Every surface the recommendation API can serve. A surface missing here is
+# not a warning that degrades quality — it is revenue that cannot be billed,
+# because _build_breakdown skips any impression it cannot map. Keep this in
+# step with CONTEXT_SURFACE in api/v1/recommendations.py.
 _SURFACE_TO_EXTENSION = {
     "mercury": ExtensionType.MERCURY,
     "apollo": ExtensionType.APOLLO,
+    "phoenix": ExtensionType.PHOENIX,
+    "venus": ExtensionType.VENUS,
+    # The thank-you block is part of the mercury extension, not a separate
+    # one — same bundle, second placement. The placement stays distinguishable
+    # through offer_impressions.surface.
+    "thank_you": ExtensionType.MERCURY,
 }
 
 
@@ -156,7 +166,10 @@ class AttributionEngine:
                     "attributed_impressions": len(breakdown),
                 },
             )
-            await self._store_attribution_result(result)
+            # The row id is what billing keys the commission off, so surface it
+            # rather than discarding it — one commission per attribution.
+            attribution_id = await self._store_attribution_result(result)
+            result.metadata["purchase_attribution_id"] = attribution_id
             logger.info(
                 f"✅ Attribution for order {context.order_id}: {total} across "
                 f"{len(breakdown)} accepted offers"
@@ -322,10 +335,24 @@ class AttributionEngine:
         self, impressions: List[OfferImpression], stamped: Dict[str, Dict[str, Any]]
     ) -> None:
         """Record the outcome for impressions evidenced by an order line."""
+        # Repair revenue as well as outcome.
+        #
+        # This used to skip anything already marked accepted, on the assumption
+        # that an accepted impression already had its revenue. It does not: an
+        # extension can report acceptance without an amount — phoenix's
+        # reportAccepted is fire-and-forget and its revenue is a client-side
+        # estimate that may not arrive — leaving outcome='accepted' with
+        # revenue_added NULL. The breakdown then valued the offer at zero and
+        # attributed nothing, so a real sale from a real recommendation was
+        # silently worth nothing.
+        #
+        # The order line is the better source anyway: it is what the shopper
+        # actually paid, after discounts, rather than a price the browser had.
         pending = [
             imp
             for imp in impressions
-            if str(imp.id) in stamped and imp.outcome != "accepted"
+            if str(imp.id) in stamped
+            and (imp.outcome != "accepted" or imp.revenue_added is None)
         ]
         if not pending:
             return
@@ -657,11 +684,6 @@ class AttributionEngine:
             existing.attribution_metadata = result.metadata
             await session.commit()
             return str(existing.id)
-
-        # purchase_attributions.session_id is NOT NULL; with no session there is
-        # nothing to key the row on and nothing was attributed anyway.
-        if not result.session_id:
-            return None
 
         attribution = PurchaseAttribution(
             session_id=result.session_id,

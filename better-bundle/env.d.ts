@@ -37,7 +37,6 @@ declare namespace NodeJS {
 
     // Server
     HOST?: string;
-    FRONTEND_PORT?: string;
     PORT?: string;
   }
 }

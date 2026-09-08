@@ -2,11 +2,10 @@
 Simplified Shop Subscription Model
 
 Single table approach: multiple subscription records per shop, only one active.
-Supports flat fee pricing with trial periods.
+Pay-as-you-go: a revenue-threshold trial, then usage charges up to a cap.
 """
 
 from decimal import Decimal
-from datetime import datetime, timedelta
 from sqlalchemy import (
     Column,
     String,
@@ -15,7 +14,6 @@ from sqlalchemy import (
     Enum as SQLEnum,
     Numeric,
     Text,
-    Integer,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
@@ -28,7 +26,7 @@ class ShopSubscription(BaseModel, ShopMixin):
     Unified Shop Subscription Model
 
     Single active subscription per shop.
-    Supports flat fee pricing: trial period → recurring monthly charge.
+    The trial ends on attributed revenue, never on elapsed time.
     """
 
     __tablename__ = "shop_subscriptions"
@@ -56,19 +54,24 @@ class ShopSubscription(BaseModel, ShopMixin):
         index=True,
     )
 
-    # ===== TRIAL-SPECIFIC FIELDS =====
-    # These override the subscription_plan defaults when needed
-    trial_duration_days = Column(
-        Integer,
-        nullable=True,
-        comment="Override trial duration in days (from subscription_plan.trial_days)",
-    )
-
     # ===== PAID SUBSCRIPTION FIELDS =====
-    monthly_fee_override = Column(
+    # Per-shop overrides of the plan's pay-as-you-go terms. The cap override is
+    # the one that gets used in practice: a merchant who hits the cap has to
+    # approve a higher one, and that new value lands here.
+    commission_rate_override = Column(
+        Numeric(5, 4),
+        nullable=True,
+        comment="Override commission rate (from subscription_plan.commission_rate)",
+    )
+    cap_amount_override = Column(
         Numeric(10, 2),
         nullable=True,
-        comment="Override monthly fee for this shop (from subscription_plan.monthly_fee)",
+        comment="Override monthly cap, e.g. after the merchant approves a raise",
+    )
+    trial_threshold_override = Column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Override free attributed revenue before the first charge",
     )
     auto_renew = Column(Boolean, default=True, nullable=False)
 
@@ -109,41 +112,44 @@ class ShopSubscription(BaseModel, ShopMixin):
         """Check if subscription is in paid phase"""
         return self.subscription_type == SubscriptionType.PAID
 
-    @property
-    def effective_monthly_fee(self) -> Decimal:
-        """Get the effective monthly fee (override > plan fee after discount)"""
-        if self.monthly_fee_override:
-            return self.monthly_fee_override
-        plan = self.subscription_plan
-        if plan and plan.monthly_fee:
-            fee = Decimal(str(plan.monthly_fee))
-            if plan.discount_percentage:
-                fee = fee * (1 - Decimal(str(plan.discount_percentage)) / 100)
-            return fee
-        return Decimal("149.50")  # Default: $299 with 50% discount
+    # Fallbacks below are only reached when a subscription has no plan attached,
+    # which should not happen — subscription_plan_id is NOT NULL. They exist so
+    # a billing calculation can never divide by a None.
+    DEFAULT_COMMISSION_RATE = Decimal("0.0300")
+    DEFAULT_CAP_AMOUNT = Decimal("299.00")
+    DEFAULT_TRIAL_THRESHOLD = Decimal("1000.00")
 
     @property
-    def effective_trial_days(self) -> int:
-        """Get the effective trial duration in days"""
-        if self.trial_duration_days:
-            return self.trial_duration_days
-        return (
-            self.subscription_plan.trial_days
-            if self.subscription_plan and self.subscription_plan.trial_days
-            else 14
-        )
+    def effective_commission_rate(self) -> Decimal:
+        """Share of attributed revenue to charge (override > plan)."""
+        if self.commission_rate_override is not None:
+            return Decimal(str(self.commission_rate_override))
+        plan = self.subscription_plan
+        if plan and plan.commission_rate is not None:
+            return Decimal(str(plan.commission_rate))
+        return self.DEFAULT_COMMISSION_RATE
+
+    @property
+    def effective_cap_amount(self) -> Decimal:
+        """Maximum chargeable in a cycle (override > plan)."""
+        if self.cap_amount_override is not None:
+            return Decimal(str(self.cap_amount_override))
+        plan = self.subscription_plan
+        if plan and plan.cap_amount is not None:
+            return Decimal(str(plan.cap_amount))
+        return self.DEFAULT_CAP_AMOUNT
+
+    @property
+    def effective_trial_threshold(self) -> Decimal:
+        """Attributed revenue the shop earns free before the first charge."""
+        if self.trial_threshold_override is not None:
+            return Decimal(str(self.trial_threshold_override))
+        plan = self.subscription_plan
+        if plan and plan.trial_revenue_threshold is not None:
+            return Decimal(str(plan.trial_revenue_threshold))
+        return self.DEFAULT_TRIAL_THRESHOLD
 
     @property
     def currency(self) -> str:
-        """Always returns USD (global flat fee pricing)"""
+        """Always returns USD (global pay-as-you-go pricing)"""
         return "USD"
-
-    @property
-    def trial_remaining_days(self) -> int:
-        """Calculate remaining trial days"""
-        if not self.is_trial or not self.started_at:
-            return 0
-        trial_end = self.started_at + timedelta(days=self.effective_trial_days)
-        now = datetime.utcnow()
-        remaining = (trial_end - now).days
-        return max(0, remaining)

@@ -33,19 +33,22 @@ from app.core.config.settings import settings
 from .cooccurrence import CoPurchaseMiner
 from .enrichment import EnrichmentService
 from .llm_provider import LLMProvider, build_provider
+from .enrichment_store import (
+    EnrichmentStore,
+    retryable_product_ids,
+)
+from app.core.database.models import MAX_ENRICHMENT_ATTEMPTS
 from .resolution import CategoryResolver
 
 logger = logging.getLogger(__name__)
 
 
-_ACTIVE_PRODUCTS_SQL = text(
-    """
+_ACTIVE_PRODUCTS_SQL = text("""
     SELECT product_id, title, description, product_type, vendor, tags, price
     FROM product_data
     WHERE shop_id = :shop_id AND is_active = true
     ORDER BY product_id
-    """
-)
+    """)
 
 
 @dataclass
@@ -59,6 +62,11 @@ class InstallReport:
     prior_edges: int = 0
     observed_pairs: int = 0
     orders_mined: int = 0
+    # Enrichment bookkeeping, so "did enrichment work?" is answerable from the
+    # report rather than by grepping logs.
+    enrichment_reused: int = 0
+    enrichment_failed: int = 0
+    enrichment_dead_lettered: int = 0
     warnings: List[str] = field(default_factory=list)
 
     @property
@@ -79,6 +87,9 @@ class InstallReport:
             "prior_edges": self.prior_edges,
             "observed_pairs": self.observed_pairs,
             "orders_mined": self.orders_mined,
+            "enrichment_reused": self.enrichment_reused,
+            "enrichment_failed": self.enrichment_failed,
+            "enrichment_dead_lettered": self.enrichment_dead_lettered,
             "servable": self.is_servable,
             "warnings": self.warnings,
         }
@@ -117,7 +128,7 @@ class EdgeInstallPipeline:
             return report
 
         report.embedded = await self.ensure_embeddings(shop_id, report)
-        enrichments = await self.enrich(products, report)
+        enrichments = await self.enrich(shop_id, products, report)
         report.enriched = len(enrichments)
 
         if enrichments:
@@ -125,9 +136,7 @@ class EdgeInstallPipeline:
                 shop_id, enrichments
             )
         else:
-            report.warnings.append(
-                "enrichment produced nothing; shop has no priors"
-            )
+            report.warnings.append("enrichment produced nothing; shop has no priors")
 
         mined = await self.backfill_history(shop_id, report)
         report.observed_pairs = mined.get("pairs", 0)
@@ -157,7 +166,7 @@ class EdgeInstallPipeline:
         report.embedded = await self.ensure_embeddings(
             shop_id, report, list(product_ids)
         )
-        enrichments = await self.enrich(products, report)
+        enrichments = await self.enrich(shop_id, products, report)
         report.enriched = len(enrichments)
         if enrichments:
             report.prior_edges = await self.resolver.resolve_products(
@@ -221,22 +230,118 @@ class EdgeInstallPipeline:
             return 0
 
     async def enrich(
-        self, products: Sequence[Dict[str, Any]], report: InstallReport
+        self, shop_id: str, products: Sequence[Dict[str, Any]], report: InstallReport
     ) -> List[Any]:
+        """Enrich whatever still needs it, and record every outcome.
+
+        Only products without a current successful row reach the API, so a
+        re-run costs nothing for work already done. Failures are written back
+        with an attempt count so the sweeper can retry exactly those products.
+        """
+        store = EnrichmentStore(model_version=self._model_version())
+
+        try:
+            to_enrich, already, dead = await store.partition(shop_id, products)
+        except Exception as e:
+            # Losing the store must not lose the pass; fall back to enriching
+            # everything rather than serving a shop with no priors.
+            report.warnings.append(f"enrichment store unavailable: {e}")
+            logger.error(f"Shop {shop_id}: enrichment store unavailable: {e}")
+            to_enrich, already, dead = list(products), [], 0
+
+        report.enrichment_reused = len(already)
+        report.enrichment_dead_lettered = dead
+        if dead:
+            report.warnings.append(
+                f"{dead} products gave up after {MAX_ENRICHMENT_ATTEMPTS} "
+                "enrichment attempts"
+            )
+
+        if not to_enrich:
+            logger.info(f"Shop {shop_id}: enrichment up to date, reused {len(already)}")
+            return already
+
+        # Claim before calling, so a crash mid-pass leaves PENDING rows the
+        # sweeper can find rather than an invisible gap.
+        try:
+            await store.claim(shop_id, to_enrich)
+        except Exception as e:
+            logger.error(f"Shop {shop_id}: failed to claim enrichment rows: {e}")
+
         try:
             service = EnrichmentService(self.provider)
-            enrichments = await service.enrich_catalog(products)
+            result = await service.enrich_catalog_with_outcomes(to_enrich)
         except Exception as e:
+            # The provider itself is unavailable (no key, total outage). Every
+            # claimed product is a failure and must be recorded as one, or the
+            # rows sit PENDING forever with no attempt count.
             report.warnings.append(f"enrichment unavailable: {e}")
             logger.error(f"Enrichment unavailable: {e}")
-            return []
-
-        missing = len(products) - len(enrichments)
-        if missing > 0:
-            report.warnings.append(
-                f"{missing} products fell back to embedding-only priors"
+            await self._record_failures(
+                store,
+                shop_id,
+                [str(p.get("product_id")) for p in to_enrich],
+                f"{type(e).__name__}: {e}",
+                report,
             )
-        return enrichments
+            return already
+
+        try:
+            await store.record_success(shop_id, result.enriched)
+        except Exception as e:
+            logger.error(f"Shop {shop_id}: failed to persist enrichment: {e}")
+
+        for failure in result.failures:
+            await self._record_failures(
+                store, shop_id, failure.product_ids, failure.error, report
+            )
+
+        report.enrichment_failed = len(result.failed_product_ids)
+        if report.enrichment_failed:
+            report.warnings.append(
+                f"{report.enrichment_failed} products fell back to "
+                "embedding-only priors and are queued for retry"
+            )
+
+        return already + result.enriched
+
+    async def _record_failures(
+        self,
+        store: "EnrichmentStore",
+        shop_id: str,
+        product_ids: Sequence[str],
+        error: str,
+        report: InstallReport,
+    ) -> None:
+        try:
+            await store.record_failure(shop_id, list(product_ids), error)
+        except Exception as e:
+            # If we cannot even record the failure, say so loudly — this is the
+            # one case where work really is lost.
+            report.warnings.append(f"could not record enrichment failure: {e}")
+            logger.error(f"Shop {shop_id}: could not record enrichment failure: {e}")
+
+    def _model_version(self) -> str:
+        return getattr(settings.ml, "AI_CHAT_MODEL", "unknown")
+
+    async def retry_failed_enrichment(self, shop_id: str) -> InstallReport:
+        """Retry only the products whose enrichment is outstanding and due.
+
+        Deliberately not a catalog pass: it loads the specific product ids the
+        store says are retryable, so a shop with 2,000 products and 20 failures
+        costs one API call, not a hundred.
+        """
+        report = InstallReport(shop_id=shop_id)
+
+        product_ids = await retryable_product_ids(shop_id)
+        if not product_ids:
+            logger.debug(f"Shop {shop_id}: nothing due for enrichment retry")
+            return report
+
+        logger.info(
+            f"Shop {shop_id}: retrying enrichment for {len(product_ids)} products"
+        )
+        return await self.refresh_products(shop_id, product_ids)
 
     async def backfill_history(
         self, shop_id: str, report: InstallReport

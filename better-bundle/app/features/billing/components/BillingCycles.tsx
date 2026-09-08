@@ -6,7 +6,9 @@ import {
   Button,
   InlineStack,
   Pagination,
+  BlockStack,
 } from "@shopify/polaris";
+import { surfaces, radii } from "../../../components/UI/design.tokens";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "@remix-run/react";
 
@@ -25,7 +27,6 @@ export function BillingCycles({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // Get data from server
   const cycles = data?.cycles || [];
   const pagination = data?.pagination;
 
@@ -48,7 +49,7 @@ export function BillingCycles({
     navigate(`?${newSearchParams.toString()}`);
   };
 
-  const rows = cycles.map((cycle: any, index: number) => [
+  const rows = cycles.map((cycle: any) => [
     `Cycle #${cycle.cycleNumber}`,
     cycle.startDate,
     cycle.endDate,
@@ -61,13 +62,12 @@ export function BillingCycles({
       <div style={{ padding: "16px" }}>
         <InlineStack align="space-between">
           <Text variant="headingMd" as="h3">
-            🔄 Billing Cycles
+            Billing cycles
           </Text>
           <Button
             loading={isLoading}
             onClick={() => {
               setIsLoading(true);
-              // Refresh cycles data
               setTimeout(() => setIsLoading(false), 1000);
             }}
           >
@@ -81,21 +81,26 @@ export function BillingCycles({
               style={{
                 padding: "48px 24px",
                 textAlign: "center",
-                backgroundColor: "#f8f9fa",
-                borderRadius: "8px",
-                border: "1px solid #e9ecef",
+                backgroundColor: surfaces.slate.bg,
+                borderRadius: radii.lg,
+                border: `1px solid ${surfaces.slate.border}`,
               }}
             >
-              <div style={{ fontSize: "48px", marginBottom: "16px" }}>📊</div>
-              <Text variant="headingMd" as="h4" tone="subdued">
-                No Billing Cycles Found
+              <Text as="p" variant="headingMd" fontWeight="bold" tone="subdued">
+                No billing cycles found
               </Text>
-              <Text as="p" tone="subdued" style={{ marginTop: "8px" }}>
+              <BlockStack gap="050">
+              <Text
+                as="p"
+                variant="bodyMd"
+                tone="subdued"
+              >
                 {data?.subscriptionType === "TRIAL" ||
                 data?.subscriptionStatus === "TRIAL"
-                  ? "Billing cycles will appear here once your trial period ends and your subscription becomes active."
-                  : "Billing cycles will appear here once your subscription is active and you start generating commissions."}
+                  ? "Billing cycles will appear once your trial ends and subscription becomes active."
+                  : "Billing cycles will appear once your subscription is active and you start generating commissions."}
               </Text>
+              </BlockStack>
             </div>
           ) : (
             <DataTable

@@ -58,7 +58,16 @@ function ThankYouRecommendations() {
   // reasonable ask here than it would be mid-checkout.
   const orderValue = Number(cost?.totalAmount?.value?.amount || 0);
 
+  // Rendering in the checkout editor, not on a real thank-you page.
+  // `shopify.extension.editor` is undefined on a live page. Without this a
+  // merchant configuring the block generates real recommendation requests and
+  // real `offer_impressions` rows, so their own setup work lands in their
+  // impact dashboard as offers shown to shoppers who never existed.
+  const inEditor = Boolean(shopify.extension?.editor);
+
   const { loading, products, error } = useRecommendations({
+    // No request and no impression while the merchant is configuring.
+    skip: inEditor,
     context: "thank_you_page",
     limit: 3,
     customerId,
@@ -68,6 +77,57 @@ function ThankYouRecommendations() {
     cartValue: orderValue,
     checkoutStep: "thank_you",
   });
+
+  // Dummy content in the editor, so the merchant can see how the block looks
+  // and where it sits. This matters more here than in checkout: the live
+  // branch below returns null when there is nothing to show, so without this
+  // the editor would render an empty frame and the merchant would have no
+  // block to position at all.
+  //
+  // Deliberately the same markup as the real cards, so what they are
+  // positioning is what shoppers will see.
+  if (inEditor) {
+    // Dummy content so the merchant can see how the block looks and where it
+    // sits. It matters more here than in checkout: the live branch below
+    // returns null when there is nothing to show, so without this the editor
+    // would render an empty frame and there would be no block to position.
+    const samples = [
+      { title: "Example product", variant: "Small / Black", price: "$24.99" },
+      { title: "Another product", variant: "One size", price: "$34.99" },
+    ];
+    return (
+      <s-section heading="You might also like">
+        <s-stack direction="block" gap="base">
+          {samples.map((sample) => (
+            <s-stack
+                key={sample.title}
+                direction="inline"
+                gap="base"
+                alignItems="center"
+                justifyContent="space-between"
+              >
+                <s-stack direction="inline" gap="base" alignItems="center">
+                  <s-product-thumbnail alt={sample.title} size="base" />
+                  <s-stack direction="block" gap="small-500">
+                    <s-text>{sample.title}</s-text>
+                    <s-text color="subdued" type="small">
+                      {sample.variant}
+                    </s-text>
+                  </s-stack>
+                </s-stack>
+                <s-stack direction="block" gap="small-500" alignItems="end">
+                  <s-text type="strong">{sample.price}</s-text>
+                  <s-text color="subdued">View</s-text>
+                </s-stack>
+              </s-stack>
+          ))}
+          <s-text color="subdued" type="small">
+            Example only — shoppers see real recommendations here.
+          </s-text>
+        </s-stack>
+      </s-section>
+    );
+  }
 
   // Render nothing rather than an empty frame. Someone who has just paid
   // should not be shown a broken widget, and nor should the merchant.
@@ -91,44 +151,42 @@ function ThankYouRecommendations() {
     <s-section heading="You might also like">
       <s-stack direction="block" gap="base">
         {products.map((product) => (
-          <s-box
-            key={product.id}
-            padding="base"
-            border="base"
-            borderWidth="base"
-            borderRadius="base"
-          >
-            <s-stack direction="inline" gap="base" alignItems="center">
-              {product.image?.url && (
-                <s-image
-                  src={product.image.url}
-                  alt={product.image.alt_text || product.title}
-                  aspectRatio="1/1"
-                  inlineSize="fill"
-                  objectFit="cover"
-                  borderRadius="base"
-                  loading="lazy"
-                />
-              )}
+          <s-stack
+              key={product.id}
+              direction="inline"
+              gap="base"
+              alignItems="center"
+              justifyContent="space-between"
+            >
+              <s-stack direction="inline" gap="base" alignItems="center">
+              {/* s-product-thumbnail rather than s-image: fixed square, and it
+                  draws its own placeholder when a product has no image. The
+                  previous s-image used inlineSize="fill", which let the photo
+                  take the whole row and squash the title and link beside it. */}
+              <s-product-thumbnail
+                src={product.image?.url || undefined}
+                alt={product.image?.alt_text || product.title}
+                size="base"
+              />
 
-              <s-stack direction="block" gap="small-500">
-                <s-text>{product.title}</s-text>
-                <s-text type="strong">{product.price}</s-text>
+              <s-text>{product.title}</s-text>
               </s-stack>
 
-              {/* Declarative navigation: there is no window.open in this
-                  sandbox, and target="_blank" keeps the order confirmation
-                  open behind the product page. */}
-              <s-link
-                href={product.url}
-                target="_blank"
-                accessibilityLabel={`View ${product.title}`}
-                onClick={() => reportClick(product)}
-              >
-                View
-              </s-link>
+              <s-stack direction="block" gap="small-500" alignItems="end">
+                <s-text type="strong">{product.price}</s-text>
+                {/* Declarative navigation: there is no window.open in this
+                    sandbox, and target="_blank" keeps the order confirmation
+                    open behind the product page. */}
+                <s-link
+                  href={product.url}
+                  target="_blank"
+                  accessibilityLabel={`View ${product.title}`}
+                  onClick={() => reportClick(product)}
+                >
+                  View
+                </s-link>
+              </s-stack>
             </s-stack>
-          </s-box>
         ))}
       </s-stack>
     </s-section>

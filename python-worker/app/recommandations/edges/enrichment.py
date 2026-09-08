@@ -20,7 +20,8 @@ products into validated `ProductEnrichment` objects, or raises.
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -57,6 +58,26 @@ Rules:
 - strength: 0..1, how reliably that category is bought alongside this product.
 - Return ONLY a JSON array, one object per input product, in the same order.
   No markdown fences, no preamble, no trailing commentary."""
+
+
+@dataclass
+class BatchFailure:
+    """Products that did not come back enriched, and why."""
+
+    product_ids: List[str]
+    error: str
+
+
+@dataclass
+class CatalogEnrichmentResult:
+    """What an enrichment pass produced, successes and failures both."""
+
+    enriched: List["ProductEnrichment"] = field(default_factory=list)
+    failures: List[BatchFailure] = field(default_factory=list)
+
+    @property
+    def failed_product_ids(self) -> List[str]:
+        return [pid for f in self.failures for pid in f.product_ids]
 
 
 class ComplementCategory(BaseModel):
@@ -124,11 +145,24 @@ class EnrichmentService:
     async def enrich_catalog(
         self, products: Sequence[Dict[str, Any]]
     ) -> List[ProductEnrichment]:
-        """Enrich every product. Batches that fail are skipped, not fatal.
+        """Enrich every product, returning only what succeeded.
+
+        Convenience wrapper. Anything that needs to record or retry failures
+        must use `enrich_catalog_with_outcomes` — a caller that only sees the
+        successes cannot tell a partial outage from a clean run.
+        """
+        return (await self.enrich_catalog_with_outcomes(products)).enriched
+
+    async def enrich_catalog_with_outcomes(
+        self, products: Sequence[Dict[str, Any]]
+    ) -> "CatalogEnrichmentResult":
+        """Enrich every product and report exactly which ones failed and why.
 
         A failed batch means those products fall back to embedding-only priors
         (`resolution.py` still has their vectors), so a partial LLM outage
-        degrades recommendation quality instead of failing the install.
+        degrades recommendation quality instead of failing the install — but
+        the failure is returned rather than swallowed, so it can be persisted
+        and retried.
         """
         batches = list(_chunk(products, self.batch_size))
         results = await asyncio.gather(
@@ -136,30 +170,54 @@ class EnrichmentService:
         )
 
         enriched: List[ProductEnrichment] = []
-        failed = 0
-        for batch, outcome in zip(batches, results):
+        failures: List[BatchFailure] = []
+
+        for batch, (outcome, error) in zip(batches, results):
             if outcome is None:
-                failed += len(batch)
+                failures.append(
+                    BatchFailure(
+                        product_ids=[str(p.get("product_id")) for p in batch],
+                        error=error or "unknown enrichment failure",
+                    )
+                )
                 continue
             enriched.extend(outcome)
 
-        if failed:
+            # A batch can succeed while omitting products — the model skipped
+            # them, or `parse_response` rejected ids it did not ask about.
+            # Those are failures too, or they would silently never be retried.
+            returned = {e.product_id for e in outcome}
+            missing = [
+                str(p.get("product_id"))
+                for p in batch
+                if str(p.get("product_id")) not in returned
+            ]
+            if missing:
+                failures.append(
+                    BatchFailure(
+                        product_ids=missing,
+                        error="model omitted these products from its response",
+                    )
+                )
+
+        failed_count = sum(len(f.product_ids) for f in failures)
+        if failed_count:
             logger.warning(
-                f"Enrichment: {failed}/{len(products)} products fell back to "
-                f"embedding-only priors after batch failures"
+                f"Enrichment: {failed_count}/{len(products)} products fell back "
+                f"to embedding-only priors after failures"
             )
         logger.info(f"Enrichment: {len(enriched)}/{len(products)} products enriched")
-        return enriched
+        return CatalogEnrichmentResult(enriched=enriched, failures=failures)
 
     async def _enrich_batch_guarded(
         self, batch: Sequence[Dict[str, Any]]
-    ) -> Optional[List[ProductEnrichment]]:
+    ) -> Tuple[Optional[List[ProductEnrichment]], Optional[str]]:
         async with self._semaphore:
             try:
-                return await self.enrich_batch(batch)
+                return await self.enrich_batch(batch), None
             except Exception as e:
                 logger.error(f"Enrichment batch failed ({len(batch)} products): {e}")
-                return None
+                return None, f"{type(e).__name__}: {e}"
 
     async def enrich_batch(
         self, batch: Sequence[Dict[str, Any]]

@@ -36,6 +36,14 @@ export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
   return (
     <NavMenu>
       <NavItem
+        to="/app/overview"
+        isActive={location.pathname === "/app/overview"}
+        prefetch="intent"
+      >
+        Overview
+      </NavItem>
+
+      <NavItem
         to="/app/impact"
         isActive={location.pathname.startsWith("/app/impact")}
         prefetch="intent"
@@ -52,11 +60,27 @@ export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
       </NavItem>
 
       <NavItem
+        to="/app/preview"
+        isActive={location.pathname === "/app/preview"}
+        prefetch="intent"
+      >
+        Preview
+      </NavItem>
+
+      <NavItem
         to="/app/billing"
-        isActive={location.pathname === "/app/billing"}
+        isActive={location.pathname.startsWith("/app/billing")}
         prefetch="intent"
       >
         Billing
+      </NavItem>
+
+      <NavItem
+        to="/app/settings"
+        isActive={location.pathname === "/app/settings"}
+        prefetch="intent"
+      >
+        Settings
       </NavItem>
 
       <NavItem

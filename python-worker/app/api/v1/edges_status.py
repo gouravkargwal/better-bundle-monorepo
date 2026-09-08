@@ -16,11 +16,15 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from app.core.database.session import get_transaction_context
+from app.core.config.settings import settings
 from app.core.logging import get_logger
 from app.recommandations.edges.cooccurrence import CoPurchaseMiner
 from app.recommandations.edges.embedding import ProductEmbedder
 from app.recommandations.edges.install import EdgeInstallPipeline
 from app.recommandations.edges.serving import EdgeRecommender
+from app.recommandations.edges.enrichment_store import EnrichmentStore
+from app.recommandations.edges.enrichment_sweeper import sweep_once
+from app.recommandations.edges.llm_budget import LLMBudget
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/edges", tags=["edges-ops"])
@@ -153,3 +157,40 @@ async def preview_recommendations(
         limit=limit,
     )
     return {"shop_id": shop_id, "surface": surface, "count": len(items), "items": items}
+
+
+@router.get("/enrichment/{shop_id}")
+async def enrichment_status(shop_id: str):
+    """Whether the LLM enrichment actually landed for this shop.
+
+    This endpoint exists because of a real incident: the pipeline reported
+    `servable: True` with `prior_edges: 0` for days, because every resolution
+    query was failing and the failure was only ever a log line. "Did enrichment
+    work?" must be answerable with one request.
+    """
+    try:
+        store = EnrichmentStore(
+            model_version=getattr(settings.ml, "AI_CHAT_MODEL", "unknown")
+        )
+        return {
+            "shop_id": shop_id,
+            "by_status": await store.stats(shop_id),
+            "guards": await LLMBudget().status(),
+        }
+    except Exception as e:
+        logger.error(f"Enrichment status failed for {shop_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/enrichment/retry")
+async def retry_enrichment_now():
+    """Run one sweep immediately instead of waiting for the interval.
+
+    The sweeper already runs on a loop; this is for when someone has just
+    fixed a key or had quota restored and does not want to wait.
+    """
+    try:
+        return await sweep_once()
+    except Exception as e:
+        logger.error(f"Manual enrichment sweep failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

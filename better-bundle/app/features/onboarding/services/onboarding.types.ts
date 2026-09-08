@@ -2,10 +2,12 @@
 export interface OnboardingData {
   subscriptionPlan: {
     symbol: string;
-    monthly_fee: number;
-    original_monthly_fee?: number;
-    discount_percentage?: number;
-    trial_days: number;
+    /** Share of attributed revenue charged, e.g. 0.03 for 3%. */
+    commission_rate: number;
+    /** Maximum chargeable per 30-day cycle. */
+    cap_amount: number;
+    /** Attributed revenue earned free before the first charge. */
+    trial_revenue_threshold: number;
     plan_name: string;
   } | null;
 }

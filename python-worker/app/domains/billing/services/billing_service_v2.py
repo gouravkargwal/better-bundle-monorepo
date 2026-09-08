@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .attribution_engine import AttributionEngine, AttributionContext
-from .flat_fee_billing_service import FlatFeeBillingService
+from .commission_service_v2 import CommissionServiceV2
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
 from ..models.attribution_models import AttributionResult, PurchaseEvent
 from app.core.database.models import (
@@ -29,20 +29,18 @@ logger = logging.getLogger(__name__)
 
 class BillingServiceV2:
     """
-    Updated billing service for flat fee pricing.
+    Billing service for pay-as-you-go pricing.
 
-    Key differences from usage-based:
-    - Attribution is calculated for analytics ONLY (no billing per purchase)
-    - Trial is time-based (not revenue threshold-based)
-    - Shopify billing uses AppRecurringPricing (not AppUsagePricing)
-    - No commission records or usage tracking
+    Each purchase is attributed, and the attributed revenue becomes a commission
+    charged at the shop's rate — capped per cycle, and free until the trial
+    revenue threshold is crossed. Shopify billing uses AppUsagePricing.
     """
 
     def __init__(self, session: AsyncSession):
         self.session = session
         self.billing_repository = BillingRepositoryV2(session)
         self.attribution_engine = AttributionEngine(session)
-        self.flat_fee_billing = FlatFeeBillingService(session, self.billing_repository)
+        self.commission_service = CommissionServiceV2(session)
 
     # ============= MAIN ENTRY POINT =============
 
@@ -50,11 +48,11 @@ class BillingServiceV2:
         self, purchase_event: PurchaseEvent
     ) -> AttributionResult:
         """
-        Process purchase attribution for analytics purposes only.
+        Attribute a purchase and turn the attributed revenue into a commission.
 
-        With flat fee pricing, purchases are NOT billed individually.
-        Attribution is calculated to provide analytics data to merchants.
-        The monthly flat fee is charged separately via Shopify.
+        During the trial the commission is recorded but not charged, which is
+        also what accumulates towards the trial revenue threshold. After the
+        trial it is charged at the shop's rate, up to the cycle cap.
         """
         try:
             shop_id = purchase_event.shop_id
@@ -72,15 +70,24 @@ class BillingServiceV2:
                 if attribution_result.total_attributed_revenue <= 0:
                     return attribution_result
 
-                # 2. Check trial expiry by time (not revenue)
-                shop_subscription = await self.billing_repository.get_shop_subscription(
-                    shop_id
+                # 2. Bill it. The commission service decides trial vs paid,
+                #    applies the cycle cap, and publishes the Shopify usage
+                #    event when there is something to charge.
+                attribution_id = attribution_result.metadata.get(
+                    "purchase_attribution_id"
                 )
-                if shop_subscription:
-                    await self._check_trial_expiry_by_time(shop_id, shop_subscription)
-
-                # 3. NO BILLING OPERATIONS — flat fee is charged via Shopify recurring subscription
-                # Attribution data is stored for analytics dashboards only
+                if attribution_id:
+                    await self.commission_service.create_commission_record(
+                        purchase_attribution_id=attribution_id,
+                        shop_id=shop_id,
+                    )
+                else:
+                    # No persisted attribution row means nothing to charge
+                    # against — never bill on an unidentifiable purchase.
+                    logger.warning(
+                        f"⚠️ No attribution row for order {purchase_event.order_id}; "
+                        "skipping commission"
+                    )
 
                 # ✅ ATOMIC: Commit changes
                 await self.session.commit()
@@ -103,24 +110,6 @@ class BillingServiceV2:
         except Exception as e:
             logger.error(f"❌ Error processing attribution: {e}", exc_info=True)
             raise
-
-    async def _check_trial_expiry_by_time(
-        self, shop_id: str, shop_subscription
-    ) -> None:
-        """
-        Check if trial has expired based on time (not revenue).
-        With flat fee pricing, trials are time-based (e.g., 14 days).
-        """
-        if not shop_subscription:
-            return
-
-        if shop_subscription.subscription_type != SubscriptionType.TRIAL:
-            return
-
-        if shop_subscription.status != SubscriptionStatus.TRIAL:
-            return
-
-        await self.billing_repository.check_trial_expiry_by_time(shop_id)
 
     async def _is_purchase_already_processed(
         self, purchase_event: PurchaseEvent

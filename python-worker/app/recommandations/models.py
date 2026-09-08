@@ -33,7 +33,16 @@ class RecommendationRequest(BaseModel):
         None, description="Session ID for session-based recommendations"
     )
     category: Optional[str] = Field(None, description="Category filter")
-    limit: int = Field(default=6, ge=1, le=20, description="Number of recommendations")
+    # No default on purpose. `fetch_recommendations_logic` does
+    # `request.limit or RETURN_LIMIT[surface]`, so any default here silently
+    # overrides the per-surface limits — a default of 6 meant the checkout
+    # asked for 3 and got 6, and RETURN_LIMIT was dead code.
+    limit: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=20,
+        description="Number of recommendations; defaults to the surface's limit",
+    )
     metadata: Optional[Dict[str, Any]] = Field(
         default=None, description="Additional metadata"
     )

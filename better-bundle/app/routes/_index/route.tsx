@@ -16,16 +16,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { showForm: Boolean(login) };
 };
 
+const FEATURES = [
+  {
+    title: "AI recommendations everywhere",
+    text: "Personalized product suggestions on your product pages, cart, checkout, thank-you page, and post-purchase — all from one engine.",
+  },
+  {
+    title: "Pay only for results",
+    text: "No monthly fee. You pay a small commission on revenue we actually generate, capped per month. Free until we've driven meaningful sales.",
+  },
+  {
+    title: "Know your true lift",
+    text: "Causal A/B measurement with a control group, so you see incremental revenue — not just attributed numbers.",
+  },
+] as const;
+
 export default function App() {
   const { showForm } = useLoaderData<typeof loader>();
 
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>
+          AI-powered recommendations that grow your Shopify revenue
+        </h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          BetterBundle analyzes your products, orders, and customers to show
+          smart recommendations across your store — and only charges you when
+          they work.
         </p>
+
+        <ul className={styles.list}>
+          {FEATURES.map((feature) => (
+            <li key={feature.title}>
+              <h2>{feature.title}</h2>
+              <p>{feature.text}</p>
+            </li>
+          ))}
+        </ul>
+
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
@@ -38,20 +67,6 @@ export default function App() {
             </button>
           </Form>
         )}
-        <ul className={styles.list}>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-          <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
-          </li>
-        </ul>
       </div>
     </div>
   );

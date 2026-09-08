@@ -377,7 +377,17 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         )
 
         # Step 3: Store the collected data
-        processed_types = await self._store_collected_data(collection_results, shop_id)
+        # The trigger travels on the collection payload. A webhook-triggered
+        # fetch and a historical import both call this method, and only the
+        # payload knows which is which.
+        source = (
+            "webhook"
+            if (collection_payload or {}).get("trigger") == "webhook"
+            else "backfill"
+        )
+        processed_types = await self._store_collected_data(
+            collection_results, shop_id, source
+        )
 
         # Step 4: Extract specific IDs for webhook events
         specific_ids = self._extract_specific_ids_from_payload(collection_payload)
@@ -441,7 +451,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         return collected_data
 
     async def _store_collected_data(
-        self, collected_data: Dict[str, List[Dict]], shop_id: str
+        self,
+        collected_data: Dict[str, List[Dict]],
+        shop_id: str,
+        source: str = "backfill",
     ) -> List[str]:
         """Store all collected data in the database."""
         processed_types = []
@@ -449,7 +462,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         for data_type, data in collected_data.items():
             if data and len(data) > 0:
                 try:
-                    await self._store_data(data_type, data, shop_id)
+                    await self._store_data(data_type, data, shop_id, source)
                     processed_types.append(data_type)
                 except Exception as e:
                     logger.error(f"❌ Failed to store {data_type} data: {e}")
@@ -468,11 +481,25 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
         return specific_ids
 
-    async def _store_data(self, data_type: str, data: List[Dict], shop_id: str):
-        """Store data using appropriate storage method"""
+    async def _store_data(
+        self, data_type: str, data: List[Dict], shop_id: str, source: str = None
+    ):
+        """Store data using appropriate storage method.
+
+        `source` records how this data reached us. It has to travel from the
+        original trigger all the way to the raw row, because normalisation
+        reads it to decide whether to publish an attribution job — a
+        webhook-delivered order must be attributed, a historical import must
+        not.
+        """
         config = self.DATA_TYPES.get(data_type)
         if config:
-            storage_method = getattr(self.data_storage, config["store"])
+            storage = (
+                self.data_storage.with_source(source)
+                if source
+                else self.data_storage
+            )
+            storage_method = getattr(storage, config["store"])
             await storage_method(data, shop_id)
 
     async def _trigger_normalization(

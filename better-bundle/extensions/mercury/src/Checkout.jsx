@@ -16,14 +16,24 @@ export default async () => {
 function Extension() {
   const [adding, setAdding] = useState({});
   const [selectedVariants, setSelectedVariants] = useState({});
-  const [quantities, setQuantities] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
   const [successMessage, setSuccessMessage] = useState("");
   const hasTrackedView = useRef(false);
-  const [selectedImageIndex, setSelectedImageIndex] = useState({});
-  const [expandedGalleries, setExpandedGalleries] = useState({});
   const { lines, cost, buyerIdentity, storage } = shopify;
   const shopDomain = shopify.shop.myshopifyDomain;
+
+  // Are we rendering inside the checkout editor rather than a real checkout?
+  //
+  // `shopify.extension.editor` is undefined on a live checkout and
+  // {type: 'checkout'} in the editor. Without this check, every merchant who
+  // opens the checkout customiser to position this block causes a real
+  // recommendation request, which writes real `offer_impressions` rows — so
+  // their own configuring shows up in their impact dashboard as offers shown
+  // to shoppers who never existed, dragging the conversion rate down.
+  //
+  // Phoenix already avoids this via Liquid's `request.design_mode`; checkout
+  // extensions have no Liquid, so it has to be read from the JS API.
+  const inEditor = Boolean(shopify.extension?.editor);
   const customerId = buyerIdentity?.customer?.value?.id || null;
 
   const cartItems = useMemo(() => {
@@ -62,8 +72,13 @@ function Extension() {
 
   const { loading, products, error } =
     useRecommendations({
+      // Nothing is fetched in the editor: no request, no impression row.
+      skip: inEditor,
       context: "checkout_page",
-      limit: 3,
+      // One offer. Three cards made an ~800px block in the column the shopper
+      // scrolls to reach "Pay now"; the server-side RETURN_LIMIT for mercury
+      // is the ceiling, this is the checkout-appropriate ask.
+      limit: 1,
       customerId,
       shopDomain,
       storage,
@@ -135,24 +150,25 @@ function Extension() {
         ? variantId
         : `gid://shopify/ProductVariant/${variantId}`;
 
-      const quantity = quantities[productId] || 1;
+      // Always 1: the quantity stepper was removed from the card because the
+      // cart lines directly above already let the shopper change it.
+      const quantity = 1;
 
-      // Stamp the impression onto the line itself, in addition to reporting
-      // the outcome below. The callback can be lost to a dropped connection
-      // mid-checkout; a line attribute cannot, because Shopify promotes it to
-      // the order. Two independent records of the same acceptance, and the
-      // backend deduplicates them by impression id.
-      const stamped = products?.find((p) => p.id === productId);
+      // Looked up once here and reused below for the success message and the
+      // outcome report. It used to be found three times, twice under the same
+      // `const product` name in one block scope — a redeclaration esbuild
+      // rejects, which is why this extension never bundled.
+      const product = products?.find((p) => p.id === productId);
       const result = await shopify.applyCartLinesChange({
         type: "addCartLine",
         merchandiseId: merchandiseId,
         quantity: quantity,
-        ...(stamped?.impression_id
+        ...(product?.impression_id
           ? {
               attributes: [
                 {
                   key: "_bb_rec_impression_id",
-                  value: String(stamped.impression_id),
+                  value: String(product.impression_id),
                 },
               ],
             }
@@ -161,8 +177,6 @@ function Extension() {
 
       if (result.type === "success") {
         setAddedProducts((prev) => new Set([...prev, productId]));
-        // Find product name for the success message
-        const product = products?.find((p) => p.id === productId);
         const productName = product?.title || "Product";
         setSuccessMessage(`${productName} added to cart successfully`);
 
@@ -215,8 +229,8 @@ function Extension() {
           valueType: "json_string",
         });
 
-        // Record outcome for incrementality tracking
-        const product = products?.find((p) => p.id === productId);
+        // Report the acceptance. The line attribute above is the durable
+        // record; this is what updates the dashboard in real time.
         if (product?.impression_id) {
           const revenue = (product.price_amount || 0) * quantity;
           recordOfferOutcome(product.impression_id, "accepted", revenue);
@@ -235,99 +249,74 @@ function Extension() {
     }
   }
 
-  function handleOptionChange(productId, optionName, optionValue) {
-    setSelectedVariants((prev) => {
-      const current = prev[productId] || {};
-      return {
-        ...prev,
-        [productId]: {
-          ...current,
-          [optionName]: optionValue,
-        },
-      };
-    });
-  }
 
-  function handleQuantityChange(productId, newQuantity) {
-    setQuantities((prev) => ({
-      ...prev,
-      [productId]: Math.max(1, Math.min(10, newQuantity)),
-    }));
-  }
 
-  function handleImageSelect(productId, imageIndex) {
-    setSelectedImageIndex((prev) => {
-      if (!prev) prev = {};
-      return {
-        ...prev,
-        [productId]: imageIndex,
-      };
-    });
-  }
 
-  function handleGalleryToggle(productId, isOpen) {
-    setExpandedGalleries((prev) => {
-      if (!prev) prev = {};
-      return {
-        ...prev,
-        [productId]: isOpen,
-      };
-    });
-  }
 
   if (!shopifyPlusValidated && !loading) {
     return null;
   }
 
-  if (loading) {
+  // The editor must always render something, or the merchant cannot see the
+  // block to position it — Shopify's guidance is to guarantee a preview even
+  // when the live conditions are not met. Static sample content, so it costs
+  // no request and writes no impression.
+  //
+  // Same anatomy as the real card on purpose: what the merchant positions and
+  // approves is exactly what a shopper will see.
+  if (inEditor) {
     return (
       <s-section heading="Recommended for you">
         <s-stack direction="block" gap="base">
-          {[1].map((i) => (
-            <s-box
-              key={i}
-              padding="base"
-              border="base"
-              borderRadius="base"
-              borderWidth="base"
-            >
-              <s-stack direction="block" gap="small-200">
-                {/* Skeleton Image - Landscape */}
-                <s-box background="subdued" borderRadius="base" padding="base">
-                  <s-skeleton-paragraph content="Image"></s-skeleton-paragraph>
-                </s-box>
-
-                {/* Skeleton Title and Price - Inline */}
-                <s-stack direction="inline" justifyContent="space-between">
-                  <s-skeleton-paragraph content="Product Title"></s-skeleton-paragraph>
-                  <s-skeleton-paragraph content="$99.99"></s-skeleton-paragraph>
-                </s-stack>
-
-                {/* Skeleton Options - Inline */}
-                <s-stack direction="inline" gap="small-200">
-                  <s-box inlineSize="48%" minInlineSize="0">
-                    <s-skeleton-paragraph content="Option 1"></s-skeleton-paragraph>
-                  </s-box>
-                  <s-box inlineSize="48%" minInlineSize="0">
-                    <s-skeleton-paragraph content="Option 2"></s-skeleton-paragraph>
-                  </s-box>
-                </s-stack>
-
-                {/* Skeleton Quantity and Button - Inline */}
-                <s-stack
-                  direction="inline"
-                  gap="base"
-                  alignItems="center"
-                  justifyContent="space-between"
-                >
-                  <s-skeleton-paragraph content="Quantity"></s-skeleton-paragraph>
-                  <s-box minInlineSize="0" inlineSize="60%">
-                    <s-skeleton-paragraph content="Add to Cart"></s-skeleton-paragraph>
-                  </s-box>
-                </s-stack>
+          <s-stack
+            direction="inline"
+            gap="base"
+            alignItems="center"
+            justifyContent="space-between"
+          >
+            <s-stack direction="inline" gap="base" alignItems="center">
+              {/* No src: the component draws its own placeholder, which is
+                  what a merchant with no recommendations yet should see. */}
+              <s-product-thumbnail alt="Example product" size="base" />
+              <s-stack direction="block" gap="small-500">
+                <s-text>Example product</s-text>
+                <s-text color="subdued" type="small">
+                  Small / Black
+                </s-text>
               </s-stack>
-            </s-box>
-          ))}
+            </s-stack>
+            <s-stack direction="block" gap="small-500" alignItems="end">
+              <s-text type="strong">$24.99</s-text>
+              <s-button variant="secondary" disabled>
+                Add
+              </s-button>
+            </s-stack>
+          </s-stack>
+          <s-text color="subdued" type="small">
+            Example only — shoppers see real recommendations here.
+          </s-text>
+        </s-stack>
+      </s-section>
+    );
+  }
+
+  if (loading) {
+    // Same shape as the resolved row, so the Total and "Pay now" below do not
+    // shift as it resolves. The earlier skeleton mirrored the old tall card
+    // and flashed ~250px before collapsing to one line.
+    return (
+      <s-section heading="Recommended for you">
+        <s-stack
+          direction="inline"
+          gap="base"
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-product-thumbnail size="base" alt="" />
+            <s-skeleton-paragraph content="Product title"></s-skeleton-paragraph>
+          </s-stack>
+          <s-skeleton-paragraph content="$00.00"></s-skeleton-paragraph>
         </s-stack>
       </s-section>
     );
@@ -372,14 +361,7 @@ function Extension() {
             product={product}
             index={index}
             selectedVariants={selectedVariants}
-            quantities={quantities}
-            selectedImageIndex={selectedImageIndex}
-            expandedGalleries={expandedGalleries}
             adding={adding}
-            onOptionChange={handleOptionChange}
-            onQuantityChange={handleQuantityChange}
-            onImageSelect={handleImageSelect}
-            onGalleryToggle={handleGalleryToggle}
             onAddToCart={handleAddToCart}
           />
         ))}

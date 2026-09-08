@@ -5,7 +5,7 @@ Represents a Shopify shop with all its configuration and relationships.
 """
 
 from sqlalchemy import Column, String, Boolean, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from .base import BaseModel
 
@@ -26,10 +26,18 @@ class Shop(BaseModel):
     money_format = Column(String(100), nullable=True)
 
     # Status flags
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
-    onboarding_completed = Column(Boolean, default=False, nullable=False)
-    setup_guide_visited = Column(Boolean, default=False, nullable=False)
-    shopify_plus = Column(Boolean, default=False, nullable=False, index=True)
+    is_active = Column(
+        Boolean, default=True, server_default="true", nullable=False, index=True
+    )
+    onboarding_completed = Column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    setup_guide_visited = Column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    shopify_plus = Column(
+        Boolean, default=False, server_default="false", nullable=False, index=True
+    )
 
     # ✅ PATTERN 1: Service Suspension Fields
     suspended_at = Column(TIMESTAMP(timezone=True), nullable=True)
@@ -42,7 +50,13 @@ class Shop(BaseModel):
     email = Column(String(255), nullable=True)
 
     # Holdout testing (incrementality)
-    holdout_disabled = Column(Boolean, default=False, nullable=False)
+    holdout_disabled = Column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+
+    # Merchant controls from the admin Settings page (surface toggles,
+    # excluded product ids). See the alembic migration for the shape.
+    settings = Column(JSONB, nullable=True)
 
     # Analysis tracking
     last_analysis_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
@@ -68,6 +82,14 @@ class Shop(BaseModel):
     )
     shop_subscriptions = relationship(
         "ShopSubscription", back_populates="shop", cascade="all, delete-orphan"
+    )
+    commission_records = relationship(
+        "CommissionRecord", back_populates="shop", cascade="all, delete-orphan"
+    )
+    # UserSession.shop declares back_populates="user_sessions"; without the
+    # matching side, mapper configuration failed.
+    user_sessions = relationship(
+        "UserSession", back_populates="shop", cascade="all, delete-orphan"
     )
 
     # Table constraints

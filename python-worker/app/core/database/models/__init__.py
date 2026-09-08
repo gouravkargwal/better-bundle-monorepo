@@ -8,6 +8,7 @@ from .enums import (
     SubscriptionPlanType,
     SubscriptionStatus,
     BillingCycleStatus,
+    EnrichmentStatus,
     TrialStatus,
     ShopifySubscriptionStatus,
     AdjustmentReason,
@@ -49,6 +50,8 @@ from .offer_impression import OfferImpression
 from .subscription_plan import SubscriptionPlan
 from .shop_subscription import ShopSubscription
 from .billing_cycle import BillingCycle
+from .commission import CommissionRecord
+from .product_enrichment import ProductEnrichment, MAX_ENRICHMENT_ATTEMPTS
 
 # Suspension audit log
 from .suspension_audit_log import SuspensionAuditLog
@@ -59,6 +62,7 @@ __all__ = [
     "SubscriptionPlanType",
     "SubscriptionStatus",
     "BillingCycleStatus",
+    "EnrichmentStatus",
     "TrialStatus",
     "ShopifySubscriptionStatus",
     "AdjustmentReason",
@@ -88,5 +92,8 @@ __all__ = [
     "SubscriptionPlan",
     "ShopSubscription",
     "BillingCycle",
+    "CommissionRecord",
+    "ProductEnrichment",
+    "MAX_ENRICHMENT_ATTEMPTS",
     "SuspensionAuditLog",
 ]

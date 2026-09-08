@@ -1,5 +1,5 @@
 """
-BoughtWith Outreach Engine
+BetterBundle Outreach Engine
 Handles: CSV import → Brevo sending → Gmail reply polling → classification → follow-ups
 """
 
@@ -20,8 +20,8 @@ GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASS")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL", "gourav@boughtwith.shop")
-SENDER_NAME = os.getenv("SENDER_NAME", "Gourav | BoughtWith")
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", "gourav@betterbundle.site")
+SENDER_NAME = os.getenv("SENDER_NAME", "Gourav | BetterBundle")
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outreach.db")
 
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
@@ -811,13 +811,13 @@ class MissingCopy(Exception):
 # Sign-off is enforced here, not trusted to the CSV. Most rows written before
 # batch9 have no sign-off at all; the old fallback template supplied one, so
 # making CSV copy authoritative would have shipped unsigned emails.
-SIGNATURE = "Thanks,\nGourav\nFounder, BoughtWith"
+SIGNATURE = "Thanks,\nGourav\nFounder, BetterBundle"
 
 
 def ensure_signature(body: str) -> str:
     """Guarantee every outgoing email ends with the sign-off, exactly once."""
     body = (body or "").rstrip()
-    if "Founder, BoughtWith" in body:
+    if "Founder, BetterBundle" in body:
         return body
     return f"{body}\n\n{SIGNATURE}"
 
@@ -884,7 +884,7 @@ def _demo_format_email():
            "Want the bundle report?")
     out = format_email(raw, "Dan Kowalski")
     assert out.startswith("Hi Dan,\n\n"), out[:30]
-    assert out.count("Founder, BoughtWith") == 1
+    assert out.count("Founder, BetterBundle") == 1
     assert "\n\n" in out and out.count("\n\n") >= 4
     assert "2,416" in out and "2,400+" in out          # numbers survive intact
     assert out.index("Want the bundle report") < out.index(_DISCLAIMER)  # disclaimer demoted
@@ -983,14 +983,14 @@ FOLLOWUP_RULES = """Hard rules:
 - Signature exactly:
 Thanks,
 Gourav
-Founder, BoughtWith"""
+Founder, BetterBundle"""
 
 
 def _followup_prompt(ctx: str, seq: int, niche: str = "store") -> str:
     # Stores own the lost revenue directly; an agency is talking about a client's.
     catalog = "one client store" if niche == "agency" else "their store"
     if seq == 2:
-        return f"""Write follow-up email #2 for BoughtWith, a Shopify app that reads a
+        return f"""Write follow-up email #2 for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
 shows those pairings on product pages, in the cart and at checkout. Offer: a
 free bundle report on {catalog}, built from their public catalog, no install
@@ -1016,7 +1016,7 @@ Structure, 70 words maximum:
 
 Return ONLY the body text."""
 
-    return f"""Write a short breakup email for BoughtWith, a Shopify app that
+    return f"""Write a short breakup email for BetterBundle, a Shopify app that
 recommends products based on what a store's own orders show selling together.
 
 CONTEXT
@@ -1026,7 +1026,7 @@ They have not replied. Close the loop gracefully and stop asking for anything.
 
 Structure, 50 words maximum, in this exact order:
 1. State plainly that you will stop reaching out.
-2. One line on what BoughtWith does, so it is memorable if the problem shows up
+2. One line on what BetterBundle does, so it is memorable if the problem shows up
    later, noting there is no monthly fee — it bills only on revenue it can
    attribute to its own recommendations.
 3. LAST SENTENCE: a genuine, non-pushy sign-off wishing them well. The email must
@@ -1061,14 +1061,14 @@ def _demo_followup_review():
     """Self-check: the two draft rejections, and the greeting the model no longer writes."""
     sent = "I am closing this file and will not reach out again."
     assert banned_phrases(sent) == ["closing this file"]
-    assert banned_phrases("I will stop reaching out. BoughtWith finds bundles.") == []
+    assert banned_phrases("I will stop reaching out. BetterBundle finds bundles.") == []
     assert invented_numbers("We fixed 4,000 SKUs.", "Catalog: 900 items") == ["4,000"]
     assert invented_numbers("The report covers 5 pairings.", "Catalog: 900") == []
-    out = format_email("I will stop reaching out. BoughtWith only bills on "
+    out = format_email("I will stop reaching out. BetterBundle only bills on "
                        "revenue it can attribute. Best of luck with the year.",
                        "Tony Sambell")
     assert out.startswith("Hi Tony,\n\n"), out[:30]
-    assert out.count("Founder, BoughtWith") == 1
+    assert out.count("Founder, BetterBundle") == 1
     print("followup_review demo OK")
 
 
@@ -1363,7 +1363,7 @@ Return ONLY the category name."""
                 if classification == "OBJECTION":
                     try:
                         rebuttal = llm(
-                            f"""Write a 60-word friendly rebuttal for BoughtWith, a
+                            f"""Write a 60-word friendly rebuttal for BetterBundle, a
 Shopify app that recommends products based on what a store's own orders show
 selling together.
 Objection: {body[:300]}

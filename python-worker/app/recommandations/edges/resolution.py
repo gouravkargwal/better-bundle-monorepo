@@ -39,22 +39,28 @@ SIMILARITY_THRESHOLD = 0.55
 # Products considered per category string.
 MATCHES_PER_CATEGORY = 10
 
-# Bi-encoder shared with cross_encoder_service. Both must stay identical or the
-# category vectors land in a different space from the product vectors and every
-# similarity is meaningless.
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# Imported, never redeclared. The model that embedded the products must be the
+# model that embeds the category queries searched against them.
+from .embedding import EMBEDDING_MODEL  # noqa: E402
 
+# CAST(:query_vec AS vector) rather than `:query_vec::vector`.
+#
+# Postgres' `::` cast operator collides with SQLAlchemy's `:name` bind-parameter
+# syntax inside text(): the parameter was left unbound, Postgres received a
+# literal ":" and raised a syntax error on every single query. The failure was
+# caught per-product and logged, so the pipeline reported success with
+# `prior_edges: 0` — the LLM enrichment was paid for and then thrown away.
 _NEAREST_SQL = text(
     """
     SELECT pv.product_id,
-           1 - (pv.vector <=> :query_vec::vector) AS similarity
+           1 - (pv.vector <=> CAST(:query_vec AS vector)) AS similarity
     FROM product_vectors pv
     JOIN product_data pd
       ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
     WHERE pv.shop_id = :shop_id
       AND pd.is_active = true
       AND pd.product_id <> :source_product_id
-    ORDER BY pv.vector <=> :query_vec::vector
+    ORDER BY pv.vector <=> CAST(:query_vec AS vector)
     LIMIT :limit
     """
 )

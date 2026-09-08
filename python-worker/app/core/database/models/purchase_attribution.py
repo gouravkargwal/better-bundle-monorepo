@@ -20,8 +20,16 @@ class PurchaseAttribution(BaseModel, ShopMixin, CustomerMixin):
     # shop_id provided by ShopMixin
 
     # Attribution identification - matching Prisma schema
+    # Nullable on purpose.
+    #
+    # A storefront recommendation is attributed by the impression id stamped on
+    # the order line, which needs no session at all — and gets none, because the
+    # visitor id is consent-gated and absent on any store without a cookie
+    # banner. While this was NOT NULL the engine computed the attribution
+    # correctly and then refused to save it, so every product-page sale was
+    # measured and immediately discarded.
     session_id = Column(
-        "session_id", String(255), ForeignKey("user_sessions.id"), nullable=False
+        "session_id", String(255), ForeignKey("user_sessions.id"), nullable=True
     )
     order_id = Column("order_id", String(255), nullable=False, index=True)
 
@@ -47,6 +55,14 @@ class PurchaseAttribution(BaseModel, ShopMixin, CustomerMixin):
     # Relationships
     session = relationship("UserSession", back_populates="attributions")
     shop = relationship("Shop", back_populates="purchase_attributions")
+    # One commission per attribution — the uniqueness is enforced on the
+    # commission side by uq_commission_purchase_attribution.
+    commission_record = relationship(
+        "CommissionRecord",
+        back_populates="purchase_attribution",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     # Indexes
     __table_args__ = (

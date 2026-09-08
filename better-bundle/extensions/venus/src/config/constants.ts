@@ -1,4 +1,11 @@
-export const BACKEND_URL = "https://api.betterbundle.site" as const;
+// Backend API base URL — the ONE place to change it for this extension.
+//
+// Extensions run in the shopper's browser, so this must be a publicly
+// reachable host: localhost is not visible to them. During local development
+// that means a tunnel to the Python worker on port 8000.
+//
+// Production: https://api.betterbundle.site
+export const BACKEND_URL = "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
 
 // Storage Keys - Centralized storage key constants
 export const STORAGE_KEYS = {

@@ -111,27 +111,28 @@ async function handleActiveSubscription(
   admin?: any,
 ) {
   try {
-    // Extract monthly fee from webhook payload (AppRecurringPricing)
-    let monthlyFee: number | undefined;
+    // Extract the approved cap from the webhook payload (AppUsagePricing).
+    // This is the number the merchant agreed to and the ceiling Shopify will
+    // enforce, so it is what the billing cycle must be seeded with.
+    let cappedAmount: number | undefined;
     const lineItems = appSub?.line_items || [];
 
     if (lineItems.length > 0) {
       const pricing = lineItems[0]?.plan?.pricing_details;
-      // AppRecurringPricing price
-      monthlyFee = pricing?.price?.amount;
+      cappedAmount = pricing?.capped_amount?.amount;
     }
 
     // If not in webhook, fetch from Shopify GraphQL using the admin client
-    if (!monthlyFee && admin) {
+    if (!cappedAmount && admin) {
       try {
-        monthlyFee = await fetchMonthlyFeeFromShopifyWithAdmin(
+        cappedAmount = await fetchCappedAmountFromShopifyWithAdmin(
           subscriptionId,
           admin,
         );
       } catch (fetchError) {
         logger.warn(
           { error: fetchError, shop: shopRecord.shop_domain, subscriptionId },
-          "Failed to fetch monthly fee from GraphQL, will use database value",
+          "Failed to fetch capped amount from GraphQL, will use plan value",
         );
       }
     }
@@ -142,7 +143,7 @@ async function handleActiveSubscription(
       where: { shop_id: shopRecord.id },
       include: {
         subscription_plans: {
-          select: { monthly_fee: true },
+          select: { cap_amount: true },
         },
       },
     });
@@ -188,17 +189,23 @@ async function handleActiveSubscription(
 
       const nextCycleNumber = lastCycle ? lastCycle.cycle_number + 1 : 1;
 
-      const fee =
-        monthlyFee ||
-        Number(shopSubscription.subscription_plans?.monthly_fee || 29);
+      // Shopify's approved value wins over our plan default: it is what the
+      // platform will actually enforce on appUsageRecordCreate.
+      const cap =
+        cappedAmount ||
+        Number(
+          shopSubscription.cap_amount_override ??
+            shopSubscription.subscription_plans?.cap_amount ??
+            299,
+        );
 
       logger.info(
         {
           shop: shopRecord.shop_domain,
-          monthlyFee: fee,
+          cappedAmount: cap,
           cycleNumber: nextCycleNumber,
         },
-        "Creating billing cycle for activated flat fee subscription",
+        "Creating billing cycle for activated usage subscription",
       );
 
       incrementCounter("subscription_update.cycle_created", {
@@ -216,8 +223,11 @@ async function handleActiveSubscription(
             cycle_number: nextCycleNumber,
             start_date: new Date(),
             end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            initial_cap_amount: 0,
-            current_cap_amount: 0,
+            // Seeding these at 0 meant zero chargeable capacity: every
+            // commission would be rejected as "cap reached" and the shop
+            // suspended on its first attributed order.
+            initial_cap_amount: cap,
+            current_cap_amount: cap,
             usage_amount: 0,
             commission_count: 0,
             status: "ACTIVE",
@@ -266,16 +276,16 @@ async function handleActiveSubscription(
     incrementCounter("subscription_update.activated", {
       shop: shopRecord.shop_domain,
       subscriptionId,
-      monthlyFee: monthlyFee ?? 0,
+      cappedAmount: cappedAmount ?? 0,
     });
 
     logger.info(
       {
         shop: shopRecord.shop_domain,
         subscriptionId,
-        monthlyFee,
+        cappedAmount,
       },
-      "Flat fee subscription activated and shop reactivated",
+      "Usage subscription activated and shop reactivated",
     );
   } catch (error) {
     logger.error({ error }, "Error activating subscription");
@@ -350,7 +360,7 @@ async function handleCancelledSubscription(
  * Fetch monthly fee from Shopify GraphQL API for an AppRecurringPricing subscription
  * Uses the admin client from the webhook (no re-authentication needed)
  */
-async function fetchMonthlyFeeFromShopifyWithAdmin(
+async function fetchCappedAmountFromShopifyWithAdmin(
   subscriptionId: string,
   admin: any,
 ): Promise<number | undefined> {
@@ -363,8 +373,8 @@ async function fetchMonthlyFeeFromShopifyWithAdmin(
               plan {
                 pricingDetails {
                   __typename
-                  ... on AppRecurringPricing {
-                    price {
+                  ... on AppUsagePricing {
+                    cappedAmount {
                       amount
                       currencyCode
                     }
@@ -384,15 +394,15 @@ async function fetchMonthlyFeeFromShopifyWithAdmin(
 
     const pricingDetails =
       data.data?.node?.lineItems?.[0]?.plan?.pricingDetails;
-    if (pricingDetails?.__typename === "AppRecurringPricing") {
-      return Number(pricingDetails.price?.amount);
+    if (pricingDetails?.__typename === "AppUsagePricing") {
+      return Number(pricingDetails.cappedAmount?.amount);
     }
 
     return undefined;
   } catch (error) {
     logger.warn(
       { error, subscriptionId },
-      "Failed to fetch monthly fee from Shopify",
+      "Failed to fetch capped amount from Shopify",
     );
     return undefined;
   }

@@ -36,44 +36,40 @@ export class BillingService {
       const isTrialPhase = subscription.subscription_type === "TRIAL";
       const isPaidPhase = subscription.subscription_type === "PAID";
 
-      // 2. TRIAL PHASE: Time-based, check expiry
+      // 2. TRIAL PHASE: ends on attributed revenue only — no elapsed-time gate.
       if (isTrialPhase) {
-        const trialDays =
-          subscription.trial_duration_days ||
-          subscription.subscription_plans?.trial_days ||
-          14;
-        const startedAt = subscription.started_at;
-        const trialEnd = new Date(
-          startedAt.getTime() + trialDays * 24 * 60 * 60 * 1000,
+        const currency = await this.getShopCurrency(shopId);
+        const trialThreshold = Number(
+          subscription.trial_threshold_override ??
+            subscription.subscription_plans?.trial_revenue_threshold ??
+            1000,
         );
-        const now = new Date();
-        const daysRemaining = Math.max(
-          0,
-          Math.ceil(
-            (trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-          ),
+        const revenueEarned = await this.getTrialRevenueEarned(shopId);
+        const commissionRate = Number(
+          subscription.commission_rate_override ??
+            subscription.subscription_plans?.commission_rate ??
+            0.03,
+        );
+        const cappedAmount = Number(
+          subscription.cap_amount_override ??
+            subscription.subscription_plans?.cap_amount ??
+            299,
         );
 
-        if (daysRemaining > 0 && subscription.status === "TRIAL") {
-          return {
-            status: "trial_active",
-            trialData: {
-              isActive: true,
-              daysRemaining,
-              trialDays,
-              currency: "USD",
-            },
-          };
-        }
+        // The worker flips status to TRIAL_COMPLETED once the threshold is
+        // crossed; reaching it here too keeps the UI honest between webhooks.
+        const stillTrialing =
+          subscription.status === "TRIAL" && revenueEarned < trialThreshold;
 
-        // Trial expired
         return {
-          status: "trial_completed",
+          status: stillTrialing ? "trial_active" : "trial_completed",
           trialData: {
-            isActive: false,
-            daysRemaining: 0,
-            trialDays,
-            currency: "USD",
+            isActive: stillTrialing,
+            revenueEarned,
+            trialThreshold,
+            commissionRate,
+            cappedAmount,
+            currency,
           },
         };
       }
@@ -108,19 +104,27 @@ export class BillingService {
           }
         } else if (subscription.shopify_subscription_id) {
           // No admin client, use DB info
+          const cycle = await this.getCurrentCycleUsage(subscription.id);
           return {
             status: "subscription_active",
             subscriptionData: {
               id: subscription.shopify_subscription_id,
               status: (subscription.shopify_status as any) || "ACTIVE",
               planName:
-                subscription.subscription_plans?.name || "Flat Fee Plan",
-              monthlyFee: Number(
-                subscription.monthly_fee_override ||
-                  subscription.subscription_plans?.monthly_fee ||
-                  29,
+                subscription.subscription_plans?.name || "Pay As You Go",
+              commissionRate: Number(
+                subscription.commission_rate_override ??
+                  subscription.subscription_plans?.commission_rate ??
+                  0.03,
               ),
-              currency: "USD",
+              cappedAmount: Number(
+                subscription.cap_amount_override ??
+                  subscription.subscription_plans?.cap_amount ??
+                  299,
+              ),
+              usageThisCycle: cycle.usageAmount,
+              attributedThisCycle: cycle.attributedRevenue,
+              currency: await this.getShopCurrency(shopId),
             },
           };
         }
@@ -143,38 +147,93 @@ export class BillingService {
     }
   }
 
-  private static async getDefaultTrialData(shopId: string): Promise<TrialData> {
+  private static async getShopCurrency(shopId: string): Promise<string> {
     const shop = await prisma.shops.findUnique({
       where: { id: shopId },
       select: { currency_code: true },
     });
+    return shop?.currency_code || "USD";
+  }
+
+  /**
+   * Attributed revenue accumulated during the trial.
+   *
+   * Sums TRIAL-phase commission rows only — the same basis the worker uses to
+   * decide when the trial is over, so the two never disagree.
+   */
+  private static async getTrialRevenueEarned(shopId: string): Promise<number> {
+    const result = await prisma.commission_records.aggregate({
+      where: { shop_id: shopId, billing_phase: "TRIAL" },
+      _sum: { attributed_revenue: true },
+    });
+    return Number(result._sum.attributed_revenue ?? 0);
+  }
+
+  /** Usage charged and revenue attributed in the shop's open billing cycle. */
+  private static async getCurrentCycleUsage(
+    shopSubscriptionId: string,
+  ): Promise<{ usageAmount: number; attributedRevenue: number }> {
+    const cycle = await prisma.billing_cycles.findFirst({
+      where: { shop_subscription_id: shopSubscriptionId, status: "ACTIVE" },
+      orderBy: { start_date: "desc" },
+    });
+    if (!cycle) return { usageAmount: 0, attributedRevenue: 0 };
+
+    const attributed = await prisma.commission_records.aggregate({
+      where: { billing_cycle_id: cycle.id },
+      _sum: { attributed_revenue: true },
+    });
+    return {
+      usageAmount: Number(cycle.usage_amount ?? 0),
+      attributedRevenue: Number(attributed._sum.attributed_revenue ?? 0),
+    };
+  }
+
+  private static async getDefaultTrialData(shopId: string): Promise<TrialData> {
     return {
       isActive: true,
-      daysRemaining: 14,
-      trialDays: 14,
-      currency: shop?.currency_code || "USD",
+      revenueEarned: 0,
+      trialThreshold: 1000,
+      commissionRate: 0.03,
+      cappedAmount: 299,
+      currency: await this.getShopCurrency(shopId),
     };
   }
 
   /**
-   * Get subscription data from Shopify API (flat fee)
+   * Build subscription data from the live Shopify subscription plus our own
+   * cycle rows. Shopify knows the cap and the balance it has billed; only we
+   * know how much revenue was attributed to produce it.
    */
   private static async getSubscriptionDataFromShopify(
     shopSubscription: any,
     shopifyStatus: any,
   ): Promise<SubscriptionData> {
+    const cycle = await this.getCurrentCycleUsage(shopSubscription.id);
     return {
       id: shopifyStatus.subscriptionId || shopSubscription.id,
       status: shopifyStatus.status as
-        "PENDING" | "ACTIVE" | "DECLINED" | "CANCELLED" | "EXPIRED",
-      planName: shopSubscription.subscription_plans?.name || "Flat Fee Plan",
-      monthlyFee:
-        shopifyStatus.monthlyFee ||
-        Number(
-          shopSubscription.monthly_fee_override ||
-            shopSubscription.subscription_plans?.monthly_fee ||
-            29,
-        ),
+        | "PENDING"
+        | "ACTIVE"
+        | "DECLINED"
+        | "CANCELLED"
+        | "EXPIRED",
+      planName: shopSubscription.subscription_plans?.name || "Pay As You Go",
+      commissionRate: Number(
+        shopSubscription.commission_rate_override ??
+          shopSubscription.subscription_plans?.commission_rate ??
+          0.03,
+      ),
+      // Prefer Shopify's cap: it is what the merchant actually approved, and
+      // it is authoritative if our row drifted.
+      cappedAmount: Number(
+        shopifyStatus.cappedAmount ??
+          shopSubscription.cap_amount_override ??
+          shopSubscription.subscription_plans?.cap_amount ??
+          299,
+      ),
+      usageThisCycle: Number(shopifyStatus.balanceUsed ?? cycle.usageAmount),
+      attributedThisCycle: cycle.attributedRevenue,
       currency: shopifyStatus.currency || "USD",
       confirmationUrl: shopifyStatus.confirmationUrl,
       billingCycle: shopifyStatus.currentPeriodEnd
@@ -188,8 +247,11 @@ export class BillingService {
   }
 
   /**
-   * Get real-time Shopify subscription status via GraphQL (flat fee)
-   * Uses AppRecurringPricing
+   * Get real-time Shopify subscription status via GraphQL.
+   *
+   * Reads AppUsagePricing: `cappedAmount` is the ceiling the merchant approved
+   * and `balanceUsed` is what Shopify has actually billed this cycle — the
+   * authoritative figure, since Shopify rejects usage records past the cap.
    */
   static async getShopifySubscriptionStatus(
     shopId: string,
@@ -198,7 +260,8 @@ export class BillingService {
     status: string;
     subscriptionId?: string;
     confirmationUrl?: string;
-    monthlyFee?: number;
+    cappedAmount?: number;
+    balanceUsed?: number;
     currency?: string;
     currentPeriodEnd?: string;
     currentPeriodStart?: string;
@@ -217,12 +280,16 @@ export class BillingService {
                 plan {
                   pricingDetails {
                     __typename
-                    ... on AppRecurringPricing {
-                      price {
+                    ... on AppUsagePricing {
+                      terms
+                      cappedAmount {
                         amount
                         currencyCode
                       }
-                      interval
+                      balanceUsed {
+                        amount
+                        currencyCode
+                      }
                     }
                   }
                 }
@@ -249,13 +316,14 @@ export class BillingService {
         const lineItem = subscription.lineItems[0];
         const pricingDetails = lineItem?.plan?.pricingDetails;
 
-        // Extract monthly fee from recurring pricing
-        let monthlyFee: number | undefined;
+        let cappedAmount: number | undefined;
+        let balanceUsed: number | undefined;
         let currency: string | undefined;
 
-        if (pricingDetails?.__typename === "AppRecurringPricing") {
-          monthlyFee = pricingDetails.price?.amount;
-          currency = pricingDetails.price?.currencyCode;
+        if (pricingDetails?.__typename === "AppUsagePricing") {
+          cappedAmount = Number(pricingDetails.cappedAmount?.amount);
+          balanceUsed = Number(pricingDetails.balanceUsed?.amount);
+          currency = pricingDetails.cappedAmount?.currencyCode;
         }
 
         // Sync with database
@@ -294,7 +362,8 @@ export class BillingService {
         return {
           status: subscription.status,
           subscriptionId: subscription.id,
-          monthlyFee,
+          cappedAmount,
+          balanceUsed,
           currency,
           currentPeriodEnd: subscription.currentPeriodEnd,
         };

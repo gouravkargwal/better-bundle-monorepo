@@ -31,9 +31,9 @@
 
 class PhoenixAttribution {
   constructor() {
-    this.baseUrl = window.getBaseUrl
-      ? window.getBaseUrl()
-      : "https://api.betterbundle.site";
+    // config.js defines getBaseUrl and is loaded before this file, so there is
+    // no fallback literal here — one URL, in one place.
+    this.baseUrl = window.getBaseUrl();
     this.logger = window.phoenixLogger || console;
     this.phoenixJWT = null;
     // Outcomes already reported, so a double-click or a re-render cannot

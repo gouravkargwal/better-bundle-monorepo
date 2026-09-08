@@ -39,10 +39,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         subscription_type: null,
         subscription_status: null,
         plan_name: null,
-        monthly_fee: null,
+        commission_rate: null,
+        cap_amount: null,
         currency: shopRecord.currency_code || "USD",
         trial_active: true,
-        trial_days_remaining: 14,
         shop_active: shopRecord.is_active,
       });
     }
@@ -50,7 +50,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // Map DB subscription status to frontend billing status
     const dbStatus: string = shopSubscription.status;
     const planName =
-      shopSubscription.subscription_plans?.name || "Flat Fee Plan";
+      shopSubscription.subscription_plans?.name || "Pay As You Go";
     const currency = shopRecord.currency_code || "USD";
 
     let billingStatus: string;
@@ -59,28 +59,12 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     switch (dbStatus) {
       case "TRIAL": {
-        // Time-based trial
-        const trialDays = shopSubscription.trial_duration_days || 14;
-        const startedAt = shopSubscription.started_at;
-        const trialEnd = new Date(
-          startedAt.getTime() + trialDays * 24 * 60 * 60 * 1000,
-        );
-        const now = new Date();
-        const daysRemaining = Math.max(
-          0,
-          Math.ceil(
-            (trialEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
-          ),
-        );
-
-        if (daysRemaining > 0) {
-          billingStatus = "trial_active";
-          trialActive = true;
-          message = `Trial active — ${daysRemaining} days remaining`;
-        } else {
-          billingStatus = "trial_completed";
-          message = "Trial period has ended";
-        }
+        // Revenue-based trial. The worker flips this row to TRIAL_COMPLETED
+        // when the threshold is crossed, so TRIAL here means still trialing —
+        // there is no elapsed-time gate to evaluate.
+        billingStatus = "trial_active";
+        trialActive = true;
+        message = "Trial active — free until the revenue threshold is reached";
         break;
       }
 
@@ -116,19 +100,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         break;
     }
 
-    // Calculate trial days remaining if still in trial
-    let trialDaysRemaining = 0;
-    if (trialActive && shopSubscription.started_at) {
-      const trialDays = shopSubscription.trial_duration_days || 14;
-      const trialEnd = new Date(
-        shopSubscription.started_at.getTime() + trialDays * 24 * 60 * 60 * 1000,
-      );
-      trialDaysRemaining = Math.max(
-        0,
-        Math.ceil((trialEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24)),
-      );
-    }
-
     return json({
       shop_id: shopRecord.id,
       billing_status: billingStatus,
@@ -136,11 +107,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
       subscription_type: shopSubscription.subscription_type,
       subscription_status: dbStatus,
       plan_name: planName,
-      monthly_fee:
-        Number(shopSubscription.subscription_plans?.monthly_fee) || null,
+      commission_rate:
+        Number(
+          shopSubscription.commission_rate_override ??
+            shopSubscription.subscription_plans?.commission_rate,
+        ) || null,
+      cap_amount:
+        Number(
+          shopSubscription.cap_amount_override ??
+            shopSubscription.subscription_plans?.cap_amount,
+        ) || null,
       currency,
       trial_active: trialActive,
-      trial_days_remaining: trialDaysRemaining,
       shopify_subscription_id: shopSubscription.shopify_subscription_id,
       confirmation_url: shopSubscription.confirmation_url,
       shop_active: shopRecord.is_active,

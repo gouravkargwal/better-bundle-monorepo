@@ -18,6 +18,30 @@ from sqlalchemy import select, and_
 logger = get_logger(__name__)
 
 
+
+WEBHOOK_SOURCE = "webhook"
+
+
+def _from_webhook(raw_record: Any) -> bool:
+    """Whether this raw record arrived because of a webhook.
+
+    `source` is stamped when the record is stored and is the only reliable
+    signal: the payload shape is GraphQL either way, so it cannot distinguish
+    a live order from a historical import.
+    """
+    return getattr(raw_record, "source", None) == WEBHOOK_SOURCE
+
+
+def _any_from_webhook(raw_records: Any) -> bool:
+    """True when a batch contains at least one webhook-delivered record.
+
+    Batches are grouped by shop and type, not by source. Treating a mixed
+    batch as a backfill would drop attribution for the live order inside it;
+    the per-order idempotency check in billing makes the opposite error
+    harmless.
+    """
+    return any(_from_webhook(r) for r in (raw_records or []))
+
 class EntityNormalizationService:
     """
     Handles normalization of individual entities (products, customers, collections).
@@ -996,10 +1020,18 @@ class NormalizationService:
         """Process a batch of records using the appropriate service."""
 
         if format_type == "graphql":
-            # Use batch processing for efficiency
+            # Use batch processing for efficiency.
+            #
+            # is_webhook comes from the record's `source`, never from
+            # format_type. Shopify sends GraphQL-shaped payloads, so keying off
+            # the format meant every real webhook took this branch with
+            # is_webhook=False and no attribution job was ever published —
+            # every live order went unattributed and unbilled.
             if data_type == "orders":
                 return await self.order_service.normalize_orders_batch(
-                    raw_records, shop_id, is_webhook=False
+                    raw_records,
+                    shop_id,
+                    is_webhook=_any_from_webhook(raw_records),
                 )
             else:
                 return await self.entity_service.normalize_entities_batch(

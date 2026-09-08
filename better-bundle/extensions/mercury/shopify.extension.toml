@@ -15,18 +15,33 @@ uid = "34e44979-d598-a499-7508-40b2e380a1c7d16d41bf"
 # and the file that contains your extension’s source code. Learn more:
 # https://shopify.dev/docs/api/checkout-ui-extensions/latest/extension-targets-overview
 
-# Checkout block — SHOPIFY PLUS ONLY. Checkout UI extensions for the
-# information, shipping and payment steps are restricted to Plus plans.
+# Static targets only, so placement is automatic and cannot be duplicated.
+#
+# Both surfaces render directly after the cart lines: the block is shaped like
+# a cart line, so that is where it belongs, and it is the one position that is
+# contextual without sitting in the critical path. A dynamic
+# `*.block.render` target was registered alongside these at first, for
+# merchants who wanted it elsewhere — removed, because a dynamic block renders
+# *in addition to* a static one. A merchant who dragged the block in would have
+# got two copies of the widget, and two `offer_impressions` rows for every
+# shopper, silently doubling the "offers shown" count the impact dashboard and
+# the conversion rate are built on.
+#
+# Checkout — SHOPIFY PLUS ONLY, like every checkout-step target. The merchant
+# would otherwise have had to drag the block somewhere, and the available
+# drop zones are mostly wrong: between Contact and Delivery interrupts the
+# form being filled in, and below "Pay now" is never seen.
 [[extensions.targeting]]
 module = "./src/Checkout.jsx"
-target = "purchase.checkout.block.render"
+target = "purchase.checkout.cart-line-list.render-after"
 
-# Thank You page block — available on EVERY plan, with no vaulted-card
-# requirement. This is the widest-reach surface the app has, and the only
-# post-purchase one that renders for every order.
+# Thank-you page — available on EVERY plan with no vaulted-card requirement,
+# which makes it the widest-reach surface the app has. The dynamic block
+# defaulted to rendering *above* the line items; this target puts it after
+# them, matching checkout.
 [[extensions.targeting]]
 module = "./src/ThankYou.jsx"
-target = "purchase.thank-you.block.render"
+target = "purchase.thank-you.cart-line-list.render-after"
 
 [extensions.capabilities]
 # Gives your extension access to directly query Shopify’s storefront API.

@@ -13,6 +13,10 @@ import prisma from "../db.server";
  *     progress: 0..1,
  *     detail?: string,
  *     productsSynced?: number }
+ *
+ * Backs onto the worker's edge-pipeline status (`/api/v1/edges/status`):
+ * the shop is "ready" once it has at least one servable edge, which is the
+ * guarantee that recommendations can actually be served.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   const { session } = await authenticate.admin(request);
@@ -36,10 +40,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
   }
 
   try {
-    const response = await fetch(
-      `${backendUrl}/api/v1/gorse/status/${shopId}`,
-      { signal: AbortSignal.timeout(5_000) },
-    );
+    const response = await fetch(`${backendUrl}/api/v1/edges/status/${shopId}`, {
+      signal: AbortSignal.timeout(5_000),
+    });
 
     if (!response.ok) {
       return json({
@@ -50,28 +53,25 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const data = await response.json();
-    const featureCounts = data?.feature_utilization?.feature_counts || {};
-    const productssynced = featureCounts.product_features || 0;
-    const qualityScore = data?.quality_indicators?.overall_quality || 0;
-    const gorseHealthy = data?.gorse_health?.success === true;
+    const productsSynced = Number(data?.products) || 0;
+    const totalEdges = Number(data?.total_edges) || 0;
+    const servable = data?.servable === true;
 
-    if (gorseHealthy && productssynced > 0) {
+    if (servable && totalEdges > 0) {
       return json({
         stage: "complete" as const,
         progress: 1,
-        productsSynced: productssynced,
-        qualityScore,
+        productsSynced,
       });
     }
 
     return json({
       stage: "training" as const,
-      progress: Math.min(qualityScore, 0.95),
-      productsSynced: productssynced,
-      qualityScore,
+      progress: Math.min(productsSynced > 0 ? 0.5 + totalEdges / 1000 : 0, 0.95),
+      productsSynced,
       detail:
-        productssynced > 0
-          ? `Analyzed ${productssynced} products`
+        productsSynced > 0
+          ? `Analyzed ${productsSynced} products`
           : "Analyzing product catalog...",
     });
   } catch {

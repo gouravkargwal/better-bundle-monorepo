@@ -43,9 +43,9 @@ class UserSession(BaseModel, ShopMixin, CustomerMixin):
     attributions = relationship(
         "PurchaseAttribution", back_populates="session", cascade="all, delete-orphan"
     )
-    interactions = relationship(
-        "UserInteraction", back_populates="session", cascade="all, delete-orphan"
-    )
+    # The `interactions` relationship pointed at UserInteraction, a model that
+    # no longer exists — it raised on mapper configuration. Interaction data
+    # now lives in offer_impressions.
 
     # Indexes
     __table_args__ = (

@@ -189,3 +189,10 @@ class AdjustmentReason(str, Enum):
 
     # Legacy (usage-based pricing)
     CAP_INCREASE = "cap_increase"  # User requested cap increase (legacy)
+
+class EnrichmentStatus(str, Enum):
+    """Lifecycle of one product's LLM enrichment."""
+
+    PENDING = "pending"      # claimed, call in flight or not yet made
+    SUCCEEDED = "succeeded"  # payload stored and valid
+    FAILED = "failed"        # last attempt failed; retryable until attempts cap

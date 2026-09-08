@@ -20,6 +20,8 @@ if (
 const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
   .hostname;
 
+const port = Number(process.env.PORT || 3000);
+
 let hmrConfig;
 if (host === "localhost") {
   hmrConfig = {
@@ -29,21 +31,29 @@ if (host === "localhost") {
     clientPort: 64999,
   };
 } else {
+  // Through a tunnel the HMR socket has to share the app's port, because that
+  // is the only one forwarded; the browser then reaches it on 443. This used to
+  // read a separate FRONTEND_PORT, which could only ever hold the same value as
+  // PORT and silently broke hot reload when it did not.
   hmrConfig = {
     protocol: "wss",
     host: host,
-    port: parseInt(process.env.FRONTEND_PORT!) || 8002,
+    port: port,
     clientPort: 443,
   };
 }
 
 export default defineConfig({
   server: {
-    allowedHosts: [host, ".trycloudflare.com"],
+    // Vite rejects requests whose Host header it does not recognise. `host` is
+    // derived from SHOPIFY_APP_URL, which goes stale the moment the CLI hands
+    // out a new tunnel — so the wildcards matter more than the exact value.
+    // A leading dot matches any subdomain.
+    allowedHosts: [host, ".trycloudflare.com", ".ngrok-free.app", ".ngrok.app", ".ngrok.io"],
     cors: {
       preflightContinue: true,
     },
-    port: Number(process.env.PORT || 3000),
+    port: port,
     hmr: hmrConfig,
     fs: {
       // See https://vitejs.dev/config/server-options.html#server-fs-allow for more information

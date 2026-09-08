@@ -54,7 +54,10 @@ services:
 
   # ==================== DATABASES ====================
   postgres:
-    image: postgres:17
+    # pgvector build of Postgres 17. The plain postgres:17 image has no
+    # `vector` type, so product_vectors cannot be created on it. Same PG
+    # major version, so an existing data volume stays compatible.
+    image: pgvector/pgvector:pg17
     container_name: betterbundle-postgres
     env_file:
       - .env.prod
@@ -236,32 +239,6 @@ services:
 
 
 
-  # ==================== VECTOR DATABASE (Qdrant) ====================
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: betterbundle-qdrant
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - backend
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service,container"
-
   # ==================== PYTHON WORKER ====================
   python-worker:
     build:
@@ -395,13 +372,12 @@ services:
     environment:
       - ZO_ROOT_USER_EMAIL=admin@betterbundle.io
       - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_ADMIN_PASSWORD}
-      - ZO_S3_BUCKET_NAME=betterbundle-observability
-      - ZO_S3_REGION=${AWS_REGION:-us-east-1}
-      - ZO_S3_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
-      - ZO_S3_SECRET_KEY=${AWS_SECRET_ACCESS_KEY}
-      # ZO_S3_SERVER_URL is NOT set — uses AWS S3 natively
+      # Local disk, same as dev — one storage path to reason about instead of
+      # two, and no AWS account or egress in the loop. Logs live on the
+      # `openobserve_data` volume, so that volume is now the only copy: it
+      # needs to be in the block-volume backup set.
       - ZO_DATA_DIR=/data
-      - ZO_LOCAL_MODE=false
+      - ZO_LOCAL_MODE=true
       - ZO_TELEMETRY=false
     ports:
       - "127.0.0.1:5080:5080"
@@ -430,7 +406,6 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
-  qdrant_data:
   npm_data:
   npm_letsencrypt:
   openobserve_data:

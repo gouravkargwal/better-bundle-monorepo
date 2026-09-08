@@ -1,5 +1,6 @@
 // features/overview/components/BillingStatus.tsx
 import { Card, Text, BlockStack, Badge, InlineStack } from "@shopify/polaris";
+import { surfaces, radii } from "../../../components/UI/design.tokens";
 
 interface BillingStatusProps {
   subscriptionStatus?: string;
@@ -122,7 +123,7 @@ export function BillingStatus({
                 subscriptionStatus,
                 isTrialPhase,
               ),
-              borderRadius: "8px",
+              borderRadius: radii.md,
               border: `1px solid ${getStatusBorderColor(subscriptionStatus, isTrialPhase)}`,
             }}
           >
@@ -132,7 +133,7 @@ export function BillingStatus({
               }}
             >
               <Text as="h3" variant="headingMd" fontWeight="bold">
-                💳 Subscription Status
+                Subscription status
               </Text>
             </div>
 
@@ -155,36 +156,36 @@ export function BillingStatus({
             {/* Commission Model Transparency */}
             <div
               style={{
-                marginTop: "12px",
-                padding: "8px",
+                padding: "12px",
                 backgroundColor: "rgba(255,255,255,0.5)",
-                borderRadius: "8px",
+                borderRadius: radii.md,
+                border: "1px solid #E5E7EB",
               }}
             >
-              <Text
-                as="p"
-                variant="bodySm"
-                fontWeight="medium"
-                style={{ marginBottom: "8px" }}
-              >
-                💰 Commission Model
-              </Text>
-              <Text as="p" variant="bodySm" tone="subdued">
-                {isTrialPhase
-                  ? `No charges during trial • ${(commissionRate * 100).toFixed(1)}% commission after trial`
-                  : `${(commissionRate * 100).toFixed(1)}% commission on attributed revenue`}
-              </Text>
-              {totalRevenueGenerated > 0 && (
+              <BlockStack gap="100">
                 <Text
                   as="p"
                   variant="bodySm"
+                  fontWeight="medium"
                   tone="subdued"
-                  style={{ marginTop: "4px" }}
                 >
-                  Total generated:{" "}
-                  {formatCurrencyValue(totalRevenueGenerated, currency)}
+                  Commission model
                 </Text>
-              )}
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {isTrialPhase
+                    ? `No charges during trial • ${(commissionRate * 100).toFixed(1)}% commission after trial`
+                    : `${(commissionRate * 100).toFixed(1)}% commission on attributed revenue`}
+                </Text>
+                {totalRevenueGenerated > 0 && (
+                  <Text
+                    as="p"
+                    variant="bodySm"
+                    tone="subdued"
+                  >
+                    Total generated: {formatCurrencyValue(totalRevenueGenerated, currency)}
+                  </Text>
+                )}
+              </BlockStack>
             </div>
           </div>
         </BlockStack>

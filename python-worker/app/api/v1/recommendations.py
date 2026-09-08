@@ -71,7 +71,12 @@ CONTEXT_SURFACE = {
 # How many offers each surface shows. Checkout is a low-consideration moment and
 # a long list reads as an interruption.
 RETURN_LIMIT = {
-    "mercury": 3,     # checkout: a long list reads as an interruption
+    # Checkout renders one offer, in the order summary under the cart lines.
+    # Three stacked cards made an ~800px block in the column the shopper is
+    # scrolling to reach "Pay now", which reads as an obstacle rather than an
+    # offer. The extension asks for 1; this is the ceiling if it ever asks for
+    # more.
+    "mercury": 2,
     "apollo": 1,      # post-purchase interstitial shows a single offer
     "thank_you": 3,
     "phoenix": 4,     # a storefront carousel has room
@@ -147,6 +152,17 @@ async def fetch_recommendations_logic(
     shop = await services.shop_lookup.validate_shop_exists(request.shop_domain)
     if not shop:
         raise ShopNotFoundError(f"Shop {request.shop_domain} not found")
+
+    # Merchant surface toggle (Settings). A disabled surface keeps its widget
+    # in the theme but serves nothing — same mechanism as the holdout control
+    # group, so the extension renders an empty widget without an error.
+    shop_settings = shop.settings or {}
+    surfaces = shop_settings.get("surfaces") or {}
+    if surfaces.get(surface, True) is False:
+        logger.info(
+            f"🚫 Surface '{surface}' disabled by merchant for {request.shop_domain}"
+        )
+        return _empty(request, "surface_disabled")
 
     request.metadata = request.metadata or {}
 
@@ -226,6 +242,17 @@ async def fetch_recommendations_logic(
             logger.warning(f"⚠️ Failed to resolve user_id: {e}")
 
     exclude_items = list(context_ids)
+
+    # Merchant-managed exclusions (Settings): products that must never be
+    # offered, regardless of edges or purchase history.
+    merchant_exclusions = shop_settings.get("excluded_product_ids") or []
+    if merchant_exclusions:
+        exclude_items.extend([str(p) for p in merchant_exclusions])
+        logger.info(
+            f"🚫 {len(merchant_exclusions)} merchant-excluded products for "
+            f"{request.shop_domain} on {surface}"
+        )
+
     if effective_user_id:
         try:
             async with get_transaction_context() as session:

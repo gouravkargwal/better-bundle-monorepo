@@ -10,21 +10,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
   // Declared here so catch block can reference them
   let planName: string | undefined;
-  let monthlyFee: number | undefined;
-  let trialDays: number | undefined;
 
   try {
-    // Parse request body — expects planName and monthlyFee
     const body = await request.json();
     planName = body.planName;
-    monthlyFee = body.monthlyFee;
-    trialDays = body.trialDays;
 
-    // Validate inputs
-    const fee = Number(monthlyFee) || 29;
-    const trial = Number(trialDays) || 14;
-
-    logger.info({ shop, planName, fee, trial }, "Billing setup started");
+    logger.info({ shop, planName }, "Billing setup started");
 
     if (!planName) {
       logger.warn({ shop }, "Billing setup failed: plan name not provided");
@@ -71,18 +62,33 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Create Shopify recurring subscription using AppRecurringPricing
+    // Pricing terms come from the plan, never from the request body — the
+    // client must not be able to name its own commission rate or cap.
+    const plan = shopSubscription.subscription_plans;
+    const commissionRate = Number(
+      shopSubscription.commission_rate_override ?? plan?.commission_rate ?? 0.03,
+    );
+    const cappedAmount = Number(
+      shopSubscription.cap_amount_override ?? plan?.cap_amount ?? 299,
+    );
+
     const currency = shopRecord.currency_code || "USD";
     const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
     const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
 
+    // AppUsagePricing, not AppRecurringPricing: there is no fixed monthly fee.
+    // `terms` is shown to the merchant on the approval screen, and cappedAmount
+    // is the ceiling Shopify enforces — usage records beyond it are rejected.
+    //
+    // No trialDays here. The trial is a revenue threshold tracked in our own
+    // database, and a Shopify trial would only delay charges by a clock we do
+    // not bill on.
     const mutation = `
-      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!, $trialDays: Int!, $test: Boolean!) {
+      mutation appSubscriptionCreate($name: String!, $returnUrl: URL!, $lineItems: [AppSubscriptionLineItemInput!]!, $test: Boolean!) {
         appSubscriptionCreate(
           name: $name
           returnUrl: $returnUrl
           lineItems: $lineItems
-          trialDays: $trialDays
           test: $test
         ) {
           userErrors {
@@ -96,18 +102,21 @@ export async function action({ request }: ActionFunctionArgs) {
             status
             createdAt
             currentPeriodEnd
-            trialDays
             lineItems {
               id
               plan {
                 pricingDetails {
                   __typename
-                  ... on AppRecurringPricing {
-                    price {
+                  ... on AppUsagePricing {
+                    terms
+                    cappedAmount {
                       amount
                       currencyCode
                     }
-                    interval
+                    balanceUsed {
+                      amount
+                      currencyCode
+                    }
                   }
                 }
               }
@@ -117,20 +126,20 @@ export async function action({ request }: ActionFunctionArgs) {
       }
     `;
 
+    const ratePercent = (commissionRate * 100).toFixed(1).replace(/\.0$/, "");
     const variables = {
       name: `Better Bundle - ${planName}`,
       returnUrl: returnUrl,
       test: process.env.NODE_ENV === "development",
-      trialDays: trial,
       lineItems: [
         {
           plan: {
-            appRecurringPricingDetails: {
-              price: {
-                amount: fee,
+            appUsagePricingDetails: {
+              terms: `${ratePercent}% of revenue attributed to recommendations, up to ${cappedAmount} ${currency} per 30 days`,
+              cappedAmount: {
+                amount: cappedAmount,
                 currencyCode: currency,
               },
-              interval: "EVERY_30_DAYS",
             },
           },
         },
@@ -189,7 +198,13 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     logger.info(
-      { shop, planName, fee, subscriptionId: subscription.id },
+      {
+        shop,
+        planName,
+        commissionRate,
+        cappedAmount,
+        subscriptionId: subscription.id,
+      },
       "Billing setup completed successfully",
     );
     incrementCounter("billing.setup.completed", { shop, planName });
@@ -198,7 +213,7 @@ export async function action({ request }: ActionFunctionArgs) {
       success: true,
       subscription_id: subscription.id,
       confirmationUrl: confirmationUrl,
-      message: `Please approve the ${planName} plan ($${fee}/month) in Shopify`,
+      message: `Please approve ${ratePercent}% of attributed revenue (max ${cappedAmount} ${currency}/30 days) in Shopify`,
     });
   } catch (error) {
     logger.error({ error, shop, planName }, "Error in billing setup");

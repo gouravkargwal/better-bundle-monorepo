@@ -41,6 +41,20 @@ export interface HoldoutConfig {
   status: string;
 }
 
+export interface TrendPoint {
+  /** ISO date (YYYY-MM-DD) */
+  date: string;
+  impressions: number;
+  revenue: number;
+}
+
+export type InsightTone = "success" | "info" | "warning" | "critical";
+
+export interface ActionableInsight {
+  tone: InsightTone;
+  text: string;
+}
+
 export interface ImpactDashboardData {
   summary: ImpactSummary;
   funnels: FunnelRow[];
@@ -48,4 +62,8 @@ export interface ImpactDashboardData {
   worstOffers: OfferPair[];
   holdoutConfig: HoldoutConfig;
   currencyCode: string;
+  /** Daily accepted revenue + impressions over the selected window */
+  trends: TrendPoint[];
+  /** Computed, merchant-facing suggestions */
+  insights: ActionableInsight[];
 }

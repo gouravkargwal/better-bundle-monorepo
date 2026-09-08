@@ -17,6 +17,10 @@ export function SubscriptionActive({
     }).format(amount);
   };
 
+  const ratePercent = (subscriptionData.commissionRate * 100)
+    .toFixed(1)
+    .replace(/\.0$/, "");
+
   const billingCycle = subscriptionData.billingCycle;
   const nextBillingDate = billingCycle?.endDate
     ? new Date(billingCycle.endDate)
@@ -42,8 +46,8 @@ export function SubscriptionActive({
                   ✅ Subscription Active
                 </Text>
                 <Text as="p" tone="subdued">
-                  Your flat-rate subscription is active and Better Bundle
-                  services are running
+                  Better Bundle is running. You are billed only on the revenue
+                  it generates.
                 </Text>
               </BlockStack>
               <Badge tone="success" size="large">
@@ -101,10 +105,13 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(subscriptionData.monthlyFee)}
+                      {formatCurrency(subscriptionData.usageThisCycle)}
                     </Text>
                     <Text as="span" variant="bodySm" tone="subdued">
-                      per month, billed every 30 days
+                      this cycle · {ratePercent}% of{" "}
+                      {formatCurrency(subscriptionData.attributedThisCycle)}{" "}
+                      attributed · capped at{" "}
+                      {formatCurrency(subscriptionData.cappedAmount)}
                     </Text>
                   </BlockStack>
                 </div>
@@ -172,7 +179,7 @@ export function SubscriptionActive({
                     as="span"
                     variant="bodySm"
                     fontWeight="semibold"
-                    color="text-success"
+                    tone="success"
                   >
                     ✓ What's Included
                   </Text>
@@ -185,7 +192,7 @@ export function SubscriptionActive({
                     }}
                   >
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -193,7 +200,7 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -201,7 +208,7 @@ export function SubscriptionActive({
                       </Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -259,14 +266,15 @@ export function SubscriptionActive({
                 </div>
                 <BlockStack gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Plan Changes:</strong> Upgrade, downgrade, or cancel
-                    your subscription at any time. Changes apply at the next
-                    billing cycle.
+                    <strong>Plan Changes:</strong> Cancel at any time. You are
+                    only ever billed for revenue already generated.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Billing:</strong> You'll be charged{" "}
-                    {formatCurrency(subscriptionData.monthlyFee)} every 30 days.
-                    No overage fees or usage tracking.
+                    <strong>Billing:</strong> {ratePercent}% of the revenue we
+                    attribute to our recommendations, charged as it accrues and
+                    never more than{" "}
+                    {formatCurrency(subscriptionData.cappedAmount)} in a 30-day
+                    cycle.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Invoices:</strong> View all past invoices and

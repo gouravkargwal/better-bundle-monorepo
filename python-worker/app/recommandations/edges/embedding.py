@@ -31,9 +31,16 @@ from app.core.database.session import get_transaction_context
 
 logger = logging.getLogger(__name__)
 
-# Must match resolution.EMBEDDING_MODEL. If these diverge, category vectors land
-# in a different space from product vectors and every similarity is meaningless.
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+# The single source of truth for which model wrote these vectors.
+# `resolution.py` imports this rather than declaring its own: if the two ever
+# disagreed, category vectors would land in a different space from product
+# vectors and every similarity score would be meaningless — with no error, just
+# quietly nonsensical recommendations.
+#
+# bge-small-en-v1.5 over all-MiniLM-L6-v2: same 384 dimensions, so no schema
+# change, same local CPU inference, but materially better on retrieval, which is
+# the one thing this is used for. It is also what the engine plan specified.
+EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 VECTOR_DIM = 384
 ENCODE_BATCH_SIZE = 64
 
@@ -72,6 +79,14 @@ class ProductEmbedder:
 
             logger.info(f"Loading embedding model: {self.model_name}")
             self._model = SentenceTransformer(self.model_name)
+
+            dim = self._model.get_sentence_embedding_dimension()
+            if dim != VECTOR_DIM:
+                raise RuntimeError(
+                    f"{self.model_name} produces {dim}-dim vectors but "
+                    f"product_vectors.vector is VECTOR({VECTOR_DIM}). Change the "
+                    f"column and migrate, or pick a {VECTOR_DIM}-dim model."
+                )
         # `encode` returns an ndarray; tolist() once, here, gives plain lists
         # all the way down.
         return self._model.encode(list(texts), batch_size=ENCODE_BATCH_SIZE).tolist()
@@ -97,7 +112,8 @@ class ProductEmbedder:
                     skipped += 1
                     continue
                 digest = text_hash(body)
-                if existing.get(product.product_id) == digest:
+                # Compared against "<model>:<hash>" so a model change re-embeds.
+                if existing.get(product.product_id) == f"{self.model_name}:{digest}":
                     skipped += 1
                     continue
                 pending.append((product.product_id, body, digest))
@@ -137,16 +153,25 @@ class ProductEmbedder:
             return list((await session.execute(query)).scalars().all())
 
     async def _existing_hashes(self, shop_id: str) -> Dict[str, str]:
-        """All stored hashes for the shop, in one query."""
+        """Stored (text_hash, model_version) per product, in one query.
+
+        The model has to be part of the key. Changing models does not change any
+        product's text, so a text-only check would skip every product and leave
+        the shop on vectors from the previous model — in a different vector
+        space from the category queries being embedded against them. No error,
+        just quietly wrong matches.
+        """
         async with get_transaction_context() as session:
             rows = (
                 await session.execute(
-                    select(ProductVector.product_id, ProductVector.text_hash).where(
-                        ProductVector.shop_id == shop_id
-                    )
+                    select(
+                        ProductVector.product_id,
+                        ProductVector.text_hash,
+                        ProductVector.model_version,
+                    ).where(ProductVector.shop_id == shop_id)
                 )
             ).all()
-        return {r.product_id: r.text_hash for r in rows}
+        return {r.product_id: f"{r.model_version}:{r.text_hash}" for r in rows}
 
     async def _store_chunk(
         self, shop_id: str, chunk: List[Tuple[str, str, str]]

@@ -10,6 +10,25 @@ from sqlalchemy import select, and_
 logger = get_logger(__name__)
 
 
+def _candidate_id(item: Dict[str, Any]) -> str:
+    """Pull the product id out of a candidate dict.
+
+    `product_id` first, because that is what `EdgeRecommender.recommend`
+    emits. The `Id`/`id` keys are the Gorse-era shapes and are kept so any
+    remaining caller of that form still works.
+
+    This previously read only `Id`/`id` and fell back to `str(item)`, so every
+    edge candidate stringified to a whole dict, failed the `.isdigit()` check
+    and was dropped — the API returned zero recommendations for every request
+    while logging a full set of valid candidates one line earlier.
+    """
+    for key in ("product_id", "Id", "id"):
+        value = item.get(key)
+        if value:
+            return str(value)
+    return str(item)
+
+
 class ProductEnrichment:
     """Service to enrich Gorse item IDs with Shopify product data"""
 
@@ -155,9 +174,7 @@ class ProductEnrichment:
                     # Handle both string item IDs and dictionary items
                     if isinstance(item_id, dict):
                         # Extract the actual item ID from the dictionary
-                        actual_item_id = item_id.get(
-                            "Id", item_id.get("id", str(item_id))
-                        )
+                        actual_item_id = _candidate_id(item_id)
                     else:
                         actual_item_id = item_id
 
@@ -236,9 +253,7 @@ class ProductEnrichment:
                     # Handle both string item IDs and dictionary items
                     if isinstance(item_id, dict):
                         # Extract the actual item ID from the dictionary
-                        actual_item_id = item_id.get(
-                            "Id", item_id.get("id", str(item_id))
-                        )
+                        actual_item_id = _candidate_id(item_id)
                     else:
                         actual_item_id = item_id
 

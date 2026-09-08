@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
     Index,
+    text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from .base import Base
@@ -65,7 +66,10 @@ class SuspensionAuditLog(Base):
     created_at = Column(
         TIMESTAMP(timezone=True),
         nullable=False,
-        server_default="NOW()",
+        # text() rather than the bare string "NOW()": Alembic reflects the
+        # normalised `now()` from Postgres and cannot compare it against a raw
+        # string, so `alembic check` reported permanent drift on this column.
+        server_default=text("NOW()"),
         default=lambda: datetime.now(timezone.utc),
         comment="When the event was recorded",
     )

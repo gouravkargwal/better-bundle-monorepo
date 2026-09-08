@@ -2,7 +2,7 @@
 
 client_id = "67ed7387b7e177679b747bf339bf739e"
 name = "Better-Bundle-Dev"
-application_url = "https://9588-2409-40d4-162-e631-b883-b3ef-c656-2d30.ngrok-free.app"
+application_url = "https://1a53-223-184-242-150.ngrok-free.app"
 embedded = true
 
 [build]
@@ -12,68 +12,68 @@ automatically_update_urls_on_dev = true
 api_version = "2024-07"
 
   [[webhooks.subscriptions]]
-  topics = [ "app_subscriptions/update" ]
-  uri = "/webhooks/billing/subscription_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "refunds/create" ]
-  uri = "/webhooks/refunds/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "collections/delete" ]
-  uri = "/webhooks/collections/delete"
-
-  [[webhooks.subscriptions]]
-  topics = [ "products/create" ]
-  uri = "/webhooks/products/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
-
-  [[webhooks.subscriptions]]
-  topics = [ "collections/update" ]
-  uri = "/webhooks/collections/update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "collections/create" ]
-  uri = "/webhooks/collections/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "products/delete" ]
-  uri = "/webhooks/products/delete"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/updated" ]
-  uri = "/webhooks/orders/updated"
-
-  [[webhooks.subscriptions]]
-  topics = [ "inventory_levels/update" ]
-  uri = "/webhooks/inventory_levels/update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/update" ]
-  uri = "/webhooks/customers/update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "customers/create" ]
-  uri = "/webhooks/customers/create"
-
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
-
-  [[webhooks.subscriptions]]
-  topics = [ "orders/paid" ]
   uri = "/webhooks/orders/paid"
+  topics = [ "orders/paid" ]
 
   [[webhooks.subscriptions]]
-  topics = [ "products/update" ]
-  uri = "/webhooks/products/update"
+  uri = "/webhooks/products/create"
+  topics = [ "products/create" ]
 
   [[webhooks.subscriptions]]
-  topics = [ "app_subscriptions/approaching_capped_amount" ]
+  uri = "/webhooks/collections/delete"
+  topics = [ "collections/delete" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/billing/approaching_cap"
+  topics = [ "app_subscriptions/approaching_capped_amount" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/delete"
+  topics = [ "products/delete" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/billing/subscription_update"
+  topics = [ "app_subscriptions/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/create"
+  topics = [ "customers/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/collections/create"
+  topics = [ "collections/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/updated"
+  topics = [ "orders/updated" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/collections/update"
+  topics = [ "collections/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/products/update"
+  topics = [ "products/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/update"
+  topics = [ "customers/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/inventory_levels/update"
+  topics = [ "inventory_levels/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/refunds/create"
+  topics = [ "refunds/create" ]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -81,8 +81,8 @@ scopes = "read_custom_pixels,read_customer_data_erasure,read_customer_events,rea
 
 [auth]
 redirect_urls = [
-  "https://9588-2409-40d4-162-e631-b883-b3ef-c656-2d30.ngrok-free.app/auth/callback",
-  "https://9588-2409-40d4-162-e631-b883-b3ef-c656-2d30.ngrok-free.app/auth/shopify/callback"
+  "https://1a53-223-184-242-150.ngrok-free.app/auth/callback",
+  "https://1a53-223-184-242-150.ngrok-free.app/auth/shopify/callback"
 ]
 
 [pos]

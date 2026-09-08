@@ -2,8 +2,19 @@
  * Centralized constants for Apollo Extension
  */
 
-export const BACKEND_URL = "https://api.betterbundle.site" as const;
-export const SHOPIFY_APP_URL = "https://betterbundle.site" as const;
+// Backend API base URL — the ONE place to change it for this extension.
+//
+// Extensions run in the shopper's browser, so this must be a publicly
+// reachable host: localhost is not visible to them. During local development
+// that means a tunnel to the Python worker on port 8000.
+//
+// Production: https://api.betterbundle.site
+export const BACKEND_URL = "https://nonconscientious-annette-saddeningly.ngrok-free.dev" as const;
+// The Remix app's own URL. Apollo posts the post-purchase changeset here to
+// be signed, so a stale value fails the whole post-purchase step with
+// ERR_CONNECTION_REFUSED — it was pinned to the production domain while
+// running against a dev tunnel.
+export const SHOPIFY_APP_URL = "https://1a53-223-184-242-150.ngrok-free.app" as const;
 
 // Storage Keys - Apollo uses in-memory cache for tokens (not persistent)
 // These are mainly for reference/compatibility

@@ -34,26 +34,30 @@ function mockSubscription(overrides: any = {}) {
     subscription_plan_id: "plan-1",
     shopify_subscription_id: null,
     shopify_status: null,
-    monthly_fee_override: null,
-    trial_duration_days: null,
+    commission_rate_override: null,
+    cap_amount_override: null,
+    trial_threshold_override: null,
     created_at: new Date(),
     subscription_plans: {
-      name: "Pro",
-      monthly_fee: 29,
-      trial_days: 14,
+      name: "Pay As You Go",
+      commission_rate: 0.03,
+      cap_amount: 299,
+      trial_revenue_threshold: 1000,
     },
     ...overrides,
   };
 }
 
-function mockExpiredSubscription(overrides: any = {}) {
-  // started_at in the past so trial is expired
-  const pastDate = new Date();
-  pastDate.setDate(pastDate.getDate() - 20); // 20 days ago, with 14-day trial
+// The trial ends on revenue, so "used up" means the threshold was reached.
+// Callers must also stub commission_records.aggregate to return >= threshold.
+function mockUsedUpSubscription(overrides: any = {}) {
+  return mockSubscription(overrides);
+}
 
-  return mockSubscription({
-    started_at: pastDate,
-    ...overrides,
+/** Attributed revenue the trial has accumulated so far. */
+function stubTrialRevenue(amount: number) {
+  mockPrisma.commission_records.aggregate.mockResolvedValue({
+    _sum: { attributed_revenue: amount },
   });
 }
 
@@ -91,9 +95,10 @@ function mockShopifySubscription(overrides: any = {}) {
       {
         plan: {
           pricingDetails: {
-            __typename: "AppRecurringPricing",
-            price: { amount: 29, currencyCode: "USD" },
-            interval: "EVERY_30_DAYS",
+            __typename: "AppUsagePricing",
+            terms: "3% of attributed revenue, up to 299 USD per 30 days",
+            cappedAmount: { amount: 299, currencyCode: "USD" },
+            balanceUsed: { amount: 42, currencyCode: "USD" },
           },
         },
       },
@@ -113,6 +118,7 @@ describe("BillingService", () => {
 
   describe("getBillingState - trial scenarios", () => {
     it("returns trial_active when trial is still in progress", async () => {
+      stubTrialRevenue(120);
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
         mockSubscription(),
       );
@@ -121,12 +127,12 @@ describe("BillingService", () => {
 
       expect(result.status).toBe("trial_active");
       expect(result.trialData!.isActive).toBe(true);
-      // Should have positive daysRemaining since started_at is now
-      expect(result.trialData!.daysRemaining).toBeGreaterThan(0);
-      expect(result.trialData!.trialDays).toBe(14);
+      expect(result.trialData!.trialThreshold).toBe(1000);
+      expect(result.trialData!.revenueEarned).toBeLessThan(1000);
     });
 
     it("returns trial_active with no subscription (new shop)", async () => {
+      stubTrialRevenue(0);
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(null);
       mockPrisma.shops.findUnique.mockResolvedValue({
         id: "shop-1",
@@ -137,36 +143,52 @@ describe("BillingService", () => {
 
       expect(result.status).toBe("trial_active");
       expect(result.trialData!.isActive).toBe(true);
-      expect(result.trialData!.trialDays).toBe(14);
+      expect(result.trialData!.trialThreshold).toBe(1000);
       expect(result.trialData!.currency).toBe("USD");
     });
 
-    it("returns trial_completed when trial period has expired", async () => {
+    it("returns trial_completed once attributed revenue reaches the threshold", async () => {
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        mockExpiredSubscription(),
+        mockUsedUpSubscription(),
       );
+      stubTrialRevenue(1000);
 
       const result = await BillingService.getBillingState("shop-1");
 
       expect(result.status).toBe("trial_completed");
       expect(result.trialData!.isActive).toBe(false);
-      expect(result.trialData!.daysRemaining).toBe(0);
     });
 
-    it("uses trial_duration_days from subscription when set", async () => {
+    it("stays in trial no matter how old the install is", async () => {
+      // A year-old install that has generated nothing is still on trial:
+      // there is deliberately no elapsed-time gate.
+      const old = new Date();
+      old.setDate(old.getDate() - 365);
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
-        mockSubscription({
-          trial_duration_days: 30,
-        }),
+        mockSubscription({ started_at: old }),
       );
+      stubTrialRevenue(10);
 
       const result = await BillingService.getBillingState("shop-1");
 
       expect(result.status).toBe("trial_active");
-      expect(result.trialData!.trialDays).toBe(30);
+      expect(result.trialData!.isActive).toBe(true);
+    });
+
+    it("uses trial_threshold_override when set", async () => {
+      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
+        mockSubscription({ trial_threshold_override: 2500 }),
+      );
+      stubTrialRevenue(0);
+
+      const result = await BillingService.getBillingState("shop-1");
+
+      expect(result.status).toBe("trial_active");
+      expect(result.trialData!.trialThreshold).toBe(2500);
     });
 
     it("uses USD as default currency for trial data", async () => {
+      stubTrialRevenue(0);
       mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
         mockSubscription(),
       );
@@ -204,8 +226,10 @@ describe("BillingService", () => {
       expect(result.status).toBe("subscription_active");
       expect(result.subscriptionData).toBeDefined();
       expect(result.subscriptionData!.status).toBe("ACTIVE");
-      expect(result.subscriptionData!.monthlyFee).toBe(29);
-      expect(result.subscriptionData!.planName).toBe("Pro");
+      expect(result.subscriptionData!.commissionRate).toBe(0.03);
+      expect(result.subscriptionData!.cappedAmount).toBe(299);
+      expect(result.subscriptionData!.usageThisCycle).toBe(42);
+      expect(result.subscriptionData!.planName).toBe("Pay As You Go");
     });
 
     it("returns subscription_active for PENDING Shopify subscriptions", async () => {
@@ -233,7 +257,8 @@ describe("BillingService", () => {
 
       expect(result.status).toBe("subscription_active");
       expect(result.subscriptionData!.status).toBe("ACTIVE");
-      expect(result.subscriptionData!.monthlyFee).toBe(29);
+      expect(result.subscriptionData!.commissionRate).toBe(0.03);
+      expect(result.subscriptionData!.cappedAmount).toBe(299);
     });
 
     it("syncs Shopify subscription status to database", async () => {
@@ -277,7 +302,8 @@ describe("BillingService", () => {
       expect(result).not.toBeNull();
       expect(result!.status).toBe("ACTIVE");
       expect(result!.subscriptionId).toBe("gid://shopify/AppSubscription/123");
-      expect(result!.monthlyFee).toBe(29);
+      expect(result!.cappedAmount).toBe(299);
+      expect(result!.balanceUsed).toBe(42);
       expect(result!.currency).toBe("USD");
     });
 

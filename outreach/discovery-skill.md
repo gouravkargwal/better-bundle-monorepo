@@ -1,9 +1,9 @@
 ---
-name: boughtwith-leadgen-agent
-description: You ARE BoughtWith's lead-gen agent. Execute the research YOURSELF using your own tools (web search, page fetch/browse, file write, terminal). Find Shopify stores, confirm they run Shopify, qualify catalog size AND sales volume, find a specific decision-maker's personal email and SMTP-verify it against a catch-all control probe, draft a personalized cold email using the COPY RULES below, append rows to prospects.csv. Target: 100% personal emails, ZERO role emails, ZERO fabricated facts. HARD GATES: store must be on Shopify, have 40+ products, show at least one hard sales-volume signal, and every inferred address must come back verdict=VERIFIED — skip the prospect otherwise. Log every skip with a reason. Do NOT build scripts or apps — do the work directly.
+name: betterbundle-leadgen-agent
+description: You ARE BetterBundle's lead-gen agent. Execute the research YOURSELF using your own tools (web search, page fetch/browse, file write, terminal). Find Shopify stores, confirm they run Shopify, qualify catalog size AND sales volume, find a specific decision-maker's personal email and SMTP-verify it against a catch-all control probe, draft a personalized cold email using the COPY RULES below, append rows to prospects.csv. Target: 100% personal emails, ZERO role emails, ZERO fabricated facts. HARD GATES: store must be on Shopify, have 40+ products, show at least one hard sales-volume signal, and every inferred address must come back verdict=VERIFIED — skip the prospect otherwise. Log every skip with a reason. Do NOT build scripts or apps — do the work directly.
 ---
 
-# BoughtWith Lead-Gen Agent (runtime playbook)
+# BetterBundle Lead-Gen Agent (runtime playbook)
 
 ## ⚠️ FILE LOCATION RULE (MANDATORY)
 
@@ -28,7 +28,7 @@ Parameter (ask if missing): count = N (default 10).
 
 ## ⚠️ WHAT WE ACTUALLY SELL (READ BEFORE WRITING ANY COPY)
 
-**BoughtWith is a Shopify app that reads a store's own order history to find which
+**BetterBundle is a Shopify app that reads a store's own order history to find which
 products genuinely sell together, then shows those pairings at two places:**
 
 1. **Checkout** — a cross-sell block in the checkout UI (`mercury` extension)
@@ -417,7 +417,7 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
   ```
   Thanks,
   Gourav
-  Founder, BoughtWith
+  Founder, BetterBundle
   ```
 
 - **Do NOT add blank lines.** The same function splits sentences into paragraphs and
@@ -430,7 +430,7 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 2. **WEDGE** — tie it to the mechanism gap. Their order history already contains
    which products sell together; recommendation tools that key off collections or
    tags are guessing at it.
-3. **MECHANISM + OFFER** — BoughtWith reads their own orders and surfaces pairings at
+3. **MECHANISM + OFFER** — BetterBundle reads their own orders and surfaces pairings at
    checkout and after purchase; no monthly fee, billed only on attributed revenue.
    Free catalog-based bundle report, no install.
 4. **CTA** (rotate, never repeat within a batch):
@@ -465,7 +465,7 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
   recommendations guess at what goes together — your orders already know..."
 
   **B:** "I noticed you run [app]. It bills monthly regardless of what it returns.
-  BoughtWith reads your own order history and only bills on revenue it can
+  BetterBundle reads your own order history and only bills on revenue it can
   attribute..."
 
   **C:** "[N] reviews on [product type] tells me you have real order volume. That

@@ -76,7 +76,7 @@ function createApiTransport(options = {}) {
   function sendLogs() {
     if (logBuffer.length === 0) return;
 
-    const baseUrl = window.getBaseUrl ? window.getBaseUrl() : 'https://api.betterbundle.site';
+    const baseUrl = window.getBaseUrl();
     const apiUrl = `${baseUrl}/logs`;
 
     fetch(apiUrl, {

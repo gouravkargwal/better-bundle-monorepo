@@ -65,6 +65,12 @@ interface Product {
 }
 
 interface UseRecommendationsProps {
+  /**
+   * When true, no request is made and no impression is recorded. Set when the
+   * extension renders in the Checkout & Accounts editor: a merchant
+   * configuring the block is not a shopper being shown an offer.
+   */
+  skip?: boolean;
   context: ExtensionContext;
   limit: number;
   customerId: string;
@@ -78,6 +84,7 @@ interface UseRecommendationsProps {
 }
 
 export function useRecommendations({
+  skip = false,
   context,
   limit,
   customerId,
@@ -123,7 +130,7 @@ export function useRecommendations({
 
   // Fetch recommendations
   useEffect(() => {
-    if (!storage) {
+    if (skip || !storage) {
       return;
     }
 

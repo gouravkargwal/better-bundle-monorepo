@@ -1,3 +1,4 @@
+import { BACKEND_URL } from "../config/constants";
 export interface LogEntry {
   level: number;
   time: string;
@@ -110,8 +111,7 @@ class Logger {
     if (typeof window !== "undefined" && (window as any).getBaseUrl) {
       return (window as any).getBaseUrl();
     }
-    // return "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
-    return "https://api.betterbundle.site";
+    return BACKEND_URL;
   }
 
   public trace = this.createLogMethod("trace", this.levels.trace);

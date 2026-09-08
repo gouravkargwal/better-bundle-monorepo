@@ -33,6 +33,10 @@ export function SubscriptionPending({
     }).format(amount);
   };
 
+  const ratePercent = (subscriptionData.commissionRate * 100)
+    .toFixed(1)
+    .replace(/\.0$/, "");
+
   const handleApproveSubscription = () => {
     if (subscriptionData.confirmationUrl) {
       window.top!.location.href = subscriptionData.confirmationUrl;
@@ -186,10 +190,10 @@ export function SubscriptionPending({
                   <BlockStack gap="200">
                     <InlineStack align="space-between">
                       <Text as="p" variant="bodySm" tone="subdued">
-                        Monthly Fee:
+                        Rate:
                       </Text>
                       <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {formatCurrency(subscriptionData.monthlyFee)}
+                        {ratePercent}% of attributed revenue
                       </Text>
                     </InlineStack>
                     <InlineStack align="space-between">
@@ -220,9 +224,10 @@ export function SubscriptionPending({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You'll be charged {formatCurrency(subscriptionData.monthlyFee)} per month.
-                    No usage tracking, no surprises — just predictable flat-rate
-                    pricing.
+                    💡 You are charged {ratePercent}% of the revenue we
+                    attribute to our recommendations, capped at{" "}
+                    {formatCurrency(subscriptionData.cappedAmount)} per 30-day
+                    cycle. No monthly fee.
                   </Text>
                 </div>
               </BlockStack>

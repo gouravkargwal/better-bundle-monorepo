@@ -12,7 +12,7 @@ import { getCurrencySymbol } from "../../../utils/currency";
 interface OverviewMetricsProps {
   overviewData: {
     totalRevenue: number;
-    commissionCharged?: number; // Actual commission charged (PAID phase only)
+    commissionCharged?: number;
     currency: string;
     conversionRate: number | null;
     revenueChange: number | null;
@@ -53,29 +53,40 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
     );
   };
 
-  // ✅ FIX: Use actual commission charged, not calculated from revenue
-  // For PAID phase: commissionCharged is the actual amount charged to Shopify
-  // For TRIAL phase: calculate from revenue since commissions aren't charged yet
   const isTrialPhase = overviewData.isTrialPhase;
-  const commissionRate = overviewData.activePlan?.commissionRate || 0.03; // Default 3%
+  const commissionRate =
+    overviewData.activePlan?.commissionRate || 0.03;
 
-  // Use actual commission charged if available (PAID phase), otherwise calculate (TRIAL phase)
   const commissionPaid = isTrialPhase
-    ? overviewData.totalRevenue * commissionRate // Trial: calculate expected commission
-    : (overviewData.commissionCharged ??
-      overviewData.totalRevenue * commissionRate); // Paid: use actual charged amount
+    ? overviewData.totalRevenue * commissionRate
+    : overviewData.commissionCharged ??
+      overviewData.totalRevenue * commissionRate;
 
   const netProfit = overviewData.totalRevenue - commissionPaid;
 
-  // Calculate percentage kept (more intuitive than ROI)
   const percentageKept =
     overviewData.totalRevenue > 0
       ? (netProfit / overviewData.totalRevenue) * 100
       : 0;
 
-  // ROI calculation (used to show "Exceptional ROI" for very high values)
   const roiPercentage =
     commissionPaid > 0 ? (netProfit / commissionPaid) * 100 : 0;
+
+  const revenueDescription =
+    overviewData.totalRevenue > 0 ? (
+    <>
+      You earned{" "}
+      {formatCurrencyValue(
+        overviewData.totalRevenue,
+        overviewData.currency,
+      )}
+      , paid only{" "}
+      {formatCurrencyValue(commissionPaid, overviewData.currency)}
+      {roiPercentage > 1000 ? " · Exceptional ROI" : ""}
+    </>
+  ) : (
+    "No charges until revenue is generated"
+  );
 
   return (
     <div
@@ -98,7 +109,8 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = "translateY(-2px)";
-          e.currentTarget.style.boxShadow = "0 8px 25px rgba(0,0,0,0.1)";
+          e.currentTarget.style.boxShadow =
+            "0 8px 25px rgba(0,0,0,0.1)";
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = "translateY(0)";
@@ -123,7 +135,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     tone="subdued"
                     fontWeight="medium"
                   >
-                    💰 Total Revenue Generated
+                    Total Revenue Generated
                   </Text>
                 </BlockStack>
                 <div
@@ -134,11 +146,13 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     minWidth: "44px",
                     minHeight: "44px",
                     padding: "10px",
-                    backgroundColor: overviewData.isTrialPhase
+                    backgroundColor: isTrialPhase
                       ? "#F59E0B15"
                       : "#10B98115",
                     borderRadius: "14px",
-                    border: `2px solid ${overviewData.isTrialPhase ? "#F59E0B30" : "#10B98130"}`,
+                    border: `2px solid ${
+                      isTrialPhase ? "#F59E0B30" : "#10B98130"
+                    }`,
                   }}
                 >
                   <Icon source={CashDollarIcon} tone="base" />
@@ -146,7 +160,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
               </InlineStack>
               <div
                 style={{
-                  color: overviewData.isTrialPhase ? "#F59E0B" : "#10B981",
+                  color: isTrialPhase ? "#F59E0B" : "#10B981",
                 }}
               >
                 <Text as="p" variant="heading2xl" fontWeight="bold">
@@ -184,7 +198,8 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = "translateY(-2px)";
-          e.currentTarget.style.boxShadow = "0 8px 25px rgba(0,0,0,0.1)";
+          e.currentTarget.style.boxShadow =
+            "0 8px 25px rgba(0,0,0,0.1)";
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = "translateY(0)";
@@ -209,7 +224,7 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                     tone="subdued"
                     fontWeight="medium"
                   >
-                    💡 Cost Efficiency
+                    Cost Efficiency
                   </Text>
                 </BlockStack>
                 <div
@@ -236,25 +251,12 @@ export function OverviewMetrics({ overviewData }: OverviewMetricsProps) {
                 </Text>
               </div>
               <Text as="p" variant="bodySm" tone="subdued">
-                {overviewData.totalRevenue > 0 ? (
-                  <>
-                    You earned{" "}
-                    {formatCurrencyValue(
-                      overviewData.totalRevenue,
-                      overviewData.currency,
-                    )}
-                    , paid only{" "}
-                    {formatCurrencyValue(commissionPaid, overviewData.currency)}
-                    {roiPercentage > 1000 && <> • Exceptional ROI</>}
-                  </>
-                ) : (
-                  "No charges until revenue is generated"
-                )}
+                {revenueDescription}
               </Text>
               {overviewData.totalRevenue > 0 && (
                 <div style={{ marginTop: "8px" }}>
                   <Badge tone="success" size="small">
-                    {(commissionRate * 100).toFixed(1)}% commission rate
+                    {(commissionRate * 100).toFixed(1) + "% commission rate"}
                   </Badge>
                 </div>
               )}

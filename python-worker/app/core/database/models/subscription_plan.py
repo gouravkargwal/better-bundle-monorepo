@@ -46,24 +46,32 @@ class SubscriptionPlan(BaseModel):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     is_default = Column(Boolean, default=False, nullable=False, index=True)
 
-    # Flat fee pricing
-    monthly_fee = Column(
+    # Pay-as-you-go pricing.
+    #
+    # The merchant is charged `commission_rate` of the revenue attributed to
+    # recommendations, never more than `cap_amount` in a 30-day cycle. Shopify
+    # requires the cap up front — it is what the merchant approves, and usage
+    # records beyond it are rejected by the platform.
+    commission_rate = Column(
+        Numeric(5, 4),
+        nullable=False,
+        default=Decimal("0.0300"),
+        server_default="0.0300",
+        comment="Share of attributed revenue charged, e.g. 0.0300 = 3%",
+    )
+    cap_amount = Column(
         Numeric(10, 2),
-        nullable=True,
+        nullable=False,
         default=Decimal("299.00"),
-        comment="Full monthly fee charged via Shopify AppSubscription",
+        server_default="299.00",
+        comment="Maximum chargeable per 30-day cycle (Shopify cappedAmount)",
     )
-    trial_days = Column(
-        Integer,
-        nullable=True,
-        default=14,
-        comment="Number of free trial days before first charge",
-    )
-    discount_percentage = Column(
-        Numeric(5, 2),
-        nullable=True,
-        default=Decimal("50.00"),
-        comment="Promotional discount percentage applied to monthly_fee (e.g. 50.00 = 50% off)",
+    trial_revenue_threshold = Column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("1000.00"),
+        server_default="1000.00",
+        comment="Attributed revenue earned free before the first charge",
     )
 
     # Metadata
@@ -91,9 +99,9 @@ class SubscriptionPlan(BaseModel):
     def __repr__(self) -> str:
         return (
             f"<SubscriptionPlan(name={self.name}, type={self.plan_type.value}, "
-            f"active={self.is_active}, monthly_fee=${self.monthly_fee or 'N/A'}, "
-            f"trial_days={self.trial_days or 'N/A'}, "
-            f"discount={self.discount_percentage or 0}%)>"
+            f"active={self.is_active}, rate={self.commission_rate}, "
+            f"cap=${self.cap_amount}, "
+            f"trial_threshold=${self.trial_revenue_threshold})>"
         )
 
     @property

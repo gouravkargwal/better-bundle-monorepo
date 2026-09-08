@@ -4,6 +4,7 @@ import { authenticate } from "../shopify.server";
 import { Page, Layout, BlockStack } from "@shopify/polaris";
 import { ExtensionSetupGuide } from "../components/Extensions/ExtensionSetupGuide";
 import { TitleBar } from "@shopify/app-bridge-react";
+import { HeroHeader } from "../components/UI/HeroHeader";
 import prisma from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -23,8 +24,15 @@ export default function ExtensionsPage() {
 
   return (
     <Page>
-      <TitleBar title="Extension Setup Guide" />
-      <BlockStack gap="400">
+      <TitleBar title="Extensions" />
+      <BlockStack gap="300">
+        <HeroHeader
+          title="Put recommendations where your shoppers convert"
+          subtitle="Enable AI-powered offers across storefront, checkout, post-purchase, and customer accounts — one setup at a time."
+          variant="gradient"
+          align="left"
+        />
+
         <Layout>
           <Layout.Section>
             <ExtensionSetupGuide shopDomain={shopDomain} />

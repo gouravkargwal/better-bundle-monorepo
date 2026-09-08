@@ -110,20 +110,13 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      const monthlyFee = Number(defaultPlan.monthly_fee) || 29;
-      const discountPct = Number(defaultPlan.discount_percentage) || 0;
-      const discountedFee =
-        discountPct > 0
-          ? Math.round(monthlyFee * (1 - discountPct / 100) * 100) / 100
-          : monthlyFee;
-
       return {
         symbol: getCurrencySymbol(currencyCode),
-        monthly_fee: discountedFee,
-        original_monthly_fee: discountPct > 0 ? monthlyFee : undefined,
-        discount_percentage: discountPct > 0 ? discountPct : undefined,
-        trial_days: Number(defaultPlan.trial_days) || 14,
-        plan_name: defaultPlan.name || "Pro",
+        commission_rate: Number(defaultPlan.commission_rate) || 0.03,
+        cap_amount: Number(defaultPlan.cap_amount) || 299,
+        trial_revenue_threshold:
+          Number(defaultPlan.trial_revenue_threshold) || 1000,
+        plan_name: defaultPlan.name || "Pay As You Go",
       };
     } catch (error) {
       logger.error({ error }, "Error getting subscription plan configuration");
@@ -240,8 +233,9 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
-      // Create shop subscription (TRIAL status) with flat fee trial configuration
-      const trialDays = Number(defaultPlan.trial_days) || 14;
+      // Create the trial subscription. No duration: the trial ends when
+      // attributed revenue reaches the plan's threshold, and the terms are
+      // read from the plan rather than copied onto the row.
       const shopSubscription = await tx.shop_subscriptions.create({
         data: {
           shop_id: shopRecord.id,
@@ -251,7 +245,6 @@ export class OnboardingService {
           started_at: new Date(),
           is_active: true,
           auto_renew: true,
-          trial_duration_days: trialDays,
         },
       });
 

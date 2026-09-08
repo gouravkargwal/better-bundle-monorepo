@@ -32,9 +32,28 @@ class ShopifyDataStorageService:
     - Basic error handling
     """
 
-    def __init__(self):
+    # How records written by this instance reached us. "backfill" is the safe
+    # default: mislabelling a historical import as a webhook would bill the
+    # merchant for orders placed before they installed.
+    SOURCE_BACKFILL = "backfill"
+    SOURCE_WEBHOOK = "webhook"
+
+    def __init__(self, source: str = SOURCE_BACKFILL):
         self.batch_size = 100  # Essential batching
         self.chunk_size = 50  # Chunked queries to avoid timeouts
+        self._source = source
+
+    def with_source(self, source: str) -> "ShopifyDataStorageService":
+        """A view of this service that stamps a different source.
+
+        Returned rather than mutated because one collection service instance
+        serves both webhook and backfill jobs concurrently; flipping a shared
+        field would race and mislabel whichever job lost.
+        """
+        clone = ShopifyDataStorageService(source=source)
+        clone.batch_size = self.batch_size
+        clone.chunk_size = self.chunk_size
+        return clone
 
     async def store_products_data(
         self, products: List[Any], shop_id: str, incremental: bool = True
@@ -142,8 +161,12 @@ class ShopifyDataStorageService:
                 "shopify_id": full_id,  # Use camelCase to match Prisma schema
                 "shopify_created_at": created_at,  # Use camelCase to match Prisma schema
                 "shopify_updated_at": updated_at,  # Use camelCase to match Prisma schema
-                # Correctly mark collected data as GraphQL backfill (not webhook/rest)
-                "source": "backfill",
+                # How this record reached us. Hardcoding "backfill" here threw
+                # away the one fact attribution depends on: a webhook-triggered
+                # fetch was indistinguishable from a historical import, so
+                # normalisation set is_webhook=False and never published an
+                # attribution job. Live orders were silently never attributed.
+                "source": self._source,
                 "format": "graphql",
             }
 
@@ -207,7 +230,7 @@ class ShopifyDataStorageService:
                             payload=item_data["payload"],
                             extracted_at=item_data["extracted_at"],
                             shopify_updated_at=item_data["shopify_updated_at"],
-                            source="backfill",
+                            source=self._source,
                             format="graphql",
                         )
                     )

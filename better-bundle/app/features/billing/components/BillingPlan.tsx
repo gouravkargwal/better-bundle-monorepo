@@ -44,14 +44,12 @@ export function BillingPlan({
             trialData={billingState.trialData!}
             shopCurrency={shopCurrency}
             onSetupBilling={async (setupData: BillingSetupData) => {
+              // Only the plan name is sent. Rate and cap are read server-side
+              // from the plan so the client cannot choose its own price.
               const response = await fetch("/api/billing/setup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  planName: setupData.planName,
-                  monthlyFee: setupData.monthlyFee,
-                  trialDays: setupData.trialDays,
-                }),
+                body: JSON.stringify({ planName: setupData.planName }),
               });
 
               const result = await response.json();

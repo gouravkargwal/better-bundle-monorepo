@@ -27,6 +27,10 @@ export function SubscriptionSuspended({
     }).format(amount);
   };
 
+  const ratePercent = (subscriptionData.commissionRate * 100)
+    .toFixed(1)
+    .replace(/\.0$/, "");
+
   const handleReactivate = () => {
     window.location.href = "/app/billing?action=reactivate";
   };
@@ -119,10 +123,10 @@ export function SubscriptionSuspended({
                   </InlineStack>
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Monthly Fee:
+                      Rate:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {formatCurrency(subscriptionData.monthlyFee)}
+                      {ratePercent}% of attributed revenue
                     </Text>
                   </InlineStack>
                 </BlockStack>

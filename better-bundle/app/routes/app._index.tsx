@@ -7,7 +7,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const isOnboarded = await getShopOnboardingCompleted(session.shop);
 
   if (isOnboarded) {
-    return redirect("/app/dashboard");
+    // Steady-state dashboard. /app/overview shows the at-a-glance dashboard
+    // (and the analysis-progress modal right after "Start Free").
+    return redirect("/app/overview");
   }
 
   return redirect("/app/onboarding");

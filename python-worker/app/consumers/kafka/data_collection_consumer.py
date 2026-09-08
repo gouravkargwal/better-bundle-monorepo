@@ -196,6 +196,12 @@ class DataCollectionKafkaConsumer:
 
             # Create collection payload based on event type
             collection_payload = self._create_collection_payload(event_type, shopify_id)
+            if collection_payload:
+                # Mark the delivery mechanism. This is the only point in the
+                # chain that knows a webhook caused this fetch; without it the
+                # resulting raw row is indistinguishable from a backfill and
+                # the order is never attributed.
+                collection_payload["trigger"] = "webhook"
             if not collection_payload:
                 logger.warning(f"❌ No collection payload for event type: {event_type}")
                 return

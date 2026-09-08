@@ -1,8 +1,7 @@
 class RecommendationAPI {
   constructor() {
     // Use config for base URL
-    // this.baseUrl = window.getBaseUrl ? window.getBaseUrl() : "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
-    this.baseUrl = window.getBaseUrl ? window.getBaseUrl() : "https://api.betterbundle.site";
+    this.baseUrl = window.getBaseUrl();
     this.logger = window.phoenixLogger || console; // Use the global logger with fallback
     this.phoenixJWT = null; // Will be set by PhoenixJWT manager
     this.isLoading = false; // Prevent duplicate API calls

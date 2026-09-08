@@ -45,17 +45,17 @@ export function TabbedBillingPage({
   const tabs = [
     {
       id: "plan",
-      content: "💳 Billing Plan",
+      content: "Billing plan",
       panelID: "plan-panel",
     },
     {
       id: "invoices",
-      content: "📄 Usage Charges",
+      content: "Usage charges",
       panelID: "invoices-panel",
     },
     {
       id: "cycles",
-      content: "🔄 Billing Cycles",
+      content: "Billing cycles",
       panelID: "cycles-panel",
     },
   ];
@@ -92,10 +92,10 @@ export function TabbedBillingPage({
       <TitleBar title="Billing" />
       <BlockStack gap="300">
         <HeroHeader
-          badge="💳 Billing Management"
-          title="Billing & Usage Charges"
-          subtitle="Manage your billing plan and view usage charges with order details"
-          gradient="green"
+          title="Manage your plan and see what you've earned"
+          subtitle="Review your billing plan, track usage charges, and check your billing cycle history — all in one place."
+          variant="gradient"
+          align="left"
         />
 
         <Tabs

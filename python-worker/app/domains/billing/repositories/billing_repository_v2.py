@@ -21,6 +21,7 @@ from app.core.database.models import (
     SubscriptionPlan,
     ShopSubscription,
     BillingCycle,
+    CommissionRecord,
     SubscriptionStatus,
     BillingCycleStatus,
     SubscriptionType,
@@ -287,77 +288,59 @@ class BillingRepositoryV2:
             logger.error(f"Error updating billing cycle usage: {e}")
             return False
 
-    # ============= FLAT FEE OPERATIONS (NEW) =============
+    # ============= TRIAL COMPLETION BY REVENUE =============
+    #
+    # The trial ends when the app has driven `effective_trial_threshold` of
+    # attributed revenue. There is deliberately no elapsed-time gate: a shop
+    # that has not yet been sold $1,000 of attributed revenue has not received
+    # what it was promised, so charging it after N days would contradict the
+    # offer.
 
-    async def create_flat_fee_subscription(
-        self,
-        shop_id: str,
-        subscription_plan_id: str,
-        shopify_subscription_id: str,
-        shopify_line_item_id: Optional[str] = None,
-        confirmation_url: Optional[str] = None,
-        monthly_fee_override: Optional[Decimal] = None,
-    ) -> Optional[ShopSubscription]:
-        """
-        Create a flat fee paid subscription and complete the trial atomically.
-
-        For flat fee pricing, the trial is completed based on time (not revenue),
-        and a new PAID subscription is created with the flat monthly fee.
-        """
+    async def calculate_trial_revenue(self, shop_id: str) -> Decimal:
+        """Total attributed revenue accumulated during the trial phase."""
         try:
-            # 1. Complete the trial subscription (time-based)
-            await self.session.execute(
-                update(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.shop_id == shop_id,
-                        ShopSubscription.subscription_type == SubscriptionType.TRIAL,
-                        ShopSubscription.is_active == True,
-                    )
-                )
-                .values(
-                    status=SubscriptionStatus.COMPLETED,
-                    completed_at=now_utc(),
-                    is_active=False,
-                    updated_at=now_utc(),
+            query = select(
+                func.coalesce(func.sum(CommissionRecord.attributed_revenue), 0)
+            ).where(
+                and_(
+                    CommissionRecord.shop_id == shop_id,
+                    # Only TRIAL-phase rows: counting paid ones too would make
+                    # the threshold appear to be re-crossed on every order.
+                    CommissionRecord.billing_phase == BillingPhase.TRIAL,
                 )
             )
-
-            # 2. Create paid subscription with flat fee
-            paid_subscription = ShopSubscription(
-                shop_id=shop_id,
-                subscription_type=SubscriptionType.PAID,
-                status=SubscriptionStatus.ACTIVE,
-                subscription_plan_id=subscription_plan_id,
-                monthly_fee_override=monthly_fee_override,
-                shopify_subscription_id=shopify_subscription_id,
-                shopify_line_item_id=shopify_line_item_id,
-                confirmation_url=confirmation_url,
-                started_at=now_utc(),
-                is_active=True,
-                auto_renew=True,
-            )
-
-            self.session.add(paid_subscription)
-            await self.session.flush()
-
-            logger.info(
-                f"Created flat fee subscription {paid_subscription.id} for shop {shop_id}"
-            )
-            return paid_subscription
-
+            result = await self.session.execute(query)
+            return Decimal(str(result.scalar_one()))
         except Exception as e:
-            logger.error(f"Error creating flat fee subscription: {e}")
-            await self.session.rollback()
-            return None
+            logger.error(f"Error calculating trial revenue: {e}")
+            return Decimal("0")
 
-    async def check_trial_expiry_by_time(self, shop_id: str) -> bool:
-        """
-        Check if trial has expired based on time (not revenue).
-        Marks trial as TRIAL_COMPLETED if trial_duration_days have passed.
-        """
+    async def check_trial_completion(
+        self, shop_id: str, actual_revenue: Decimal
+    ) -> bool:
+        """Complete the trial if attributed revenue has reached the threshold."""
         try:
-            query = (
+            subscription = await self.get_shop_subscription(shop_id)
+            if not subscription:
+                return False
+
+            if subscription.subscription_type != SubscriptionType.TRIAL:
+                return True  # Already past the trial.
+
+            if subscription.status != SubscriptionStatus.TRIAL:
+                return True  # Already completed.
+
+            return await self.complete_trial_subscription(shop_id, actual_revenue)
+        except Exception as e:
+            logger.error(f"Error checking trial completion: {e}")
+            return False
+
+    async def complete_trial_subscription(
+        self, shop_id: str, actual_revenue: Decimal
+    ) -> bool:
+        """Mark the trial complete once the revenue threshold is crossed."""
+        try:
+            result = await self.session.execute(
                 select(ShopSubscription)
                 .where(
                     and_(
@@ -367,21 +350,22 @@ class BillingRepositoryV2:
                         ShopSubscription.is_active == True,
                     )
                 )
+                # Was selectinload(pricing_tier); the terms now live on the plan.
                 .options(selectinload(ShopSubscription.subscription_plan))
             )
-            result = await self.session.execute(query)
             subscription = result.scalar_one_or_none()
-
-            if not subscription or not subscription.started_at:
+            if not subscription:
+                logger.debug(f"No active trial found for shop {shop_id}")
                 return False
 
-            trial_days = subscription.subscription_plan.trial_days
-            trial_end = subscription.started_at + timedelta(days=trial_days)
+            threshold = subscription.effective_trial_threshold
+            if actual_revenue < threshold:
+                logger.debug(
+                    f"Trial threshold not reached: {actual_revenue} < {threshold}"
+                )
+                return False
 
-            if now_utc() < trial_end:
-                return False  # Trial still active
-
-            # Trial has expired - mark as TRIAL_COMPLETED
+            # Guarded on status so two concurrent orders cannot both complete it.
             update_result = await self.session.execute(
                 update(ShopSubscription)
                 .where(
@@ -397,17 +381,21 @@ class BillingRepositoryV2:
                 )
             )
 
-            if update_result.rowcount > 0:
-                logger.info(
-                    f"Time-based trial expired for shop {shop_id} after {trial_days} days"
-                )
-                await self.session.flush()
+            if update_result.rowcount == 0:
+                logger.debug(f"Trial {subscription.id} already completed elsewhere")
                 return True
 
-            return False
+            # The shop keeps serving recommendations — it is not suspended here.
+            # It simply owes a billing setup before anything can be charged.
+            logger.info(
+                f"✅ Trial completed for shop {shop_id}: "
+                f"attributed revenue {actual_revenue} >= threshold {threshold}"
+            )
+            await self.session.flush()
+            return True
 
         except Exception as e:
-            logger.error(f"Error checking trial expiry by time: {e}")
+            logger.error(f"Error completing trial subscription: {e}")
             return False
 
     async def create_billing_cycle_for_subscription(

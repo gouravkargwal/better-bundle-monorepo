@@ -34,6 +34,7 @@ from app.api.v1.edges_status import router as edges_status_router
 from app.domains.billing.api.billing_api import router as billing_api_router
 from app.routes.auth_routes import router as auth_router
 from app.api.v1.outcome import router as outcome_router
+from app.api.v1.attribution_backfill import router as attribution_backfill_router
 
 logger = get_logger(__name__)
 
@@ -65,9 +66,34 @@ async def lifespan(app: FastAPI):
     if kafka_consumer_manager:
         await kafka_consumer_manager.start_all_consumers()
 
+    # Retry driver for LLM enrichment. Without this, a product whose enrichment
+    # failed stays unenriched until its next products/update webhook — which
+    # for a quiet catalog may be never.
+    from app.recommandations.edges import enrichment_sweeper
+
+    sweeper_task = asyncio.create_task(enrichment_sweeper.run_forever())
+    logger.info("✅ Enrichment retry sweeper started")
+
+    # Safety net for missed order webhooks. Shopify retries for 48h then gives
+    # up; a deploy, an outage or a consumer rebalance in that window means the
+    # order arrives only via the periodic collection, which is deliberately not
+    # attributed. Without this sweep that sale is never billed and never shown
+    # to the merchant, and nothing reports it.
+    from app.domains.billing.services import attribution_reconciler
+
+    reconciler_task = asyncio.create_task(attribution_reconciler.run_forever())
+    logger.info("✅ Attribution reconciler started")
+
     yield
 
     # Shutdown
+
+    for task in (sweeper_task, reconciler_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     # Stop Kafka consumers first
     if kafka_consumer_manager:
@@ -109,6 +135,12 @@ app.include_router(edges_status_router)
 app.include_router(billing_api_router)
 app.include_router(auth_router)
 app.include_router(outcome_router)
+# Recovery path for orders that reached us by backfill rather than webhook.
+# Normalisation only publishes an attribution job for webhook-delivered orders
+# (so importing pre-install history cannot bill the merchant), which means an
+# order whose webhook was never delivered is otherwise never attributed. This
+# router was written for exactly that and had never been mounted.
+app.include_router(attribution_backfill_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -208,11 +240,16 @@ async def initialize_services():
             permission_service=services["shopify_permissions"],
         )
 
-        # Initialize database and create tables (now we know DB is accessible)
-        from app.core.database.create_tables import create_all_tables
+        # Bring the schema up to date. Replaces the previous create_all() call:
+        # that created missing tables but silently ignored any change to an
+        # existing one, so column additions never reached the database.
+        from app.core.database.migrations import upgrade_to_head
 
-        await create_all_tables()
-        logger.info("✅ Database tables verified/created")
+        if not await upgrade_to_head():
+            raise RuntimeError(
+                "Database migrations failed - refusing to start against an "
+                "unknown schema. See the logged traceback."
+            )
 
         # Initialize Kafka Topic Manager and create topics
         from app.core.kafka.topic_manager import topic_manager

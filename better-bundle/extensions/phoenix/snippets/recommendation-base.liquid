@@ -45,7 +45,15 @@
 <script src="{{ 'visitor-id.js' | asset_url }}" defer></script>
 <script src="{{ 'attribution.js' | asset_url }}" defer></script>
 <!-- JWT Authentication (load synchronously before others) -->
-<script src="{{ 'jwtTokenManager.js' | asset_url }}"></script>
+{% comment %}
+  defer, like every other script here. It was parser-blocking, which theme
+  check flags as ParserBlockingScript and which app review will pick up.
+
+  Safe because its only consumer is main.js — the last script in this list —
+  and deferred scripts execute in document order, so the dependency still
+  resolves. Nothing inline uses window.JWTTokenManager.
+{% endcomment %}
+<script src="{{ 'jwtTokenManager.js' | asset_url }}" defer></script>
 <script src="{{ 'api.js' | asset_url }}" defer></script>
 <!-- Core modules (load in order) -->
 <script src="{{ 'variant-manager.js' | asset_url }}" defer></script>

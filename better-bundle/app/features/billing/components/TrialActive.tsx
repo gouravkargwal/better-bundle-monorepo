@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import {
   Card,
   BlockStack,
@@ -16,8 +15,6 @@ interface TrialActiveProps {
 }
 
 export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
-  const [timeRemaining, setTimeRemaining] = useState<string>("");
-
   // Add null check for trialData
   if (!trialData) {
     return (
@@ -27,36 +24,22 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
     );
   }
 
-  const daysRemaining = trialData.daysRemaining;
-  const trialDays = trialData.trialDays;
+  // Progress is revenue, not time — the trial ends when we have driven
+  // `trialThreshold` of attributed sales, however long that takes.
+  const { revenueEarned, trialThreshold } = trialData;
+  const remaining = Math.max(0, trialThreshold - revenueEarned);
   const trialProgress =
-    trialDays > 0
-      ? Math.max(0, Math.min(100, ((trialDays - daysRemaining) / trialDays) * 100))
+    trialThreshold > 0
+      ? Math.max(0, Math.min(100, (revenueEarned / trialThreshold) * 100))
       : 0;
-  const isExpiringSoon = daysRemaining <= 3 && daysRemaining > 0;
-  const isExpired = daysRemaining <= 0;
+  const nearingThreshold = trialProgress >= 80 && trialProgress < 100;
 
-  // Update countdown every minute
-  useEffect(() => {
-    const updateRemaining = () => {
-      if (daysRemaining > 0) {
-        const totalHours = daysRemaining * 24;
-        if (totalHours >= 24) {
-          setTimeRemaining(`${daysRemaining} days`);
-        } else if (totalHours >= 1) {
-          setTimeRemaining(`${Math.floor(totalHours)} hours`);
-        } else {
-          setTimeRemaining("Less than an hour");
-        }
-      } else {
-        setTimeRemaining("Expired");
-      }
-    };
-
-    updateRemaining();
-    const interval = setInterval(updateRemaining, 60000);
-    return () => clearInterval(interval);
-  }, [daysRemaining]);
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: shopCurrency,
+      maximumFractionDigits: 0,
+    }).format(amount);
 
   return (
     <BlockStack gap="500">
@@ -69,15 +52,12 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                 🚀 Free Trial Active
               </Text>
               <Text as="p" tone="subdued">
-                Drive sales with Better Bundle — completely free for{" "}
-                {trialDays} days
+                Free until Better Bundle has driven{" "}
+                {formatCurrency(trialThreshold)} in attributed sales
               </Text>
             </BlockStack>
-            <Badge
-              tone={isExpiringSoon ? "warning" : "success"}
-              size="large"
-            >
-              {isExpiringSoon ? "Expiring Soon" : "Active"}
+            <Badge tone={nearingThreshold ? "attention" : "success"} size="large">
+              {nearingThreshold ? "Nearly There" : "Active"}
             </Badge>
           </InlineStack>
         </BlockStack>
@@ -107,11 +87,9 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
             <div
               style={{
                 padding: "20px",
-                backgroundColor: isExpiringSoon ? "#FEF3C7" : "#F0FDF4",
+                backgroundColor: nearingThreshold ? "#FEF3C7" : "#F0FDF4",
                 borderRadius: "12px",
-                border: `2px solid ${
-                  isExpiringSoon ? "#F59E0B" : "#22C55E"
-                }`,
+                border: `2px solid ${nearingThreshold ? "#F59E0B" : "#22C55E"}`,
               }}
             >
               <BlockStack gap="400">
@@ -119,18 +97,18 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                 <InlineStack align="space-between" blockAlign="end">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Time Remaining
+                      Revenue Generated
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
-                      {timeRemaining}
+                      {formatCurrency(revenueEarned)}
                     </Text>
                   </BlockStack>
                   <BlockStack gap="100" align="end">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Trial Period
+                      Free Until
                     </Text>
                     <Text as="p" variant="headingMd" fontWeight="semibold">
-                      {daysRemaining} of {trialDays} days
+                      {formatCurrency(trialThreshold)}
                     </Text>
                   </BlockStack>
                 </InlineStack>
@@ -139,16 +117,16 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                 <BlockStack gap="200">
                   <ProgressBar
                     progress={Math.min(trialProgress, 100)}
-                    tone={isExpiringSoon ? "warning" : "success"}
+                    tone="success"
                     size="medium"
                   />
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" fontWeight="medium">
                       {Math.min(trialProgress, 100).toFixed(0)}% Complete
                     </Text>
-                    {!isExpired && (
+                    {remaining > 0 && (
                       <Text as="p" variant="bodySm" tone="subdued">
-                        {daysRemaining} days remaining
+                        {formatCurrency(remaining)} to go
                       </Text>
                     )}
                   </InlineStack>
@@ -174,13 +152,15 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">2.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  When trial ends, choose your plan to continue
+                  Once we&apos;ve driven {formatCurrency(trialThreshold)},
+                  approve billing in Shopify to keep going
                 </Text>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">3.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Pay a flat monthly fee — predictable and simple
+                  After that you pay a share of the sales we generate — nothing
+                  if we generate nothing
                 </Text>
               </div>
             </BlockStack>

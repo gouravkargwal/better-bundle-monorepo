@@ -1,7 +1,8 @@
 """
 Seed script for the default subscription plan.
 
-Creates a single flat-rate plan at $299/mo with a 50% promotional discount.
+Creates the pay-as-you-go plan: 3% of attributed revenue, $299 cycle cap,
+free until the first $1,000 of attributed revenue.
 Run this once per environment (dev/staging/prod).
 
 Usage:
@@ -48,7 +49,11 @@ else:
 
 for env_file in env_files:
     if env_file.exists():
-        load_dotenv(env_file, override=True)
+        # override=False: a variable already in the environment wins.
+        # With override=True this clobbered the real DATABASE_URL inside the
+        # container with a stale localhost one from python-worker/.env.local,
+        # so the script tried to reach Postgres on its own loopback.
+        load_dotenv(env_file, override=False)
         print(f"📄 Loaded env from: {env_file}")
         break
 
@@ -73,7 +78,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-PLAN_NAME = "Flat Fee Standard"
+PLAN_NAME = "Pay As You Go"
 
 
 async def seed_subscription_plans(session: AsyncSession) -> None:
@@ -93,11 +98,14 @@ async def seed_subscription_plans(session: AsyncSession) -> None:
 
         plan = SubscriptionPlan(
             name=PLAN_NAME,
-            description="Standard flat-fee plan with promotional discount",
-            plan_type=SubscriptionPlanType.FLAT_RATE,
-            monthly_fee=Decimal("299.00"),
-            discount_percentage=Decimal("50.00"),
-            trial_days=14,
+            description=(
+                "3% of the revenue we attribute to recommendations, capped at "
+                "$299 per 30-day cycle. Free until the first $1,000 attributed."
+            ),
+            plan_type=SubscriptionPlanType.USAGE_BASED,
+            commission_rate=Decimal("0.0300"),
+            cap_amount=Decimal("299.00"),
+            trial_revenue_threshold=Decimal("1000.00"),
             is_active=True,
             is_default=True,
             plan_metadata='{"features": ["shopify_subscription", "bundle_attribution", "analytics"]}',
@@ -108,7 +116,8 @@ async def seed_subscription_plans(session: AsyncSession) -> None:
         await session.flush()
         logger.info(
             f"✅ Created plan: {plan.name} (ID: {plan.id}) — "
-            f"${plan.monthly_fee}/mo with {plan.discount_percentage}% discount"
+            f"{plan.commission_rate * 100}% of attributed revenue, "
+            f"cap ${plan.cap_amount}, free until ${plan.trial_revenue_threshold}"
         )
 
         await session.commit()

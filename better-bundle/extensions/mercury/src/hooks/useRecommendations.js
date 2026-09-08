@@ -39,6 +39,11 @@ const formatPrice = (amount, currencyCode) => {
 };
 
 export function useRecommendations({
+  // When true, no request is made and no impression is recorded. Set by the
+  // caller when the extension is rendering in the checkout editor: a merchant
+  // positioning the block is not a shopper being shown an offer, and counting
+  // them inflates "offers shown" with traffic that could never convert.
+  skip = false,
   context,
   limit,
   customerId,
@@ -89,7 +94,7 @@ export function useRecommendations({
   // Fetch recommendations
   // ✅ Only refetch if cart items actually changed (new items added), not just cart value
   useEffect(() => {
-    if (!storage) {
+    if (skip || !storage) {
       return;
     }
 
@@ -188,7 +193,7 @@ export function useRecommendations({
 
     // ✅ Fetch recommendations (only if cart items changed or first load)
     fetchRecommendations();
-  }, [customerId, context, limit, shopDomain, memoizedCartData, storage]);
+  }, [skip, customerId, context, limit, shopDomain, memoizedCartData, storage]);
 
   return {
     loading,

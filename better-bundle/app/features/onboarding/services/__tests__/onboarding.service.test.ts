@@ -118,7 +118,9 @@ function defaultPlan() {
     is_active: true,
     is_default: true,
     monthly_fee: 29,
-    trial_days: 14,
+    commission_rate: 0.03,
+    cap_amount: 299,
+    trial_revenue_threshold: 1000,
   };
 }
 
@@ -166,8 +168,9 @@ describe("OnboardingService", () => {
 
       expect(result.subscriptionPlan).toEqual({
         symbol: "$",
-        monthly_fee: 29,
-        trial_days: 14,
+        commission_rate: 0.03,
+        cap_amount: 299,
+        trial_revenue_threshold: 1000,
         plan_name: "Default Plan",
       });
     });

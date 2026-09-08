@@ -1,7 +1,10 @@
 services:
   # ==================== DATABASE ====================
   postgres:
-    image: postgres:17
+    # pgvector build of Postgres 17. The plain postgres:17 image has no
+    # `vector` type, so product_vectors cannot be created on it. Same PG
+    # major version, so an existing data volume stays compatible.
+    image: pgvector/pgvector:pg17
     container_name: betterbundle-postgres-dev
     env_file:
       - .env.dev

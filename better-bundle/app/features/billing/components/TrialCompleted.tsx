@@ -32,20 +32,20 @@ export function TrialCompleted({
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: shopCurrency,
+      maximumFractionDigits: 0,
     }).format(amount);
   };
+
+  const ratePercent = (trialData.commissionRate * 100)
+    .toFixed(1)
+    .replace(/\.0$/, "");
 
   const handleSetupBilling = async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Use default plan selection — in a more advanced UI, you'd let the user choose
-      const setupData: BillingSetupData = {
-        planName: "Pro",
-        monthlyFee: 29,
-        trialDays: trialData.trialDays || 14,
-      };
+      const setupData: BillingSetupData = { planName: "Pay As You Go" };
 
       const result = await onSetupBilling(setupData);
       if (!result.success) {
@@ -162,16 +162,16 @@ export function TrialCompleted({
                       Price:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="bold">
-                      {formatCurrency(29)}/month
+                      {ratePercent}% of attributed revenue
                     </Text>
                   </InlineStack>
 
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Billing Cycle:
+                      Monthly Maximum:
                     </Text>
                     <Text as="p" variant="bodyMd" fontWeight="bold">
-                      Every 30 Days
+                      {formatCurrency(trialData.cappedAmount)}
                     </Text>
                   </InlineStack>
 
@@ -194,8 +194,8 @@ export function TrialCompleted({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    ✅ Cancel anytime • No hidden fees • Predictable monthly
-                    pricing
+                    ✅ Cancel anytime • No monthly fee • You only pay on sales
+                    we generate
                   </Text>
                 </div>
               </BlockStack>
@@ -229,10 +229,11 @@ export function TrialCompleted({
                   </div>
                   <BlockStack gap="100">
                     <Text as="h3" variant="headingMd" fontWeight="bold">
-                      Continue with Pro Plan
+                      Continue with Pay As You Go
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      {formatCurrency(29)}/month — full access to all features
+                      {ratePercent}% of the revenue we generate, capped at{" "}
+                      {formatCurrency(trialData.cappedAmount)}
                     </Text>
                   </BlockStack>
                 </InlineStack>
@@ -247,7 +248,7 @@ export function TrialCompleted({
                 >
                   <BlockStack gap="200">
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -255,7 +256,7 @@ export function TrialCompleted({
                       </Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -263,7 +264,7 @@ export function TrialCompleted({
                       </Text>
                     </InlineStack>
                     <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" color="text-success">
+                      <Text as="span" variant="bodySm" tone="success">
                         ✓
                       </Text>
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -282,8 +283,10 @@ export function TrialCompleted({
                   }}
                 >
                   <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You'll be charged {formatCurrency(29)} per month,
-                    automatically billed every 30 days. Cancel anytime.
+                    💡 You are charged {ratePercent}% of the revenue we
+                    attribute to our recommendations, never more than{" "}
+                    {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
+                    A month we generate nothing costs you nothing.
                   </Text>
                 </div>
               </BlockStack>
@@ -380,8 +383,8 @@ export function TrialCompleted({
               </div>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Predictable Pricing:</strong> One flat monthly fee —
-                  no surprises.
+                  <strong>Capped Pricing:</strong> Your bill can never exceed{" "}
+                  {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>Flexible:</strong> Upgrade, downgrade, or cancel

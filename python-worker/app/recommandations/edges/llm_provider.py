@@ -9,7 +9,10 @@ answered, and nothing below it knows what the JSON means.
 
 import asyncio
 import logging
-from typing import Protocol
+import random
+from typing import Optional, Protocol
+
+from .llm_budget import LLMBudget
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +33,24 @@ class GeminiProvider:
     with nothing in the logs to explain why.
     """
 
-    def __init__(self, api_key: str, model: str, retries: int = 2, timeout: int = 120):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        retries: int = 2,
+        timeout: int = 120,
+        budget: Optional[LLMBudget] = None,
+    ):
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not set")
         self.api_key = api_key
         self.model = model
         self.retries = retries
         self.timeout = timeout
+        # Circuit breaker + daily ceiling + error classification. Shared across
+        # workers via Redis, so an outage is recognised once rather than
+        # rediscovered by every shop's sweep.
+        self.budget = budget or LLMBudget()
         self._client = None
 
     def _get_client(self):
@@ -59,9 +73,15 @@ class GeminiProvider:
             ),
         )
 
+        # Checked once before the in-process retries, not per attempt: if the
+        # circuit is open or the day's ceiling is spent, no amount of local
+        # retrying is going to help.
+        await self.budget.check()
+
         last_error = None
         for attempt in range(self.retries + 1):
             try:
+                await self.budget.record_call()
                 response = await asyncio.wait_for(
                     self._get_client().aio.models.generate_content(
                         model=self.model, contents=user, config=config
@@ -71,11 +91,25 @@ class GeminiProvider:
                 text = (response.text or "").strip()
                 if not text:
                     raise RuntimeError("empty response from model")
+                await self.budget.record_success()
                 return text
             except Exception as e:
                 last_error = e
+                classification = await self.budget.record_failure(e)
+
+                # A permanent error will fail identically next time. Retrying
+                # it locally, and then again from the sweeper, is pure spend.
+                if not classification.retryable:
+                    raise RuntimeError(
+                        f"{self.model} failed permanently "
+                        f"({classification.reason}): {e}"
+                    ) from e
+
                 if attempt < self.retries:
-                    await asyncio.sleep(2**attempt)
+                    # Jitter so every shop's sweep does not retry in lockstep
+                    # and re-hit a rate limit together.
+                    delay = (2**attempt) * (1 + random.random() * 0.3)
+                    await asyncio.sleep(delay)
 
         raise RuntimeError(
             f"{self.model} failed after {self.retries + 1} attempts: {last_error}"
@@ -100,8 +134,15 @@ class StaticProvider:
 
 
 def build_provider(settings) -> LLMProvider:
-    """Construct the configured provider from app settings."""
+    """Construct the configured provider from app settings.
+
+    The AI fields live on the `ml` sub-model, not on Settings itself. Reading
+    them off the root object returned the "" default via getattr, so every
+    enrichment run raised "GEMINI_API_KEY is not set" no matter what was in the
+    environment. Accepts either shape so a bare MLSettings also works in tests.
+    """
+    ai = getattr(settings, "ml", settings)
     return GeminiProvider(
-        api_key=getattr(settings, "GEMINI_API_KEY", "") or "",
-        model=getattr(settings, "AI_CHAT_MODEL", "gemini-2.5-flash-lite"),
+        api_key=getattr(ai, "GEMINI_API_KEY", "") or "",
+        model=getattr(ai, "AI_CHAT_MODEL", "gemini-2.5-flash-lite"),
     )

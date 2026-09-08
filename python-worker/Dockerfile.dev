@@ -1,30 +1,39 @@
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Never build a package from source when a wheel exists. Without this pip will
+# happily spend minutes compiling something it could have downloaded.
+ENV PIP_PREFER_BINARY=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# curl is needed by the healthcheck below. gcc/g++ stay because a wheel-less
+# package on a new Python or architecture would otherwise fail the build
+# outright rather than compiling.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Requirements are copied on their own so this layer caches. Editing app code
+# does not reinstall dependencies; only a requirements change does.
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# sentence-transformers pulls PyTorch, which by default is the CUDA build —
+# well over a gigabyte of libraries this image can never use. The CPU index
+# serves a far smaller wheel, and nothing here runs on a GPU.
+RUN pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        -r requirements.txt
 
-# Copy application code
 COPY . .
 
-# Expose port
 EXPOSE 8000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application in development mode with auto-reload
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

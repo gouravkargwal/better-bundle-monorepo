@@ -18,7 +18,7 @@ class ProductVector(BaseModel, ShopMixin):
     product_id = Column(String, nullable=False, index=True)
     vector = Column(Vector(384), nullable=False)
     text_hash = Column(String(32), nullable=False)  # md5 of input text
-    model_version = Column(String, nullable=False, default="all-MiniLM-L6-v2")
+    model_version = Column(String, nullable=False, default="BAAI/bge-small-en-v1.5")
 
     __table_args__ = (
         UniqueConstraint(

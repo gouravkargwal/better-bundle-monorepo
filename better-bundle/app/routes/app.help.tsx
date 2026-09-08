@@ -7,10 +7,11 @@ import {
   Link as PolarisLink,
   Badge,
   InlineStack,
-  Box,
   Button,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
+import { HeroHeader } from "../components/UI/HeroHeader";
+import { surfaces, radii } from "../components/UI/design.tokens";
 import { authenticate } from "../shopify.server";
 import { useLoaderData } from "@remix-run/react";
 
@@ -35,99 +36,139 @@ export default function HelpPage() {
   return (
     <Page>
       <TitleBar title="Help & Support" />
-      <BlockStack gap="400">
-        {/* Contact Methods Section */}
+      <BlockStack gap="300">
+        <HeroHeader
+          title="Get help when you need it"
+          subtitle="Reach out by email or WhatsApp — we usually reply within a few hours, no ticket required."
+          variant="subtle"
+          align="left"
+        />
+
         <Card>
-          <BlockStack gap="300">
-            <Box>
-              <Text as="h2" variant="headingMd">
-                Get in Touch
-              </Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Choose your preferred way to reach us
-              </Text>
-            </Box>
-
-            {/* Email */}
-            <Box
-              borderRadius="200"
-              borderWidth="1"
-              padding="300"
-              borderColor="border"
-            >
-              <InlineStack align="space-between" blockAlign="center">
-                <BlockStack gap="100">
-                  <Text as="h3" variant="bodyLg" fontWeight="semibold">
-                    Email Support
+          <div style={{ padding: "24px" }}>
+            <BlockStack gap="400">
+              {/* Header */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <Text variant="headingMd" as="h3">
+                    📬 Get in touch
                   </Text>
-                  <PolarisLink
-                    url={`mailto:${email}?subject=BetterBundle%20Support`}
-                    removeUnderline
-                  >
-                    <Text variant="bodyMd" as="span">
-                      {email}
+                  <div style={{ marginTop: "4px" }}>
+                    <Text as="p" tone="subdued">
+                      Choose your preferred way to reach us
                     </Text>
-                  </PolarisLink>
-                </BlockStack>
-                <Badge tone="info">Recommended</Badge>
-              </InlineStack>
-            </Box>
+                  </div>
+                </div>
+                <Badge tone="success" size="large">
+                  {responseTime}
+                </Badge>
+              </div>
 
-            {/* WhatsApp */}
-            <Box
-              borderRadius="200"
-              borderWidth="1"
-              padding="300"
-              borderColor="border"
-            >
-              <BlockStack gap="200">
-                <Text as="h3" variant="bodyLg" fontWeight="semibold">
-                  WhatsApp
-                </Text>
+              {/* Contact methods */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                {/* Email */}
+                <div
+                  style={{
+                    padding: "20px",
+                    backgroundColor: "#EFF6FF",
+                    borderRadius: "12px",
+                    border: "1px solid #BFDBFE",
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text as="h3" variant="bodyLg" fontWeight="semibold">
+                        Email support
+                      </Text>
+                      <Badge tone="info">Recommended</Badge>
+                    </InlineStack>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Best for detailed questions or issues you want on record.
+                    </Text>
+                    <PolarisLink
+                      url={`mailto:${email}?subject=BetterBundle%20Support`}
+                      removeUnderline
+                    >
+                      <Text variant="bodyMd" as="span" fontWeight="medium">
+                        {email}
+                      </Text>
+                    </PolarisLink>
+                  </BlockStack>
+                </div>
 
-                {/* Display Phone Number */}
-                <Box>
-                  <Text variant="bodyMd" as="span" tone="subdued">
-                    {phone}
-                  </Text>
-                </Box>
+                {/* WhatsApp */}
+                <div
+                  style={{
+                    padding: "20px",
+                    ...surfaces.success,
+                    borderRadius: radii.lg,
+                  }}
+                >
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="bodyLg" fontWeight="semibold">
+                      WhatsApp
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Fastest way to get a quick answer — chat with us directly.
+                    </Text>
+                    <Text variant="bodyMd" as="span" fontWeight="medium">
+                      {phone}
+                    </Text>
+                    <div>
+                      <a
+                        href={whatsappLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ textDecoration: "none" }}
+                      >
+                        <Button variant="primary" size="medium">
+                          Send WhatsApp message
+                        </Button>
+                      </a>
+                    </div>
+                  </BlockStack>
+                </div>
+              </div>
 
-                {/* WhatsApp Button/Link */}
-                <Box>
-                  <a
-                    href={whatsappLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ textDecoration: "none" }}
-                  >
-                    <Button variant="primary" size="medium">
-                      Message on WhatsApp
-                    </Button>
-                  </a>
-                </Box>
-              </BlockStack>
-            </Box>
-
-            {/* Support Info */}
-            <Box
-              borderRadius="200"
-              backgroundColor="bg-surface-secondary"
-              padding="300"
-            >
-              <InlineStack gap="300">
-                <BlockStack gap="100" flex="fill">
+              {/* Support hours */}
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#FEF3C7",
+                  borderRadius: "12px",
+                  border: "1px solid #FCD34D",
+                }}
+              >
+                <InlineStack
+                  gap="300"
+                  align="space-between"
+                  blockAlign="center"
+                  wrap
+                >
                   <Text as="p" variant="bodySm" fontWeight="semibold">
-                    {responseTime}
+                    🕘 Support hours: {supportHours}
                   </Text>
-                </BlockStack>
-                <BlockStack gap="100" flex="fill">
-                  <Text as="p" variant="bodySm">
-                    Hours: {supportHours}
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {responseTime} — no ticket required
                   </Text>
-                </BlockStack>
-              </InlineStack>
-            </Box>
-          </BlockStack>
+                </InlineStack>
+              </div>
+            </BlockStack>
+          </div>
         </Card>
       </BlockStack>
     </Page>
