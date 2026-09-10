@@ -198,8 +198,27 @@ class CommissionRecord(Base, TimestampMixin):
     # invoiced_at = Column(...)  # REMOVED
 
     # Currency
+    #
+    # `currency` is the currency the merchant is CHARGED in — always USD, since
+    # that is what the Shopify subscription is pinned to. The two fields below
+    # record where the money came from, because attributed revenue is measured
+    # in whatever the shopper paid in.
     currency = Column(
         String(3), nullable=False, default="USD", comment="Currency code (ISO 4217)"
+    )
+    source_currency = Column(
+        String(3),
+        nullable=True,
+        comment="Currency the attributed revenue was measured in",
+    )
+    # The rate that priced this charge, copied in at creation. Stored rather
+    # than re-derived so a past commission cannot be restated by a later
+    # refresh — otherwise every invoice silently changes as rates move, and a
+    # billing dispute has no answer.
+    fx_rate = Column(
+        Numeric(20, 10),
+        nullable=True,
+        comment="Units of source_currency per 1 USD used for this commission",
     )
 
     # Additional info

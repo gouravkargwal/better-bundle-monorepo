@@ -24,6 +24,24 @@ SENTINEL_HOLDOUT_PERCENT = 2   # 2% after significance reached
 MIN_CONTROL_ORDERS = 100       # minimum control orders before reporting
 P_VALUE_THRESHOLD = 0.05       # significance threshold
 
+# Per-surface overrides. A surface absent here uses INITIAL_HOLDOUT_PERCENT.
+#
+# Checkout and thank-you are held at 0 deliberately, not by oversight. They only
+# became bucketable at all once the `_bb_session` cart attribute gave them a
+# stable identity, and that arrived long before they had the traffic to measure.
+# A 10% holdout across 21 impressions is about two control sessions — no
+# statistical signal whatsoever — bought by withholding offers from shoppers who
+# were already at the payment step. That is the worst possible trade: real
+# forgone revenue for noise.
+#
+# The capability is in place; only the number is off. Raise these once the
+# surface is doing enough volume to clear MIN_CONTROL_ORDERS in reasonable time,
+# and the experiment starts with no further code change.
+SURFACE_HOLDOUT_PERCENT = {
+    "mercury": 0,
+    "thank_you": 0,
+}
+
 
 class HoldoutService:
     """
@@ -31,12 +49,26 @@ class HoldoutService:
     """
 
     @staticmethod
-    def get_holdout_percent(shop: Shop) -> int:
-        """Get the current holdout percentage for a shop."""
+    def get_holdout_percent(shop: Shop, surface: Optional[str] = None) -> int:
+        """The holdout percentage for this shop and surface.
+
+        The merchant's own switch wins over everything: `holdout_disabled` means
+        no shopper is ever withheld an offer, on any surface.
+
+        Otherwise a surface may set its own rate — see SURFACE_HOLDOUT_PERCENT
+        for why checkout and thank-you are currently zero. Surfaces not listed
+        get the shop-wide default.
+
+        `surface` is optional so existing callers keep working; passing None
+        gives the shop-wide rate.
+        """
         if shop.holdout_disabled:
             return 0
-        # For now, always use initial. Future: read from a shop config or
-        # derive from rollup stats.
+
+        if surface is not None and surface in SURFACE_HOLDOUT_PERCENT:
+            return SURFACE_HOLDOUT_PERCENT[surface]
+
+        # Future: read from a shop config or derive from rollup stats.
         return INITIAL_HOLDOUT_PERCENT
 
     @staticmethod
@@ -127,9 +159,25 @@ class HoldoutService:
         impression_id: str,
         outcome: str,
         revenue_added: Optional[Decimal] = None,
+        session_id: Optional[str] = None,
+        customer_id: Optional[str] = None,
     ) -> bool:
         """
         Record the outcome of an offer impression (clicked/accepted/declined/ignored).
+
+        `session_id` / `customer_id` backfill an identity the impression was
+        written without. This is what makes a click-through billable at all:
+        the checkout and thank-you surfaces have no storefront visitor id and no
+        customer on a guest order, so their impressions are written with both
+        columns NULL. The clicked-then-bought path joins the impression to a
+        later order on exactly those columns, and `NULL = anything` never
+        matches — so before this, every thank-you click was recorded and then
+        could never be credited.
+
+        Only ever fills a blank. An impression that already carries an identity
+        keeps it: overwriting would let a second shopper's click reassign the
+        first shopper's offer, and the holdout bucket that identity was drawn
+        from would no longer match the arm the impression was recorded in.
         """
         try:
             async with get_transaction_context() as session:
@@ -145,6 +193,10 @@ class HoldoutService:
                 impression.outcome_at = datetime.now(timezone.utc)
                 if revenue_added is not None:
                     impression.revenue_added = revenue_added
+                if session_id and not impression.session_id:
+                    impression.session_id = session_id
+                if customer_id and not impression.customer_id:
+                    impression.customer_id = customer_id
             return True
         except Exception as e:
             logger.error(f"Failed to record outcome for {impression_id}: {e}")

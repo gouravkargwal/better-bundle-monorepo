@@ -89,6 +89,46 @@ class NormalizationDataStorageService:
             self.logger.error(f"Entity upsert failed: {e}")
             return False
 
+    # Line-item property and cart attribute that mark an order as owing an
+    # attribution. Kept in step with attribution_engine.LINE_ITEM_IMPRESSION_KEY
+    # and CLICK_ATTRIBUTE_KEY; duplicated rather than imported to avoid the
+    # storage layer depending on the billing domain.
+    _STAMP_KEY = "_bb_rec_impression_id"
+    _CLICK_ATTRIBUTE = "_bb_clicks"
+
+    @classmethod
+    def _owes_attribution(cls, canonical_data: Dict[str, Any]) -> bool:
+        """Does this order carry recommendation evidence?
+
+        Decided here, at write time, so the reconciler never has to re-derive it
+        by scanning line items. Two kinds of evidence:
+
+        - a line item stamped with the impression it came from, which is how the
+          storefront and checkout surfaces attribute;
+        - a click recorded on the cart, which is how the thank-you and
+          customer-account surfaces attribute — they cannot write to a cart, so
+          the shopper adds the product with the theme's own button and the only
+          record is the attribute Phoenix wrote on arrival.
+        """
+        for item in canonical_data.get("line_items") or []:
+            props = item.get("properties") if isinstance(item, dict) else None
+            if isinstance(props, dict) and props.get(cls._STAMP_KEY):
+                return True
+
+        note_attributes = canonical_data.get("note_attributes")
+        if isinstance(note_attributes, dict):
+            note_attributes = [
+                {"key": k, "value": v} for k, v in note_attributes.items()
+            ]
+        for entry in note_attributes or []:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key") or entry.get("name")
+            if key == cls._CLICK_ATTRIBUTE and entry.get("value"):
+                return True
+
+        return False
+
     async def upsert_order_with_line_items(
         self, canonical_data: Dict[str, Any], shop_id: str
     ) -> bool:
@@ -127,7 +167,17 @@ class NormalizationDataStorageService:
                 )
                 existing = result.scalar_one_or_none()
 
+                owes_attribution = self._owes_attribution(canonical_data)
+
                 if existing:
+                    # Only ever promote NULL -> pending. An order already marked
+                    # 'done' must not be reset by an unrelated orders/updated
+                    # webhook, and one dead-lettered as 'failed' must not be
+                    # resurrected to be retried forever. Genuine post-purchase
+                    # additions still re-attribute through the normal Kafka
+                    # path; this column is the safety net, not the trigger.
+                    if owes_attribution and existing.attribution_state is None:
+                        order_data["attribution_state"] = "pending"
 
                     await session.execute(
                         update(OrderData)
@@ -136,6 +186,8 @@ class NormalizationDataStorageService:
                     )
                     order_record_id = existing.id
                 else:
+                    if owes_attribution:
+                        order_data["attribution_state"] = "pending"
 
                     order_instance = OrderData(**order_data)
                     session.add(order_instance)
@@ -200,8 +252,16 @@ class NormalizationDataStorageService:
                     )
                     existing = result.scalar_one_or_none()
 
+                    # Same write-time decision as the single-order path. The
+                    # backfill comes through here, so without it every
+                    # historically imported order would be invisible to the
+                    # reconciler.
+                    owes_attribution = self._owes_attribution(canonical_data)
+
                     if existing:
                         self.logger.debug(f"Updating existing order {order_id}")
+                        if owes_attribution and existing.attribution_state is None:
+                            order_data["attribution_state"] = "pending"
                         await session.execute(
                             update(OrderData)
                             .where(OrderData.id == existing.id)
@@ -210,6 +270,8 @@ class NormalizationDataStorageService:
                         order_record_id = existing.id
                     else:
                         self.logger.debug(f"Creating new order {order_id}")
+                        if owes_attribution:
+                            order_data["attribution_state"] = "pending"
                         order_instance = OrderData(**order_data)
                         session.add(order_instance)
                         await session.flush()

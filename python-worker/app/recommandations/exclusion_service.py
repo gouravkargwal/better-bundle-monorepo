@@ -9,7 +9,7 @@ from typing import List, Optional, Any, Dict
 from app.shared.helpers.datetime_utils import now_utc
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+from sqlalchemy import select, and_, desc, text
 
 from app.core.logging import get_logger
 from app.core.database.models.product_data import ProductData
@@ -18,8 +18,93 @@ from app.recommandations.purchase_history import PurchaseHistoryService
 logger = get_logger(__name__)
 
 
+# How far back an offer's own history counts against re-showing it. A refusal
+# is not permanent — taste and need change — but it holds for long enough that
+# a shopper does not see the same rejected product twice in one shopping trip.
+IMPRESSION_MEMORY_DAYS = 30
+
+# Lifetime impressions of one offer to one shopper before it is retired.
+#
+# 2, not 1: a shopper who ignored an offer on the product page may still take
+# it post-purchase, where the money is already committed and it is one click —
+# that rising-intent re-ask is the entire reason apollo converts. What has no
+# defence is the third showing, or any showing after an explicit decline.
+MAX_IMPRESSIONS_PER_OFFER = 2
+
+
 class ProductExclusionService:
     """Service for managing product exclusions from recommendations"""
+
+    async def get_impression_exclusions(
+        self,
+        session: AsyncSession,
+        shop_id: str,
+        customer_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        cap: int = MAX_IMPRESSIONS_PER_OFFER,
+    ) -> List[str]:
+        """Offers this shopper has already answered, or seen too often.
+
+        Excludes an offer when either holds:
+
+        - it was `declined` or `accepted` — both are decisions. A decline is the
+          clearest signal we ever get and we were ignoring it; an accept means
+          they own it (the purchase-history exclusions only catch this once the
+          order lands, which is far too late inside a single session).
+        - it has been shown `cap` times already.
+
+        Keyed on customer_id or session_id, whichever the surface has. Mercury
+        impressions carry neither, so this returns nothing there — checkout is
+        covered instead by the cart contents already in `context_ids`. Fixing
+        that properly means threading the checkout token through as an identity;
+        until then mercury can still repeat an offer the shopper declined on the
+        product page.
+        """
+        if not customer_id and not session_id:
+            return []
+
+        since = now_utc() - timedelta(days=IMPRESSION_MEMORY_DAYS)
+
+        try:
+            # The CASTs are load-bearing, not decoration. asyncpg cannot infer a
+            # type for a bare `:param` used only in a comparison and fails the
+            # whole statement with AmbiguousParameterError — the same trap that
+            # made `:query_vec::vector` silently break every resolution query.
+            # Because it is caught below, the failure is invisible except in the
+            # log: the exclusion just quietly stops excluding.
+            #
+            # No `IS NOT NULL` guard is needed either: `col = CAST(NULL AS
+            # varchar)` evaluates to NULL, so an absent identity simply matches
+            # nothing. Do not "fix" this by adding one back.
+            result = await session.execute(
+                text(
+                    """
+                    SELECT offer_id
+                    FROM offer_impressions
+                    WHERE shop_id = :shop_id
+                      AND offer_id IS NOT NULL
+                      AND created_at >= :since
+                      AND (
+                            customer_id = CAST(:customer_id AS varchar)
+                         OR session_id  = CAST(:session_id  AS varchar)
+                      )
+                    GROUP BY offer_id
+                    HAVING bool_or(outcome IN ('declined', 'accepted'))
+                        OR count(*) >= :cap
+                    """
+                ),
+                {
+                    "shop_id": shop_id,
+                    "since": since,
+                    "customer_id": customer_id,
+                    "session_id": session_id,
+                    "cap": cap,
+                },
+            )
+            return [str(row.offer_id) for row in result]
+        except Exception as e:
+            logger.error(f"⚠️ Failed to get impression exclusions for {shop_id}: {e}")
+            return []
 
     async def get_purchase_exclusions(
         self,

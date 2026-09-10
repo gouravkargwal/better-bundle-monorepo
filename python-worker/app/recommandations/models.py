@@ -46,6 +46,15 @@ class RecommendationRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(
         default=None, description="Additional metadata"
     )
+    # Set by the storefront when the page is not a real shopper visit — a theme
+    # customiser session or a shareable theme preview link. Recommendations are
+    # still served (the merchant is trying to see the widget) but no impression
+    # is written, because a merchant previewing their own theme is not an offer
+    # shown to a shopper and counting it drags the conversion rate down.
+    preview: bool = Field(
+        default=False,
+        description="Theme editor or preview render; serve but do not record",
+    )
 
 
 class RecommendationResponse(BaseModel):

@@ -14,6 +14,11 @@
   window.showPagination = {{ block.settings.show_pagination | default: true }};
   window.recommendationLimit = {{ block.settings.limit | default: 6 }};
   window.designMode = {{ request.design_mode | json }};
+  // design_mode is the theme customiser; visual_preview_mode is a shareable
+  // theme preview link. Neither is a shopper, so neither should record an
+  // impression — but only design_mode renders dummy data instead of fetching,
+  // so preview links need the flag sent to the API.
+  window.previewMode = {{ request.design_mode | json }} || {{ request.visual_preview_mode | json }};
   window.shopDomain = {{ shop.permanent_domain | json }};
   window.customerId = {{ customer.id | json }};
   window.cartProductIds = {{ cart.items | map: 'product_id' | json }};

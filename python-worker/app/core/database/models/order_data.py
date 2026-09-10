@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     ForeignKey,
     Integer,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
 from sqlalchemy.orm import relationship
@@ -66,6 +67,45 @@ class OrderData(BaseModel, ShopMixin):
     )
     created_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     updated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+
+    # Whether this order still owes an attribution, decided once when the order
+    # is written rather than re-derived on every reconciler pass.
+    #
+    # NULL means there is nothing to attribute — no recommendation stamp on any
+    # line, no click recorded on the cart — and such an order is never looked at
+    # again. Only orders carrying evidence get a state.
+    #
+    # This exists to keep the reconciler's cost proportional to the *backlog*
+    # rather than to order volume. It used to find work by joining every order
+    # in a 14-day window to its line items and testing
+    # `properties::jsonb ? '_bb_rec_impression_id'` — a cast, so unindexable,
+    # so a sequential scan of every recent line item, 96 times a day, almost
+    # always to discover nothing. With a partial index on 'pending' the query
+    # reads only the orders actually stuck, whether the merchant does a hundred
+    # orders a month or a hundred thousand.
+    # No `index=True`: a plain btree here would hold a row per order forever,
+    # almost all of them NULL, which is precisely the unbounded growth the
+    # partial index below exists to avoid.
+    attribution_state = Column(String(20), nullable=True)
+
+    # Retry accounting, mirroring `product_enrichments`. Without it a single
+    # order that can never be attributed is republished every 15 minutes for
+    # the whole 14-day window.
+    attribution_attempts = Column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    attribution_last_error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        # Partial, so the index physically contains only the backlog — normally
+        # near empty. A plain index on `attribution_state` would carry a row per
+        # order forever and defeat the point.
+        Index(
+            "ix_order_data_attribution_pending",
+            "order_date",
+            postgresql_where=Column("attribution_state") == "pending",
+        ),
+    )
 
     def __repr__(self) -> str:
         return f"<OrderData(order_id={self.order_id}, shop_id={self.shop_id})>"

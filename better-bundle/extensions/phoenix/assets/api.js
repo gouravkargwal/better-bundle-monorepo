@@ -43,6 +43,19 @@ class RecommendationAPI {
         limit: limit
       };
 
+      // Not a real shopper: a theme preview link, or the customiser if we ever
+      // reach here from it. Recommendations are still served so the merchant
+      // can see the widget work, but the backend writes no impression — an
+      // offer nobody was shown must not sit in the denominator of the
+      // conversion rate they are billed against.
+      //
+      // design_mode already short-circuits before any fetch; this covers
+      // visual_preview_mode, the shareable preview link, where design_mode is
+      // false and the page is otherwise indistinguishable from a live visit.
+      if (window.previewMode) {
+        requestBody.preview = true;
+      }
+
       // The product being viewed is the whole query key: edges are looked up
       // from it. Without it there is nothing to recommend against.
       if (window.productId) {

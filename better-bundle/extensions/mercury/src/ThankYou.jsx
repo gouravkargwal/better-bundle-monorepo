@@ -1,7 +1,8 @@
 import { render } from "preact";
-import { useMemo } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { useRecommendations } from "./hooks/useRecommendations.js";
 import { recordOfferOutcome } from "./api/analytics.js";
+import { resolveSessionId } from "./utils/identity.js";
 import { logger } from "./utils/logger.js";
 
 /**
@@ -65,9 +66,33 @@ function ThankYouRecommendations() {
   // impact dashboard as offers shown to shoppers who never existed.
   const inEditor = Boolean(shopify.extension?.editor);
 
+  // Same measurement identity as the checkout block and the storefront: read
+  // from the `_bb_session` cart attribute, which Shopify carries through to
+  // this page. It is what puts a thank-you offer inside the holdout experiment
+  // and gives its impression something a later order can be joined on — this
+  // surface links out to a product page, so the purchase it drives is a
+  // separate order placed later.
+  const [sessionId, setSessionId] = useState(undefined);
+  useEffect(() => {
+    if (inEditor) {
+      setSessionId(null);
+      return;
+    }
+    let cancelled = false;
+    resolveSessionId(shopify).then((id) => {
+      if (!cancelled) setSessionId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inEditor]);
+
   const { loading, products, error } = useRecommendations({
-    // No request and no impression while the merchant is configuring.
-    skip: inEditor,
+    // No request and no impression while the merchant is configuring, and none
+    // until the identity resolves — an impression written without it is
+    // permanently outside the experiment.
+    skip: inEditor || sessionId === undefined,
+    sessionId,
     context: "thank_you_page",
     limit: 3,
     customerId,

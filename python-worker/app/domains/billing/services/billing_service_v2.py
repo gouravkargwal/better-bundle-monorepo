@@ -352,28 +352,43 @@ class BillingServiceV2:
         """
         try:
             from sqlalchemy import select, func, and_, or_
-            from app.core.database.models.user_interaction import UserInteraction
-            from app.domains.analytics.models.interaction import InteractionType
+            from app.core.database.models.offer_impression import OfferImpression
 
-            # Look for Apollo interactions that indicate post-purchase recommendations
-            post_purchase_interaction_types = [
-                InteractionType.RECOMMENDATION_CLICKED.value,
-                InteractionType.RECOMMENDATION_ADD_TO_CART.value,
-                InteractionType.RECOMMENDATION_VIEWED.value,
-            ]
+            # Reads `offer_impressions`, which replaced the legacy
+            # `user_interactions` table for offer events.
+            #
+            # This used to import `app.core.database.models.user_interaction`,
+            # a module that no longer exists, so the whole check raised
+            # ModuleNotFoundError on every order. The exception was caught and
+            # defaulted to False, which meant it silently always answered "no
+            # post-purchase interactions" — so `purchase_time` never switched to
+            # `updated_at` and an Apollo offer accepted after the order was
+            # placed could fall outside the attribution window entirely.
+            #
+            # A post-purchase impression is created *after* the order exists, so
+            # an apollo impression inside (created_at, updated_at] is exactly
+            # the signal being looked for.
+            links = []
+            if customer_id:
+                links.append(OfferImpression.customer_id == customer_id)
+            if session_id:
+                links.append(OfferImpression.session_id == session_id)
+            if not links:
+                # No identity, nothing to match on. Not an error: a guest
+                # checkout has neither, and the caller's default (use
+                # created_at) is the right answer.
+                return False
 
-            # Query for interactions that occurred AFTER the initial order creation
-            # but BEFORE or AT the order update time
-            query = select(func.count(UserInteraction.id)).where(
+            query = select(func.count(OfferImpression.id)).where(
                 and_(
-                    UserInteraction.shop_id == shop_id,
-                    UserInteraction.customer_id == customer_id,
-                    UserInteraction.interaction_type.in_(
-                        post_purchase_interaction_types
-                    ),
-                    UserInteraction.extension_type == "apollo",
-                    UserInteraction.created_at > order_created_at,
-                    UserInteraction.created_at <= order_updated_at,
+                    OfferImpression.shop_id == shop_id,
+                    OfferImpression.surface == "apollo",
+                    # Control rows record a shopper who was shown nothing, so
+                    # they are not evidence of a post-purchase interaction.
+                    OfferImpression.is_control.is_(False),
+                    OfferImpression.created_at > order_created_at,
+                    OfferImpression.created_at <= order_updated_at,
+                    or_(*links),
                 )
             )
 
@@ -382,7 +397,7 @@ class BillingServiceV2:
 
             if interaction_count > 0:
                 logger.info(
-                    f"✅ Found {interaction_count} post-purchase Apollo interactions "
+                    f"✅ Found {interaction_count} post-purchase Apollo impressions "
                     f"between {order_created_at} and {order_updated_at}"
                 )
                 return True
@@ -540,6 +555,9 @@ class BillingServiceV2:
             purchase_products=purchase_event.products,
             purchase_time=purchase_time,
             order_metafields=getattr(purchase_event, "order_metafields", None),
+            order_note_attributes=getattr(
+                purchase_event, "order_note_attributes", None
+            ),
         )
 
         attribution_result = await self.attribution_engine.calculate_attribution(

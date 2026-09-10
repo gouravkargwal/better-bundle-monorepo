@@ -4,6 +4,7 @@ import { useRecommendations } from "./hooks/useRecommendations.js";
 import { recordOfferOutcome } from "./api/analytics.js";
 import { ProductCard } from "./components/ProductCard.jsx";
 import { getOptionValueFromVariant } from "./utils/productUtils.js";
+import { resolveSessionId } from "./utils/identity.js";
 import { logger } from "./utils/logger.js";
 
 const shopifyPlusValidated =
@@ -18,6 +19,16 @@ function Extension() {
   const [selectedVariants, setSelectedVariants] = useState({});
   const [addedProducts, setAddedProducts] = useState(new Set());
   const [successMessage, setSuccessMessage] = useState("");
+  // One offer per checkout, taken or not.
+  //
+  // The recommendation request keys on the cart contents, so accepting an offer
+  // changed the cart, which refetched, which produced a *new* offer — and the
+  // accepted product was filtered out of the results, so there was always
+  // something fresh to show. The shopper got an endless upsell treadmill on the
+  // screen where they are trying to pay, and every round wrote another
+  // impression row, inflating the denominator of the conversion rate the
+  // merchant is billed against.
+  const [hasAccepted, setHasAccepted] = useState(false);
   const hasTrackedView = useRef(false);
   const { lines, cost, buyerIdentity, storage } = shopify;
   const shopDomain = shopify.shop.myshopifyDomain;
@@ -35,6 +46,30 @@ function Extension() {
   // extensions have no Liquid, so it has to be read from the JS API.
   const inEditor = Boolean(shopify.extension?.editor);
   const customerId = buyerIdentity?.customer?.value?.id || null;
+
+  // Measurement identity, read from the cart (or minted onto it once).
+  //
+  // Resolved before the first request rather than alongside it: an impression
+  // written without it is permanently unbucketed and unattributable, and there
+  // is no going back to fix the row afterwards. `undefined` means "still
+  // resolving", which gates the fetch below; `null` means "resolved, and there
+  // is none" — a shopper who came straight to checkout on a store that does not
+  // permit attribute writes. They still get recommendations, just outside the
+  // experiment.
+  const [sessionId, setSessionId] = useState(undefined);
+  useEffect(() => {
+    if (inEditor) {
+      setSessionId(null);
+      return;
+    }
+    let cancelled = false;
+    resolveSessionId(shopify).then((id) => {
+      if (!cancelled) setSessionId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inEditor]);
 
   const cartItems = useMemo(() => {
     return (
@@ -73,7 +108,11 @@ function Extension() {
   const { loading, products, error } =
     useRecommendations({
       // Nothing is fetched in the editor: no request, no impression row.
-      skip: inEditor,
+      // Nothing refetched after an acceptance either — see `hasAccepted`.
+      // And nothing until the identity has resolved, so the impression is
+      // written with a bucketing key rather than without one.
+      skip: inEditor || hasAccepted || sessionId === undefined,
+      sessionId,
       context: "checkout_page",
       // One offer. Three cards made an ~800px block in the column the shopper
       // scrolls to reach "Pay now"; the server-side RETURN_LIMIT for mercury
@@ -177,6 +216,8 @@ function Extension() {
 
       if (result.type === "success") {
         setAddedProducts((prev) => new Set([...prev, productId]));
+        // Stops the cart change below from refetching a fresh offer.
+        setHasAccepted(true);
         const productName = product?.title || "Product";
         setSuccessMessage(`${productName} added to cart successfully`);
 

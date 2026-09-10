@@ -2,6 +2,7 @@
 Kafka-based purchase attribution consumer for processing purchase attribution events
 """
 
+import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
@@ -25,6 +26,17 @@ from app.repository.ShopRepository import ShopRepository
 from app.core.services.dlq_service import DLQService
 
 logger = get_logger(__name__)
+
+# In-place attempts before a message is dead-lettered. Small on purpose: a
+# transient fault clears in seconds, and anything that survives three tries is a
+# code or data problem that retrying will not solve — it will just hold up every
+# order behind it.
+MAX_PROCESSING_ATTEMPTS = 3
+
+# Linear backoff between attempts (2s, 4s). Kept well under the consumer's
+# max_poll_interval_ms of 300s so the retries cannot get the consumer evicted
+# from its group mid-message.
+PROCESSING_RETRY_BACKOFF_SECONDS = 2
 
 
 class PurchaseAttributionKafkaConsumer:
@@ -58,15 +70,65 @@ class PurchaseAttributionKafkaConsumer:
 
         try:
             async for message in self.consumer.consume():
-                try:
-                    await self._handle_message(message)
-                    await self.consumer.commit(message)
-                except Exception as e:
-                    logger.error(f"Error processing purchase attribution message: {e}")
-                    continue
+                await self._process_with_retry(message)
         except Exception as e:
             logger.error(f"Error in purchase attribution consumer: {e}")
             raise
+
+    async def _process_with_retry(self, message: Dict[str, Any]) -> None:
+        """Handle one message, then commit — or dead-letter it and commit anyway.
+
+        The offset must always end up advancing. The previous version logged the
+        failure and `continue`d without committing, so a message that fails
+        deterministically was never acknowledged: the committed offset froze,
+        every restart replayed the same failure, and everything queued behind it
+        starved. One order with a bad `session_id` foreign key stalled the entire
+        attribution topic at offset 6 with a lag of 3 — no attributions, no
+        commissions, and nothing in the logs saying why.
+
+        So: retry a few times for transient faults (a database blip, a
+        rebalance), then hand the message to the DLQ and commit, which unblocks
+        the partition while keeping the message for inspection. Losing sight of
+        one order is bad; losing the entire revenue pipeline behind it is worse.
+        """
+        for attempt in range(1, MAX_PROCESSING_ATTEMPTS + 1):
+            try:
+                await self._handle_message(message)
+                await self.consumer.commit(message)
+                return
+            except Exception as e:
+                if attempt < MAX_PROCESSING_ATTEMPTS:
+                    delay = PROCESSING_RETRY_BACKOFF_SECONDS * attempt
+                    logger.warning(
+                        f"Attribution message failed (attempt "
+                        f"{attempt}/{MAX_PROCESSING_ATTEMPTS}), retrying in "
+                        f"{delay}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                payload = message.get("value") or message
+                logger.error(
+                    f"🪦 Dead-lettering attribution message after "
+                    f"{attempt} attempts — order "
+                    f"{payload.get('order_id') if isinstance(payload, dict) else '?'} "
+                    f"will not be attributed until this is fixed: {e}",
+                    exc_info=True,
+                )
+                try:
+                    await self.dlq_service.send_to_dlq(
+                        original_message=payload,
+                        reason="processing_failed",
+                        original_topic="purchase-attribution-jobs",
+                        error_details=str(e),
+                    )
+                except Exception as dlq_error:
+                    # Even a failed DLQ write must not re-block the partition;
+                    # the error log above is the durable record either way.
+                    logger.error(f"Failed to write to DLQ: {dlq_error}")
+
+                await self.consumer.commit(message)
+                return
 
     async def close(self):
         """Close consumer"""
@@ -251,11 +313,23 @@ class PurchaseAttributionKafkaConsumer:
                             for k, v in order_metafields.items()
                         ]
 
+                # Cart attributes Shopify promoted onto the order. Extracted
+                # before the pre-check because for a guest order they may be the
+                # *only* evidence: no customer and no session means the
+                # impression lookup below finds nothing, so without this the
+                # order is skipped and a genuine click-through is never billed.
+                order_note_attributes = getattr(order, "note_attributes", None)
+                if isinstance(order_note_attributes, dict):
+                    order_note_attributes = [
+                        {"key": k, "value": v}
+                        for k, v in order_note_attributes.items()
+                    ]
+
                 # Line-item properties / Apollo metafields are checked as well
                 # as impressions, so an order carrying extension tracking data
                 # is still processed if the impression row is missing.
                 has_tracking_data = self._has_tracking_data_from_extensions(
-                    products, order_metafields_list
+                    products, order_metafields_list, order_note_attributes
                 )
                 has_impressions = await self._has_offer_impressions(
                     session, shop_id, customer_id, user_session
@@ -285,6 +359,7 @@ class PurchaseAttributionKafkaConsumer:
                         "line_item_count": len(products),
                     },
                     order_metafields=order_metafields_list,
+                    order_note_attributes=order_note_attributes,
                 )
 
                 # Process attribution
@@ -344,6 +419,7 @@ class PurchaseAttributionKafkaConsumer:
         self,
         products: List[Dict[str, Any]],
         order_metafields: Optional[List[Dict[str, Any]]],
+        order_note_attributes: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         """
         Check if order has tracking data from extensions (line items or Apollo metafields).
@@ -351,14 +427,24 @@ class PurchaseAttributionKafkaConsumer:
         This is the PRIORITY source of truth - what extensions actually added to the order
         at checkout time, regardless of whether UserInteraction records exist.
         """
-        # 1. Check for tracking in line item properties
+        # 1. Check for tracking in line item properties.
+        #
+        # Keyed on the impression id rather than an allowlist of extension
+        # names. The allowlist was ["apollo", "mercury"], which silently
+        # excluded every phoenix and venus stamp — the storefront surfaces that
+        # rely on line-item stamping most, since nothing reports their outcome
+        # in the moment. An order carrying an impression id is attributable
+        # whichever surface put it there.
         for product in products:
             properties = product.get("properties", {})
-            if isinstance(properties, dict) and properties:
-                extension = properties.get("_bb_rec_extension")
-                if extension and extension.lower() in ["apollo", "mercury"]:
-                    logger.debug(f"✅ Found tracking data in line item: {extension}")
-                    return True
+            if isinstance(properties, dict) and properties.get(
+                "_bb_rec_impression_id"
+            ):
+                logger.debug(
+                    f"✅ Found impression stamp in line item: "
+                    f"{properties.get('_bb_rec_extension') or 'unknown surface'}"
+                )
+                return True
 
         # 2. Check for Apollo/Mercury tracking in order metafields
         if order_metafields:
@@ -384,5 +470,16 @@ class PurchaseAttributionKafkaConsumer:
                     if products_value:
                         logger.debug(f"✅ Found Mercury products array in metafields")
                         return True
+
+        # 3. Click recorded on the cart by Phoenix, for a recommendation the
+        #    shopper followed here from a surface with no cart access. For a
+        #    guest order this is often the only evidence there is.
+        for entry in order_note_attributes or []:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key") or entry.get("name")
+            if key == "_bb_clicks" and entry.get("value"):
+                logger.debug("✅ Found cart-recorded recommendation click")
+                return True
 
         return False

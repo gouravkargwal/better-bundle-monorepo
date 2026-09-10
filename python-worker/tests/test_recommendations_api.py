@@ -16,6 +16,7 @@ Run with:
 """
 
 import hashlib
+import json
 import uuid
 from typing import List, Optional
 
@@ -37,6 +38,15 @@ from app.recommandations.models import RecommendationRequest
 from app.services.holdout_service import INITIAL_HOLDOUT_PERCENT
 
 pytestmark = pytest.mark.asyncio
+
+
+# A real shopper's User-Agent. Required, not decorative: the serve path treats a
+# missing User-Agent as a bot and deliberately writes no impression for one, so
+# without this every test below would assert against un-recorded offers.
+SHOPPER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +166,7 @@ async def test_product_page_returns_renderable_recommendations(shop, source_prod
         product_id=source_product,
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
     assert result["count"] > 0, (
         "a product with recommendable edges returned nothing — the serve path "
@@ -186,7 +196,7 @@ async def test_recommendation_count_respects_the_surface_limit(shop, source_prod
         product_id=source_product,
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
     limit = RETURN_LIMIT[CONTEXT_SURFACE["product_page"]]
     assert result["count"] <= limit
 
@@ -198,7 +208,7 @@ async def test_a_product_is_never_recommended_alongside_itself(shop, source_prod
         product_id=source_product,
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
     returned = {str(i["id"]) for i in result["recommendations"]}
     assert str(source_product) not in returned
 
@@ -215,7 +225,7 @@ async def test_every_offer_shown_writes_a_treatment_impression(shop, source_prod
         product_id=source_product,
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
     assert result["count"] > 0
 
     impression_ids = [i["impression_id"] for i in result["recommendations"]]
@@ -243,7 +253,7 @@ async def test_control_shopper_is_shown_nothing(shop, source_product):
         product_id=source_product,
         user_id=_identity_in_bucket(shop.id, want_control=True),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
     assert result["count"] == 0
     assert result["recommendations"] == []
@@ -265,7 +275,7 @@ async def test_bucketing_is_stable_for_the_same_shopper(shop, source_product):
             product_id=source_product,
             user_id=identity,
         )
-        result = await fetch_recommendations_logic(request, services)
+        result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
         assert result["source"] == "holdout_control"
 
 
@@ -283,7 +293,7 @@ async def test_anonymous_shopper_is_served_but_flagged_unbucketed(
         context="product_page",
         product_id=source_product,
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
     assert result["source"] != "holdout_control"
     if result["count"]:
@@ -301,10 +311,22 @@ async def test_anonymous_shopper_is_served_but_flagged_unbucketed(
 
 
 async def _set_shop_settings(shop_id: str, settings: dict | None):
+    # Serialized and cast explicitly. Binding a dict straight into a `text()`
+    # statement hands asyncpg's jsonb encoder a dict where it expects a string
+    # and it dies with "'dict' object has no attribute 'encode'" — the same
+    # trap as `::vector`, where an untyped bind reaches the driver with no idea
+    # what to do with it. `None` stays None so the column goes to SQL NULL
+    # rather than the JSON value `null`, which is what an unconfigured shop has.
     async with get_transaction_context() as session:
         await session.execute(
-            text("UPDATE shops SET settings = :settings WHERE id = :shop_id"),
-            {"settings": settings, "shop_id": shop_id},
+            text(
+                "UPDATE shops SET settings = CAST(:settings AS jsonb) "
+                "WHERE id = :shop_id"
+            ),
+            {
+                "settings": json.dumps(settings) if settings is not None else None,
+                "shop_id": shop_id,
+            },
         )
 
 
@@ -326,7 +348,7 @@ async def test_disabled_surface_serves_nothing(shop, source_product):
             product_id=source_product,
             user_id=_identity_in_bucket(shop.id, want_control=False),
         )
-        result = await fetch_recommendations_logic(request, services)
+        result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
         assert result["count"] == 0
         assert result["recommendations"] == []
@@ -351,7 +373,7 @@ async def test_enabled_surface_still_serves(shop, source_product):
             product_id=source_product,
             user_id=_identity_in_bucket(shop.id, want_control=False),
         )
-        result = await fetch_recommendations_logic(request, services)
+        result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
         assert result["count"] > 0
     finally:
         await _set_shop_settings(shop.id, previous.settings if previous else None)
@@ -390,7 +412,7 @@ async def test_merchant_exclusions_are_never_recommended(shop, source_product):
             product_id=source_product,
             user_id=_identity_in_bucket(shop.id, want_control=False),
         )
-        result = await fetch_recommendations_logic(request, services)
+        result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
         returned = {str(i["id"]) for i in result["recommendations"]}
         assert str(top_target.product_id) not in returned
     finally:
@@ -410,7 +432,7 @@ async def test_unknown_context_is_rejected(shop):
         product_id="anything",
     )
     with pytest.raises(InvalidInputError):
-        await fetch_recommendations_logic(request, services)
+        await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
 
 async def test_unknown_shop_is_rejected():
@@ -420,13 +442,13 @@ async def test_unknown_shop_is_rejected():
         product_id="anything",
     )
     with pytest.raises(ShopNotFoundError):
-        await fetch_recommendations_logic(request, services)
+        await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
 
 async def test_missing_shop_and_user_is_rejected():
     request = RecommendationRequest(context="product_page", product_id="anything")
     with pytest.raises(InvalidInputError):
-        await fetch_recommendations_logic(request, services)
+        await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
 
 async def test_no_context_products_returns_empty_not_an_error(shop):
@@ -436,7 +458,7 @@ async def test_no_context_products_returns_empty_not_an_error(shop):
         context="product_page",
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
     assert result["count"] == 0
     assert result["source"] == "no_context_products"
 
@@ -449,6 +471,179 @@ async def test_unknown_product_returns_empty_not_an_error(shop):
         product_id=f"does-not-exist-{uuid.uuid4().hex}",
         user_id=_identity_in_bucket(shop.id, want_control=False),
     )
-    result = await fetch_recommendations_logic(request, services)
+
+    result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
     assert result["count"] == 0
     assert result["source"] in {"no_edges", "all_unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# Traffic that gets recommendations but must not be recorded as an impression
+# ---------------------------------------------------------------------------
+
+
+async def _impression_count(shop_id: str) -> int:
+    async with get_transaction_context() as session:
+        return (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM offer_impressions WHERE shop_id = :shop_id"
+                ),
+                {"shop_id": shop_id},
+            )
+        ).scalar_one()
+
+
+async def test_bot_is_served_but_writes_no_impression(shop, source_product):
+    """A crawler should render a normal page and leave no trace in the metrics.
+
+    Impressions are the denominator of the conversion rate the merchant is
+    billed against, so a bot fetch that records one understates the app's lift.
+    """
+    before = await _impression_count(shop.id)
+
+    request = RecommendationRequest(
+        shop_domain=shop.shop_domain,
+        context="product_page",
+        product_id=source_product,
+        user_id=_identity_in_bucket(shop.id, want_control=False),
+    )
+    result = await fetch_recommendations_logic(
+        request,
+        services,
+        user_agent="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+    )
+
+    assert result["count"] > 0, "a bot should still be served a working widget"
+    assert await _impression_count(shop.id) == before, (
+        "a bot fetch wrote an offer_impressions row"
+    )
+    for item in result["recommendations"]:
+        assert not item.get("impression_id")
+
+
+async def test_theme_preview_is_served_but_writes_no_impression(shop, source_product):
+    """Same contract for a theme preview: the merchant sees the widget work,
+    but their own previewing does not land in their impact dashboard."""
+    before = await _impression_count(shop.id)
+
+    request = RecommendationRequest(
+        shop_domain=shop.shop_domain,
+        context="product_page",
+        product_id=source_product,
+        user_id=_identity_in_bucket(shop.id, want_control=False),
+        preview=True,
+    )
+    result = await fetch_recommendations_logic(
+        request, services, user_agent=SHOPPER_UA
+    )
+
+    assert result["count"] > 0
+    assert await _impression_count(shop.id) == before, (
+        "a theme preview wrote an offer_impressions row"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Offers the shopper has already answered are not shown again
+# ---------------------------------------------------------------------------
+
+
+async def _record_impression(shop_id: str, session_id: str, offer_id: str, outcome: str):
+    async with get_transaction_context() as session:
+        await session.execute(
+            text(
+                """
+                INSERT INTO offer_impressions
+                    (id, shop_id, session_id, surface, offer_type, offer_id,
+                     is_control, outcome, created_at, updated_at)
+                VALUES
+                    (gen_random_uuid(), :shop_id, :session_id, 'phoenix',
+                     'cross_sell', :offer_id, false, :outcome, now(), now())
+                """
+            ),
+            {
+                "shop_id": shop_id,
+                "session_id": session_id,
+                "offer_id": offer_id,
+                "outcome": outcome,
+            },
+        )
+
+
+async def test_declined_offer_is_never_shown_again(shop):
+    """A decline is the clearest signal we get, and we were ignoring it.
+
+    Real data showed one offer declined once on apollo and then shown seven
+    more times to the same shopper.
+    """
+    session_id = f"test-{uuid.uuid4().hex}"
+    await _record_impression(shop.id, session_id, "111111", "declined")
+
+    async with get_transaction_context() as session:
+        excluded = await services.exclusion.get_impression_exclusions(
+            session, shop.id, session_id=session_id
+        )
+
+    assert "111111" in excluded
+
+
+async def test_accepted_offer_is_never_shown_again(shop):
+    """An accept means they own it. The purchase-history exclusions only catch
+    this once the order lands, which is far too late inside one session."""
+    session_id = f"test-{uuid.uuid4().hex}"
+    await _record_impression(shop.id, session_id, "222222", "accepted")
+
+    async with get_transaction_context() as session:
+        excluded = await services.exclusion.get_impression_exclusions(
+            session, shop.id, session_id=session_id
+        )
+
+    assert "222222" in excluded
+
+
+async def test_offer_is_retired_after_the_impression_cap(shop):
+    """Two showings is the cap: one re-ask at a higher-intent surface is fair,
+    a third is noise."""
+    session_id = f"test-{uuid.uuid4().hex}"
+
+    await _record_impression(shop.id, session_id, "333333", "shown")
+    async with get_transaction_context() as session:
+        after_one = await services.exclusion.get_impression_exclusions(
+            session, shop.id, session_id=session_id
+        )
+    assert "333333" not in after_one, "retired after a single showing"
+
+    await _record_impression(shop.id, session_id, "333333", "shown")
+    async with get_transaction_context() as session:
+        after_two = await services.exclusion.get_impression_exclusions(
+            session, shop.id, session_id=session_id
+        )
+    assert "333333" in after_two, "shown twice and still not retired"
+
+
+async def test_another_shoppers_history_does_not_exclude(shop):
+    """Exclusions are per shopper. Keying them any wider would let one
+    shopper's decline suppress an offer for everybody else."""
+    mine = f"test-{uuid.uuid4().hex}"
+    theirs = f"test-{uuid.uuid4().hex}"
+    await _record_impression(shop.id, theirs, "444444", "declined")
+
+    async with get_transaction_context() as session:
+        excluded = await services.exclusion.get_impression_exclusions(
+            session, shop.id, session_id=mine
+        )
+
+    assert "444444" not in excluded
+
+
+async def test_no_identity_excludes_nothing(shop):
+    """Mercury impressions carry neither customer_id nor session_id, so there
+    is no key to scope an exclusion by. It must return empty rather than
+    matching every anonymous row in the shop."""
+    async with get_transaction_context() as session:
+        excluded = await services.exclusion.get_impression_exclusions(
+            session, shop.id
+        )
+
+    assert excluded == []

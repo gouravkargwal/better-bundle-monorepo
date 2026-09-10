@@ -9,7 +9,7 @@ import {
 } from "@remix-run/react";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
-import { Frame } from "@shopify/polaris";
+import { Frame, Loading } from "@shopify/polaris";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import { useState, useEffect } from "react";
 
@@ -78,20 +78,12 @@ export default function App() {
           <EnhancedNavMenu isOnboarded={isOnboarded} />
         </div>
 
-        {/* Always render loading indicator - same structure on server and client */}
-        <div
-          suppressHydrationWarning
-          style={{
-            display: isNavigating ? "block" : "none",
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            zIndex: 10000,
-            height: "3px",
-            background: "#008060",
-          }}
-        />
+        {/* Polaris renders this into the Frame above, matching how the Shopify
+            admin itself indicates navigation. It replaces a hand-rolled 3px
+            #008060 bar plus an opacity: 0.6 dim on the whole outlet — 25 lines
+            of fixed positioning and a hardcoded brand green that drifts from
+            Polaris every time Shopify retunes it. */}
+        {isNavigating && <Loading />}
 
         {/* In-app notification banners */}
         {notifications.length > 0 && (
@@ -105,16 +97,7 @@ export default function App() {
           </div>
         )}
 
-        <div
-          suppressHydrationWarning
-          style={{
-            opacity: isNavigating ? 0.6 : 1,
-            transition: "opacity 150ms ease-in-out",
-            minHeight: "100vh",
-          }}
-        >
-          <Outlet />
-        </div>
+        <Outlet />
       </Frame>
     </AppProvider>
   );

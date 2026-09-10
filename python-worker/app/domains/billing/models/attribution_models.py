@@ -98,6 +98,11 @@ class PurchaseEvent(BaseModel):
     updated_at: Optional[datetime] = None  # For post-purchase additions
     metadata: Dict[str, Any]
     order_metafields: Optional[List[Dict[str, Any]]] = None  # For Apollo tracking data
+    # Cart attributes Shopify promoted onto the order. This is where a
+    # click-through from a surface with no cart access lands: those extensions
+    # cannot stamp a line item, so Phoenix records the click on the cart instead
+    # and Shopify carries it to the order for us.
+    order_note_attributes: Optional[List[Dict[str, Any]]] = None
 
 
 class AttributionBreakdown(BaseModel):

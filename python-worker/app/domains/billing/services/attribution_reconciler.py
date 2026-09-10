@@ -54,22 +54,39 @@ MAX_ORDERS_PER_SWEEP = 200
 
 # `properties` is a `json` column, not `jsonb`, so it needs an explicit cast
 # before the `?` containment operator will accept it.
+# Orders still owing an attribution.
+#
+# Reads `order_data.attribution_state`, which is set once when the order is
+# written, and is backed by a partial index containing only 'pending' rows. So
+# the cost of a sweep tracks the size of the backlog — normally zero — not the
+# merchant's order volume.
+#
+# What this replaced, and why: it used to join every order in the window to its
+# line items and test `l.properties::jsonb ? :stamp_key`. Casting `properties`
+# (a `json` column) to `jsonb` makes the predicate a functional expression, so
+# no index can serve it — every pass sequentially scanned every recent line item
+# to re-derive a fact already known at write time, 96 times a day, almost always
+# finding nothing. That is fine at a hundred orders and ruinous at a hundred
+# thousand.
+#
+# `attribution_attempts` bounds the retries: an order that cannot be attributed
+# is dead-lettered rather than republished every 15 minutes until it ages out of
+# the window.
 _UNATTRIBUTED_STAMPED_ORDERS = text(
     """
-    SELECT o.shop_id, o.order_id
-    FROM order_data o
-    JOIN line_item_data l ON l.order_id = o.id
-    WHERE o.order_date >= :since
-      AND l.properties::jsonb ? :stamp_key
-      AND NOT EXISTS (
-          SELECT 1 FROM purchase_attributions pa
-          WHERE pa.shop_id = o.shop_id AND pa.order_id = o.order_id
-      )
-    GROUP BY o.shop_id, o.order_id
-    ORDER BY MAX(o.order_date) DESC
+    SELECT shop_id, order_id
+    FROM order_data
+    WHERE attribution_state = 'pending'
+      AND order_date >= :since
+      AND attribution_attempts < :max_attempts
+    ORDER BY order_date DESC
     LIMIT :limit
     """
 )
+
+# Attempts before an order is dead-lettered as 'failed'. Matches the shape used
+# by product_enrichments, where the same runaway-retry problem was solved.
+MAX_ATTRIBUTION_ATTEMPTS = 5
 
 STAMP_KEY = "_bb_rec_impression_id"
 
@@ -78,18 +95,61 @@ async def find_unattributed_orders(
     lookback_days: int = LOOKBACK_DAYS,
     limit: int = MAX_ORDERS_PER_SWEEP,
 ) -> List[Dict[str, str]]:
-    """Orders carrying a recommendation stamp but with no attribution row."""
+    """Orders carrying recommendation evidence but with no attribution row."""
     since = now_utc().replace(microsecond=0) - timedelta(days=lookback_days)
 
     async with get_transaction_context() as session:
         rows = (
             await session.execute(
                 _UNATTRIBUTED_STAMPED_ORDERS,
-                {"since": since, "stamp_key": STAMP_KEY, "limit": limit},
+                {
+                    "since": since,
+                    "limit": limit,
+                    "max_attempts": MAX_ATTRIBUTION_ATTEMPTS,
+                },
             )
         ).all()
 
     return [{"shop_id": r.shop_id, "order_id": r.order_id} for r in rows]
+
+
+async def _count_attempt(rows: List[Dict[str, str]]) -> None:
+    """Charge each republished order an attempt, dead-lettering at the ceiling.
+
+    Counted on publish rather than on failure, because the failure usually
+    happens somewhere this function cannot see — a consumer that never picks the
+    job up, or picks it up and dies. Counting the attempt here means an order
+    that silently never completes still stops being retried, which is the whole
+    point of the ceiling.
+    """
+    if not rows:
+        return
+
+    async with get_transaction_context() as session:
+        for row in rows:
+            await session.execute(
+                text(
+                    """
+                    UPDATE order_data
+                    SET attribution_attempts = attribution_attempts + 1,
+                        attribution_state = CASE
+                            WHEN attribution_attempts + 1 >= :max_attempts
+                            THEN 'failed' ELSE attribution_state END,
+                        attribution_last_error = CASE
+                            WHEN attribution_attempts + 1 >= :max_attempts
+                            THEN 'gave up after ' || (attribution_attempts + 1)
+                                 || ' reconciliation attempts'
+                            ELSE attribution_last_error END
+                    WHERE shop_id = :shop_id AND order_id = :order_id
+                      AND attribution_state = 'pending'
+                    """
+                ),
+                {
+                    "shop_id": row["shop_id"],
+                    "order_id": row["order_id"],
+                    "max_attempts": MAX_ATTRIBUTION_ATTEMPTS,
+                },
+            )
 
 
 async def reconcile_once(
@@ -136,6 +196,8 @@ async def reconcile_once(
                 )
     finally:
         await publisher.close()
+
+    await _count_attempt(missed)
 
     logger.info(
         f"✅ Attribution reconciliation republished {published}/{len(missed)} orders"

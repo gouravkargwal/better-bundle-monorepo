@@ -30,6 +30,21 @@ class OutcomeRequest(BaseModel):
     # click is the last thing we can observe, so it is recorded and reconciled
     # against the order later.
 
+    # Identity of whoever is reporting this outcome, used only to fill a blank.
+    #
+    # Impressions from the checkout and thank-you surfaces are written with no
+    # session and no customer: those extensions get no storefront visitor id,
+    # and a guest order has no customer. The clicked-then-bought reconciliation
+    # joins on exactly these columns, so without them a click can be recorded
+    # and never credited. Phoenix has a visitor id and sends it here when a
+    # shopper arrives on a product page via a recommendation link.
+    session_id: Optional[str] = Field(
+        None, description="Visitor id to attach if the impression has none"
+    )
+    customer_id: Optional[str] = Field(
+        None, description="Customer id to attach if the impression has none"
+    )
+
 
 @router.post("/outcome")
 async def record_outcome(request: OutcomeRequest):
@@ -60,6 +75,8 @@ async def record_outcome(request: OutcomeRequest):
         impression_id=request.impression_id,
         outcome=request.outcome,
         revenue_added=request.revenue_added,
+        session_id=request.session_id,
+        customer_id=request.customer_id,
     )
 
     if not success:

@@ -19,6 +19,9 @@ from app.core.database.models.enums import (
     SubscriptionType,
     SubscriptionStatus,
 )
+from app.core.database.models.order_data import OrderData
+from app.core.database.models.shop import Shop
+from .fx import convert_to_usd
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
 from app.repository.CommissionRepository import CommissionRepository
 from app.repository.PurchaseAttributionRepository import PurchaseAttributionRepository
@@ -60,7 +63,28 @@ class CommissionServiceV2:
             )
 
             effective_commission_rate = shop_subscription.effective_commission_rate
-            total_revenue = purchase_attr.total_revenue
+
+            # Attributed revenue is measured in whatever the shopper paid in;
+            # every amount from here down is USD, because that is what the
+            # Shopify subscription is pinned to. Converting at this single choke
+            # point covers the trial and paid paths alike.
+            order_currency = await self._get_order_currency(
+                shop_id, str(purchase_attr.order_id)
+            )
+            converted = await convert_to_usd(
+                self.session,
+                Decimal(str(purchase_attr.total_revenue)),
+                order_currency,
+            )
+            if converted is None:
+                logger.error(
+                    f"❌ Cannot bill attribution {purchase_attribution_id}: no "
+                    f"usable USD rate for {order_currency}. Commission not "
+                    f"created — it will be picked up once rates refresh."
+                )
+                return None
+
+            total_revenue = converted.amount
             commission_data = self._calculate_commission(
                 total_revenue, effective_commission_rate
             )
@@ -80,6 +104,12 @@ class CommissionServiceV2:
             )
 
             if commission:
+                # Record what priced this charge. Stored, not re-derived: a
+                # later rate refresh must not restate an invoice the merchant
+                # has already paid, and a billing dispute needs an answer.
+                commission.source_currency = converted.source_currency
+                commission.fx_rate = converted.rate
+
                 await self.commission_repository.commit()
                 logger.info(
                     f"✅ Created commission: ${commission.commission_earned} "
@@ -165,6 +195,46 @@ class CommissionServiceV2:
         except Exception as e:
             logger.error(f"❌ Error creating trial commission: {e}")
             return None
+
+    async def _get_order_currency(self, shop_id: str, order_id: str) -> Optional[str]:
+        """The currency the attributed revenue is denominated in.
+
+        Presentment, not shop currency: `offer_impressions.revenue_added` is the
+        price the extension *displayed* to the shopper, which on a Markets store
+        is their local currency rather than the merchant's. One order has one
+        presentment currency, so this is consistent at the scope that matters.
+
+        Falls back to the shop's own currency when the order cannot be found —
+        better than assuming USD, which is what silently over-billed every
+        non-USD merchant.
+        """
+        row = (
+            await self.session.execute(
+                select(
+                    OrderData.presentment_currency_code,
+                    OrderData.currency_code,
+                ).where(
+                    and_(
+                        OrderData.shop_id == shop_id,
+                        OrderData.order_id == order_id,
+                    )
+                )
+            )
+        ).first()
+
+        if row:
+            return row.presentment_currency_code or row.currency_code
+
+        shop_currency = (
+            await self.session.execute(
+                select(Shop.currency_code).where(Shop.id == shop_id)
+            )
+        ).scalar_one_or_none()
+        logger.warning(
+            f"💱 Order {order_id} not found for currency lookup; falling back to "
+            f"shop currency {shop_currency}"
+        )
+        return shop_currency
 
     def _build_trial_commission(
         self,

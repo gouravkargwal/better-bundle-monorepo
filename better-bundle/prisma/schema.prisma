@@ -295,7 +295,7 @@ model product_vectors {
 }
 
 model purchase_attributions {
-  session_id                String              @db.VarChar(255)
+  session_id                String?             @db.VarChar(255)
   order_id                  String              @db.VarChar(255)
   contributing_extensions   Json                @db.Json
   attribution_weights       Json                @db.Json
@@ -312,7 +312,7 @@ model purchase_attributions {
   shop_id                   String              @db.VarChar
   customer_id               String?             @db.VarChar
   commission_records        commission_records?
-  user_sessions             user_sessions       @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user_sessions             user_sessions?      @relation(fields: [session_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   shops                     shops               @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@unique([shop_id, order_id], map: "ix_purchase_attribution_shop_id_order_id")
@@ -511,12 +511,14 @@ model shops {
   id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   created_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  settings              Json?
   collection_data       collection_data[]
   commission_records    commission_records[]
   customer_data         customer_data[]
   offer_impressions     offer_impressions[]
   order_data            order_data[]
   product_data          product_data[]
+  product_enrichments   product_enrichments[]
   product_vectors       product_vectors[]
   purchase_attributions purchase_attributions[]
   raw_collections       raw_collections[]
@@ -668,6 +670,8 @@ model commission_records {
   deleted_at              DateTime?              @db.Timestamptz(6)
   created_at              DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at              DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  source_currency         String?                @db.VarChar(3)
+  fx_rate                 Decimal?               @db.Decimal(20, 10)
   billing_cycles          billing_cycles?        @relation(fields: [billing_cycle_id], references: [id], onUpdate: NoAction)
   purchase_attributions   purchase_attributions  @relation(fields: [purchase_attribution_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   shops                   shops                  @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -685,6 +689,40 @@ model commission_records {
   @@index([order_id], map: "ix_commission_records_order_id")
   @@index([shop_id], map: "ix_commission_records_shop_id")
   @@index([status], map: "ix_commission_records_status")
+}
+
+model exchange_rates {
+  currency   String   @unique(map: "ix_exchange_rates_currency") @db.VarChar(3)
+  usd_rate   Decimal  @db.Decimal(20, 10)
+  fetched_at DateTime @db.Timestamptz(6)
+  source     String   @db.VarChar(50)
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model product_enrichments {
+  product_id      String                 @db.VarChar
+  status          enrichment_status_enum @default(PENDING)
+  text_hash       String                 @db.VarChar(32)
+  model_version   String                 @db.VarChar(100)
+  payload         Json?
+  attempts        Int                    @default(0)
+  last_error      String?
+  last_attempt_at DateTime?              @db.Timestamptz(6)
+  succeeded_at    DateTime?              @db.Timestamptz(6)
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  created_at      DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at      DateTime               @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shop_id         String                 @db.VarChar
+  shops           shops                  @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([shop_id, product_id], map: "uq_product_enrichment_shop_product")
+  @@index([shop_id, status, attempts], map: "idx_product_enrichments_retryable")
+  @@index([product_id], map: "ix_product_enrichments_product_id")
+  @@index([shop_id], map: "ix_product_enrichments_shop_id")
+  @@index([status], map: "ix_product_enrichments_status")
 }
 
 enum billing_cycle_status_enum {
@@ -739,4 +777,10 @@ enum commission_status_enum {
   REJECTED
   FAILED
   CAPPED
+}
+
+enum enrichment_status_enum {
+  PENDING
+  SUCCEEDED
+  FAILED
 }

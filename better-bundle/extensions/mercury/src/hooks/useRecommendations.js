@@ -47,6 +47,11 @@ export function useRecommendations({
   context,
   limit,
   customerId,
+  // Stable measurement id for this shopper, read from the `_bb_session` cart
+  // attribute. Without it the backend cannot bucket the shopper into the
+  // holdout — so the offer is served but excluded from the lift calculation —
+  // and the impression it writes has no identity to join a later order on.
+  sessionId,
   shopDomain,
   storage,
   // Cart data for better recommendations
@@ -123,6 +128,7 @@ export function useRecommendations({
           context,
           limit,
           user_id: customerId,
+          ...(sessionId && { session_id: sessionId }),
           ...(shopDomain && { shop_domain: shopDomain }),
           // Pass cart data for better recommendations
           cart_items: memoizedCartData.cartItems,
@@ -193,7 +199,16 @@ export function useRecommendations({
 
     // ✅ Fetch recommendations (only if cart items changed or first load)
     fetchRecommendations();
-  }, [skip, customerId, context, limit, shopDomain, memoizedCartData, storage]);
+  }, [
+    skip,
+    customerId,
+    sessionId,
+    context,
+    limit,
+    shopDomain,
+    memoizedCartData,
+    storage,
+  ]);
 
   return {
     loading,

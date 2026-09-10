@@ -24,7 +24,7 @@ class BaseShopifyAPIClient:
 
     def __init__(self):
         self.base_url = "https://{shop}.myshopify.com"
-        self.api_version = "2025-01"  # Latest stable version
+        self.api_version = "2026-07"  # newest version Shopify still supports
         self.endpoint = "/admin/api/{version}/graphql.json"
 
         # Rate limiting based on Shopify's official limits

@@ -25,10 +25,16 @@ export function formatCurrency(
     locale?: string;
   } = {},
 ): string {
-  const { showSymbol = true, decimals = 2, locale = "en-US" } = options;
+  const { showSymbol = true, locale = "en-US" } = options;
 
   // Fallback to USD if currency code is empty or invalid
   const validCurrencyCode = currencyCode && currencyCode.trim() ? currencyCode : "USD";
+
+  // Default to the currency's own convention rather than a flat 2. Yen, Won,
+  // Dong and Rupiah have no minor unit, so "¥1,234.00" is not a number that
+  // exists — `getCurrencyInfo` below already knew this and nothing asked it.
+  const decimals =
+    options.decimals ?? getCurrencyInfo(validCurrencyCode).decimalPlaces;
 
   if (showSymbol) {
     // Use Intl.NumberFormat for proper locale-aware formatting

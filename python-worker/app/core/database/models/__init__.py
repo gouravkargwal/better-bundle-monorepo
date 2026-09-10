@@ -52,6 +52,7 @@ from .shop_subscription import ShopSubscription
 from .billing_cycle import BillingCycle
 from .commission import CommissionRecord
 from .product_enrichment import ProductEnrichment, MAX_ENRICHMENT_ATTEMPTS
+from .exchange_rate import ExchangeRate
 
 # Suspension audit log
 from .suspension_audit_log import SuspensionAuditLog
@@ -95,5 +96,6 @@ __all__ = [
     "CommissionRecord",
     "ProductEnrichment",
     "MAX_ENRICHMENT_ATTEMPTS",
+    "ExchangeRate",
     "SuspensionAuditLog",
 ]

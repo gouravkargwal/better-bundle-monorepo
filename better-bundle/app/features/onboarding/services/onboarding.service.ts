@@ -35,19 +35,21 @@ export class OnboardingService {
       // Activate web pixel (non-critical, best-effort)
       await this.activateWebPixel(admin, session.shop);
 
-      // Trigger historical data analysis (fire-and-forget via Kafka) — non-fatal
-      try {
-        await this.triggerAnalysis(session.shop, shop.id, session.accessToken);
-      } catch (analysisError) {
-        logger.error(
-          { error: analysisError, shop: session.shop },
-          "Triggering analysis failed after onboarding — continuing",
-        );
-        // ponytail: If Kafka is down, onboarding still succeeds.
-        // A background reconciliation job should retry failed analysis triggers.
-      }
+      // Trigger historical data analysis via Kafka. Deliberately fatal.
+      //
+      // This publish is what fills the shop with data; without it there are no
+      // products, no edges and no recommendations. Swallowing the failure and
+      // marking onboarding complete anyway produced the worst possible state: a
+      // shop flagged onboarded, redirected past this screen forever, with an
+      // empty dashboard and nothing to retry the publish.
+      //
+      // Letting it throw needs no reconciliation job, because the retry already
+      // exists — onboarding_completed stays false, so the merchant lands back
+      // here and the button re-publishes. `completeOnboardingTransaction`
+      // upserts, so clicking again is idempotent.
+      await this.triggerAnalysis(session.shop, shop.id, session.accessToken);
 
-      // Mark onboarding completed
+      // Only now is the shop genuinely onboarded.
       await this.markOnboardingCompleted(session.shop);
 
       return shop;

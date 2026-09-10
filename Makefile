@@ -1,12 +1,18 @@
 # BetterBundle
 #
-# ENV selects the compose file: local (default), dev, prod.
-#   make up            → docker-compose.local.yml
-#   make up ENV=dev    → docker-compose.dev.yml
+# ENV selects the compose file: dev (default), local, prod.
+#   make up              → docker-compose.dev.yml
+#   make up ENV=local    → docker-compose.local.yml
+#
+# Defaults to dev because that is the stack that actually runs here. It used to
+# default to local, which pointed every target at a compose file whose services
+# were not up: `exec` still found the containers (same project name), so
+# migrations appeared to work, but `logs python-worker` failed with "no such
+# service" — which is why the worker's logs looked empty when they were fine.
 #
 # Anything that talks to a real Shopify store needs SHOP and TOKEN passed in.
 
-ENV ?= local
+ENV ?= dev
 COMPOSE := docker compose -f docker-compose.$(ENV).yml
 WORKER  := $(COMPOSE) exec python-worker
 

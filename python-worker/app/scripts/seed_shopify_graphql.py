@@ -32,7 +32,7 @@ class ShopifyGraphQLSeeder:
     def __init__(self, shop_domain: str, access_token: str):
         self.shop_domain = shop_domain
         self.access_token = access_token
-        self.api_version = "2025-01"  # Use latest stable version
+        self.api_version = "2026-07"  # newest version Shopify still supports
         self.base_url = f"https://{shop_domain}/admin/api/{self.api_version}"
 
         # Generators

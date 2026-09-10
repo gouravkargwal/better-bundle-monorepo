@@ -84,11 +84,32 @@ async def lifespan(app: FastAPI):
     reconciler_task = asyncio.create_task(attribution_reconciler.run_forever())
     logger.info("✅ Attribution reconciler started")
 
+    # FX rates for billing. Attributed revenue is in the shopper's currency and
+    # commissions are USD; without these rates every non-USD shop is either
+    # unbillable or billed at its FX rate, which over-charged an INR merchant
+    # by about 95x. Refreshes once at startup so a fresh database is billable
+    # immediately.
+    from app.domains.billing.services import fx_refresher
+
+    fx_task = asyncio.create_task(fx_refresher.run_forever())
+    logger.info("✅ FX rate refresher started")
+
+    # Asks Shopify what we have not seen. Data had exactly two routes in — the
+    # onboarding backfill and webhooks — so when webhook delivery broke (the
+    # subscriptions were pinned to a removed api_version) nothing arrived and
+    # nothing noticed for days. The attribution reconciler could not help: it
+    # reconciles orders already stored, so it swept correctly and found nothing.
+    # A non-empty sweep here is also the webhook-failure alarm.
+    from app.domains.shopify.services import ingestion_backstop
+
+    backstop_task = asyncio.create_task(ingestion_backstop.run_forever())
+    logger.info("✅ Ingestion backstop started")
+
     yield
 
     # Shutdown
 
-    for task in (sweeper_task, reconciler_task):
+    for task in (sweeper_task, reconciler_task, fx_task, backstop_task):
         task.cancel()
         try:
             await task

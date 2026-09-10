@@ -29,12 +29,14 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.shared.helpers import now_utc
 from app.core.database.models import PurchaseAttribution
 from app.core.database.models.offer_impression import OfferImpression
+from app.core.database.models.order_data import OrderData
+from app.core.database.models.user_session import UserSession
 from app.core.database.session import get_session_context
 
 from ..models.attribution_models import (
@@ -76,6 +78,31 @@ TRACKING_NAMESPACE = "bb_recommendation"
 # Read from `line_item_data.properties`, populated by the order normalizer.
 LINE_ITEM_IMPRESSION_KEY = "_bb_rec_impression_id"
 
+# Cart attributes, which Shopify promotes to `order.note_attributes`.
+#
+# These exist for the surfaces that cannot stamp a line item at all. The
+# thank-you block and the customer-account block have no cart to write to — the
+# only thing they can do is link out to the product's own page, where the
+# shopper adds it with the *theme's* button, an add this app never observes.
+#
+# So the recommendation link carries the impression id, and Phoenix records it
+# on the cart when the shopper arrives. Shopify then delivers it on the order.
+# That makes the claim deterministic: no session to correlate, no customer
+# required, no time window, and it survives a shopper switching devices —
+# because the evidence rides the cart rather than the browser.
+#
+# Both keys start with an underscore, which is Shopify's convention for an
+# attribute hidden from the customer and from the order UI.
+CLICK_ATTRIBUTE_KEY = "_bb_clicks"
+SESSION_ATTRIBUTE_KEY = "_bb_session"
+
+# Separators for the `_bb_clicks` value: "impressionId:productId,impressionId:productId".
+#
+# A flat string rather than JSON because cart attribute values are plain text
+# and a compact format keeps the value well inside Shopify's limit.
+_CLICK_PAIR_SEP = ","
+_CLICK_FIELD_SEP = ":"
+
 # `offer_impressions.surface` is already the extension name.
 # Every surface the recommendation API can serve. A surface missing here is
 # not a warning that degrades quality — it is revenue that cannot be billed,
@@ -105,6 +132,7 @@ class AttributionContext:
     purchase_products: List[Dict[str, Any]]
     purchase_time: datetime
     order_metafields: Optional[List[Dict[str, Any]]] = None
+    order_note_attributes: Optional[List[Dict[str, Any]]] = None
 
 
 class AttributionEngine:
@@ -185,13 +213,43 @@ class AttributionEngine:
 
     # ---------- impression collection ----------
 
+    @staticmethod
+    def _note_attributes(context: AttributionContext) -> Dict[str, str]:
+        """Cart attributes as a flat dict.
+
+        Shopify delivers them as a list of {key, value} pairs, and the GraphQL
+        normalizer stores `customAttributes` verbatim, so the shape is the same
+        either way. Anything that is not a well-formed pair is skipped rather
+        than raising: these come off a live cart other apps also write to.
+        """
+        attrs: Dict[str, str] = {}
+        for entry in context.order_note_attributes or []:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get("key") or entry.get("name")
+            value = entry.get("value")
+            if key and value is not None:
+                attrs[str(key)] = str(value)
+        return attrs
+
     def _link_session_id(self, context: AttributionContext) -> Optional[str]:
         """The session to join impressions on.
 
-        Mercury stamps the session onto the cart, which Shopify promotes to the
-        order, so the metafield is more trustworthy than whatever the caller
-        happened to pass in.
+        Order of trust: the cart attribute Phoenix writes, then the Mercury
+        metafield, then whatever the caller passed in.
+
+        The cart attribute comes first because it is the only one that is
+        actually populated. This used to read the `bb_recommendation.session_id`
+        metafield alone — which nothing has ever written. Mercury writes
+        `extension`, `context`, `source` and `products`, so this returned
+        `context.session_id`, which is itself null on a guest storefront order.
+        The result was that every identity-joined attribution path silently had
+        nothing to join on.
         """
+        attrs = self._note_attributes(context)
+        if attrs.get(SESSION_ATTRIBUTE_KEY):
+            return attrs[SESSION_ATTRIBUTE_KEY]
+
         for mf in context.order_metafields or []:
             if (
                 mf.get("namespace") == TRACKING_NAMESPACE
@@ -200,6 +258,31 @@ class AttributionEngine:
             ):
                 return str(mf["value"])
         return context.session_id
+
+    def _clicked_impressions_from_cart(
+        self, context: AttributionContext
+    ) -> Dict[str, str]:
+        """impression_id -> product_id, from the `_bb_clicks` cart attribute.
+
+        Written by Phoenix when a shopper arrives on a product page via a
+        recommendation link. Each pair records which impression sent them and
+        which product it was recommending, so the claim can be checked against
+        what the order actually contains rather than trusted outright.
+        """
+        raw = self._note_attributes(context).get(CLICK_ATTRIBUTE_KEY)
+        if not raw:
+            return {}
+
+        pairs: Dict[str, str] = {}
+        for chunk in raw.split(_CLICK_PAIR_SEP):
+            chunk = chunk.strip()
+            if not chunk or _CLICK_FIELD_SEP not in chunk:
+                continue
+            impression_id, _, product_id = chunk.partition(_CLICK_FIELD_SEP)
+            impression_id, product_id = impression_id.strip(), product_id.strip()
+            if impression_id and product_id:
+                pairs[impression_id] = product_id
+        return pairs
 
     def _impression_ids_from_line_items(
         self, context: AttributionContext
@@ -224,7 +307,7 @@ class AttributionEngine:
     ) -> List[OfferImpression]:
         """Impressions this order can be credited to.
 
-        Two independent paths, unioned:
+        Four independent paths, unioned:
 
         1. **Line-item stamped** — the order itself carries the impression id.
            These are attributable regardless of the impression's `outcome`
@@ -247,6 +330,17 @@ class AttributionEngine:
            the product anyway. That is precisely what the held-out control
            group corrects. Per-order attribution is the upper bound; the
            treatment-minus-control difference is the number to bill on.
+
+        4. **Click recorded on the cart** — the same journey as path 3, but the
+           impression id travelled on a cart attribute rather than having to be
+           correlated after the fact. Preferred over path 3 wherever it is
+           present: it needs no session, no customer and no time window, and it
+           survives the shopper changing device. Path 3 remains the fallback for
+           when the cart write did not land.
+
+        Note that paths 3 and 4 answer "was this purchase attributable", not
+        "did we cause it". Neither can distinguish a shopper we persuaded from
+        one who was always going to buy. Only the holdout comparison can.
 
         Control impressions are excluded from both. A held-out shopper was
         shown no offer, so a stamp on their order would be a bug, not revenue.
@@ -301,6 +395,34 @@ class AttributionEngine:
                     or_(*links),
                 )
             )
+
+        # Path 4: click recorded on the cart itself.
+        #
+        # Same journey as path 3 — followed a recommendation, added it with the
+        # theme's own button — but the evidence arrived on the order instead of
+        # having to be correlated. So this needs no session, no customer and no
+        # time window: the cart carried it, and a cart cannot outlive itself.
+        #
+        # Still checked against the order's contents. The attribute says which
+        # product each impression was recommending, and an impression is only
+        # credited if that exact product is in the order. Without that check a
+        # shopper who clicked five recommendations and bought two would have all
+        # five credited.
+        cart_clicks = self._clicked_impressions_from_cart(context)
+        if cart_clicks:
+            confirmed = [
+                impression_id
+                for impression_id, product_id in cart_clicks.items()
+                if product_id in purchased_ids
+            ]
+            dropped = len(cart_clicks) - len(confirmed)
+            if dropped:
+                logger.info(
+                    f"Order {context.order_id}: {dropped} cart-recorded click(s) "
+                    f"ignored — recommended product not in the order"
+                )
+            if confirmed:
+                clauses.append(OfferImpression.id.in_(confirmed))
 
         if not clauses:
             # Invariant 2: no stamp and no join key means no claim.
@@ -669,6 +791,28 @@ class AttributionEngine:
         )
         existing = (await session.execute(stmt)).scalar_one_or_none()
 
+        # `purchase_attributions.session_id` is a foreign key into
+        # `user_sessions`, but the id this engine joins impressions on is a
+        # *visitor* id — the consent-gated value Phoenix mints in the browser
+        # and now writes to the cart as `_bb_session`. Those are two different
+        # namespaces that happen to share a column, and writing the wrong one
+        # makes Postgres reject the whole insert:
+        #
+        #   purchase_attributions_session_id_fkey
+        #   Key (session_id)=(...) is not present in table "user_sessions"
+        #
+        # The attribution itself was computed perfectly — $98.02 across three
+        # surfaces on the order that surfaced this — and then discarded at the
+        # last step, silently, for every order. Exactly the failure mode as when
+        # this column was NOT NULL: measured, then thrown away.
+        #
+        # So the visitor id keeps doing its real job (joining impressions) and
+        # is persisted here only when it genuinely identifies a user_sessions
+        # row. Otherwise NULL, which the column allows and which costs nothing:
+        # a storefront attribution is evidenced by the impression stamp, not by
+        # a session.
+        session_fk = await self._resolve_session_fk(session, result.session_id)
+
         if existing:
             logger.info(
                 f"🔄 Updating existing attribution for order {result.order_id}"
@@ -682,11 +826,12 @@ class AttributionEngine:
             existing.purchase_at = result.calculated_at
             existing.attribution_algorithm = result.attribution_type.value
             existing.attribution_metadata = result.metadata
+            await self._clear_attribution_debt(session, result)
             await session.commit()
             return str(existing.id)
 
         attribution = PurchaseAttribution(
-            session_id=result.session_id,
+            session_id=session_fk,
             order_id=str(result.order_id),
             customer_id=result.customer_id,
             shop_id=result.shop_id,
@@ -701,5 +846,62 @@ class AttributionEngine:
             attribution_metadata=result.metadata,
         )
         session.add(attribution)
+        await self._clear_attribution_debt(session, result)
         await session.commit()
         return str(attribution.id)
+
+    @staticmethod
+    async def _resolve_session_fk(
+        session: AsyncSession, session_id: Optional[str]
+    ) -> Optional[str]:
+        """`session_id` if it is a real `user_sessions` row, else None.
+
+        Checked rather than assumed because the value reaching here may be a
+        visitor id from the cart or the storefront, which is not a session key.
+        A missing row must degrade to NULL, never abort the insert — the
+        attribution is the thing worth keeping.
+        """
+        if not session_id:
+            return None
+
+        exists = (
+            await session.execute(
+                select(UserSession.id).where(UserSession.id == str(session_id))
+            )
+        ).scalar_one_or_none()
+
+        if exists is None:
+            logger.debug(
+                f"Session {session_id} is not a user_sessions row — storing the "
+                f"attribution without a session link"
+            )
+            return None
+        return str(exists)
+
+    @staticmethod
+    async def _clear_attribution_debt(
+        session: AsyncSession, result: AttributionResult
+    ) -> None:
+        """Mark the order as no longer owing an attribution.
+
+        Committed in the same transaction as the attribution row, so the two can
+        never disagree: an order is 'done' exactly when its attribution exists.
+        Doing it afterwards in a separate commit would leave a crash window
+        where the attribution is stored but the order still reads 'pending', and
+        the reconciler would keep republishing it.
+
+        Only clears 'pending'. A row already 'done' stays as it is, and one
+        dead-lettered as 'failed' is left for a human to look at rather than
+        being quietly tidied away.
+        """
+        await session.execute(
+            update(OrderData)
+            .where(
+                and_(
+                    OrderData.shop_id == result.shop_id,
+                    OrderData.order_id == str(result.order_id),
+                    OrderData.attribution_state == "pending",
+                )
+            )
+            .values(attribution_state="done", attribution_last_error=None)
+        )

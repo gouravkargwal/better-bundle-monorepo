@@ -22,6 +22,8 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Header
 
@@ -35,6 +37,7 @@ from app.recommandations.enrichment import ProductEnrichment
 from app.recommandations.exclusion_service import ProductExclusionService
 from app.recommandations.models import RecommendationRequest, RecommendationResponse
 from app.recommandations.shop_lookup_service import ShopLookupService
+from app.recommandations.traffic import is_bot
 from app.recommandations.client_id_resolver import ClientIdResolver
 from app.services.holdout_service import HoldoutService
 from app.shared.helpers import now_utc
@@ -77,9 +80,9 @@ RETURN_LIMIT = {
     # offer. The extension asks for 1; this is the ceiling if it ever asks for
     # more.
     "mercury": 2,
-    "apollo": 1,      # post-purchase interstitial shows a single offer
+    "apollo": 1,  # post-purchase interstitial shows a single offer
     "thank_you": 3,
-    "phoenix": 4,     # a storefront carousel has room
+    "phoenix": 4,  # a storefront carousel has room
     "venus": 2,
 }
 
@@ -120,9 +123,21 @@ services = RecommendationServices(
 
 
 async def fetch_recommendations_logic(
-    request: RecommendationRequest, services: RecommendationServices
+    request: RecommendationRequest,
+    services: RecommendationServices,
+    user_agent: Optional[str] = None,
 ) -> dict:
     """Resolve shop -> bucket holdout -> read edges -> enrich -> log impressions."""
+
+    # Traffic that gets recommendations but is not a shopper seeing an offer.
+    # `preview` is declared by the storefront (theme editor or preview link);
+    # the bot check is server-side because a crawler will not volunteer it.
+    if request.preview:
+        skip_recording, skip_reason = True, "theme_preview"
+    elif is_bot(user_agent):
+        skip_recording, skip_reason = True, "bot"
+    else:
+        skip_recording, skip_reason = False, None
 
     # 1. Resolve and validate the shop
     shop_domain = request.shop_domain
@@ -177,13 +192,30 @@ async def fetch_recommendations_logic(
     # billed on.
     is_bucketable = bool(request.user_id or request.session_id)
     impression_group_id = str(uuid.uuid4())
-    holdout_pct = HoldoutService.get_holdout_percent(shop)
+    holdout_pct = HoldoutService.get_holdout_percent(shop, surface)
     if HoldoutService.is_held_out(
         shop_id=shop.id,
         customer_id=request.user_id,
         session_id=request.session_id,
         holdout_percent=holdout_pct,
     ):
+        # A bot or a theme preview that lands in the control bucket must not be
+        # logged either: control sessions are the counterfactual the billed lift
+        # is measured against, so padding them understates the app's effect just
+        # as recording fake impressions overstates the denominator.
+        if skip_recording:
+            logger.info(
+                f"👻 Held-out {skip_reason} not recorded as control | surface={surface}"
+            )
+            return {
+                "recommendations": [],
+                "count": 0,
+                "source": "holdout_control",
+                "context": request.context,
+                "timestamp": now_utc(),
+                "holdout": {"is_control": True, "holdout_percent": holdout_pct},
+            }
+
         task = asyncio.create_task(
             HoldoutService.log_control_session(
                 shop_id=shop.id,
@@ -198,9 +230,11 @@ async def fetch_recommendations_logic(
             )
         )
         task.add_done_callback(
-            lambda t: logger.error(f"Control session logging failed: {t.exception()}")
-            if t.exception()
-            else None
+            lambda t: (
+                logger.error(f"Control session logging failed: {t.exception()}")
+                if t.exception()
+                else None
+            )
         )
         return {
             "recommendations": [],
@@ -227,9 +261,7 @@ async def fetch_recommendations_logic(
         return _empty(request, "no_context_products")
 
     context_value = float(
-        request.metadata.get("cart_value")
-        or request.metadata.get("order_value")
-        or 0.0
+        request.metadata.get("cart_value") or request.metadata.get("order_value") or 0.0
     )
     limit = request.limit or RETURN_LIMIT.get(surface, 3)
 
@@ -269,7 +301,33 @@ async def fetch_recommendations_logic(
         except Exception as e:
             logger.warning(f"⚠️ Failed to get exclusions for {effective_user_id}: {e}")
 
+    # Offers this shopper has already answered. Without this the same product
+    # comes back after an explicit decline — we recorded the refusal and then
+    # recommended it seven more times.
+    try:
+        async with get_transaction_context() as session:
+            answered = await services.exclusion.get_impression_exclusions(
+                session=session,
+                shop_id=shop.id,
+                customer_id=effective_user_id,
+                session_id=request.session_id,
+            )
+        exclude_items.extend(answered)
+        if answered:
+            logger.info(
+                f"🚫 {len(answered)} already-answered offers excluded on {surface}"
+            )
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to get impression exclusions: {e}")
+
+    exclude_items = list(dict.fromkeys(exclude_items))
+
     # 6. Cache
+    #
+    # exclude_items is part of the key. It was omitted, so two shoppers with the
+    # same cart and no resolvable user id shared one cache entry — which would
+    # have served each of them the other's excluded offers and quietly undone
+    # every exclusion above.
     cache_key = services.cache.generate_cache_key(
         shop_id=shop.id,
         context=request.context,
@@ -277,10 +335,9 @@ async def fetch_recommendations_logic(
         user_id=effective_user_id,
         category=None,
         limit=limit,
+        exclude_items=exclude_items,
     )
-    cached = await services.cache.get_cached_recommendations(
-        cache_key, request.context
-    )
+    cached = await services.cache.get_cached_recommendations(cache_key, request.context)
     if cached:
         logger.info(f"⚡ Cache hit | context={request.context}")
         return {
@@ -304,9 +361,11 @@ async def fetch_recommendations_logic(
     if not candidates:
         return _empty(request, "no_edges", holdout_pct)
 
-    source = "edges_observed" if any(
-        c["source"] == "observed" for c in candidates
-    ) else "edges_prior"
+    source = (
+        "edges_observed"
+        if any(c["source"] == "observed" for c in candidates)
+        else "edges_prior"
+    )
 
     # 8. Hydrate with product detail, drop anything unavailable
     enriched = await services.enrichment.enrich_items(
@@ -325,7 +384,24 @@ async def fetch_recommendations_logic(
 
     # 9. Impressions. Written before the response so the extension always has an
     # impression_id to report an outcome against.
-    for idx, item in enumerate(final_items):
+    #
+    # Not written for a theme preview or a bot. Both still get real
+    # recommendations — a merchant previewing their theme wants to see the
+    # widget work, and a crawler should render a normal page — but neither is a
+    # shopper being shown an offer. Recording them inflates the "offers shown"
+    # denominator with impressions no human saw, which drags down the very
+    # conversion rate the merchant is billed against.
+    #
+    # Guarded here rather than in each extension because every surface routes
+    # through this function, so one check covers phoenix, mercury, apollo and
+    # venus at once.
+    if skip_recording:
+        logger.info(
+            f"👻 Serving {len(final_items)} recommendations without impressions "
+            f"| reason={skip_reason} | surface={surface}"
+        )
+
+    for idx, item in enumerate([] if skip_recording else final_items):
         iid = await HoldoutService.log_impression(
             shop_id=shop.id,
             surface=surface,
@@ -351,6 +427,7 @@ async def fetch_recommendations_logic(
         )
         if iid:
             item["impression_id"] = iid
+            item["url"] = _tag_url(item.get("url"), iid, item.get("id"))
 
     response_data = {
         "recommendations": final_items,
@@ -377,9 +454,11 @@ async def fetch_recommendations_logic(
         )
     )
     analytics_task.add_done_callback(
-        lambda t: logger.error(f"Analytics logging failed: {t.exception()}")
-        if t.exception()
-        else None
+        lambda t: (
+            logger.error(f"Analytics logging failed: {t.exception()}")
+            if t.exception()
+            else None
+        )
     )
 
     return {
@@ -405,6 +484,62 @@ async def _resolve_user(request: RecommendationRequest, shop_id: str):
     return None
 
 
+# Query parameter carrying the impression a click came from.
+#
+# This is the only thing that survives a navigation out of an extension's
+# sandbox. When a shopper follows a recommendation to the product's own page,
+# they add it there with the *theme's* button — an add this app never observes,
+# so no impression id can be stamped on the cart line. The parameter hands that
+# id to Phoenix on arrival, which is what lets the click be joined to the
+# eventual order.
+#
+# Deliberately an opaque impression UUID and nothing else. URLs get logged by
+# proxies, pasted into chats and indexed by crawlers, so a customer id or email
+# here would leak; a UUID that means nothing outside our own tables does not.
+IMPRESSION_QUERY_PARAM = "_bb_imp"
+
+# The product the impression was recommending, carried alongside it.
+#
+# Phoenix pairs the two on the cart so the eventual order can be checked against
+# what was actually recommended. Without it a shopper who followed five
+# recommendations and bought two would have all five credited — the claim has to
+# name a product for the order to be able to refute it.
+PRODUCT_QUERY_PARAM = "_bb_pid"
+
+
+def _tag_url(
+    url: Optional[str], impression_id: str, product_id: Optional[str] = None
+) -> Optional[str]:
+    """Append the impression id to a product URL, preserving existing params.
+
+    Built with urlencode rather than string concatenation so a handle that
+    already carries a query string or fragment survives intact — `?variant=123`
+    is common on these links and a naive `+ "?_bb_imp="` would corrupt it.
+    """
+    if not url:
+        return url
+
+    try:
+        parts = urlsplit(url)
+        query = parse_qsl(parts.query, keep_blank_values=True)
+        # Never duplicate the parameters if a URL somehow already carries them.
+        query = [
+            (k, v)
+            for k, v in query
+            if k not in (IMPRESSION_QUERY_PARAM, PRODUCT_QUERY_PARAM)
+        ]
+        query.append((IMPRESSION_QUERY_PARAM, str(impression_id)))
+        if product_id:
+            query.append((PRODUCT_QUERY_PARAM, str(product_id)))
+        return urlunsplit(
+            (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+        )
+    except Exception as e:
+        # A malformed URL must not cost the shopper their recommendation.
+        logger.warning(f"⚠️ Could not tag url {url!r}: {e}")
+        return url
+
+
 def _empty(request: RecommendationRequest, reason: str, holdout_pct: int = 0) -> dict:
     return {
         "recommendations": [],
@@ -418,7 +553,9 @@ def _empty(request: RecommendationRequest, reason: str, holdout_pct: int = 0) ->
 
 @router.post("/", response_model=RecommendationResponse)
 async def get_recommendations(
-    request: RecommendationRequest, authorization: str = Header(None)
+    request: RecommendationRequest,
+    authorization: str = Header(None),
+    user_agent: str = Header(None),
 ):
     """Context-aware recommendations, served from precomputed edges."""
     start = time.time()
@@ -433,7 +570,9 @@ async def get_recommendations(
                 },
             )
 
-        result_data = await fetch_recommendations_logic(request, services)
+        result_data = await fetch_recommendations_logic(
+            request, services, user_agent=user_agent
+        )
 
         duration = time.time() - start
         labels = {
