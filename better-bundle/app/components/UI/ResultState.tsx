@@ -60,8 +60,8 @@ export function ResultState({
     case "significant":
       headline = money(result.incrementalRevenue);
       body =
-        `Shoppers who saw recommendations spent ${pct(result.conversionLiftRel)} more ` +
-        `than the ${holdoutPercent}% who saw none. Over ${window} that's money you ` +
+        `Shoppers who saw personalised recommendations spent ${pct(result.conversionLiftRel)} more ` +
+        `than the ${holdoutPercent}% who saw generic ones. Over ${window} that's money you ` +
         `wouldn't otherwise have made. We're 95% confident the real figure sits ` +
         `between ${money(result.incrementalRevenueLower)} and ` +
         `${money(result.incrementalRevenueUpper)}.`;
@@ -72,8 +72,8 @@ export function ResultState({
       // A point estimate, as a percentage. Deliberately no currency: an
       // interval that straddles zero is not a revenue figure.
       body =
-        `Shoppers who saw recommendations spent about the same as those who ` +
-        `did not. The ${pct(result.conversionLiftRel)} difference observed so far is ` +
+        `Shoppers who saw personalised recommendations spent about the same as those who ` +
+        `saw generic ones. The ${pct(result.conversionLiftRel)} difference observed so far is ` +
         `within normal week-to-week variation, so we are not reporting it as a ` +
         `lift. Adding placements increases the volume needed to settle it.`;
       action = { label: "Add another placement", url: "/app/extensions" };
@@ -82,7 +82,7 @@ export function ResultState({
     case "insufficient_data":
       body =
         `Not enough data yet. To confirm recommendations caused a sale we ` +
-        `compare against the shoppers who were shown none, which needs about ` +
+        `compare against the shoppers who were shown generic recommendations, which needs about ` +
         `${result.minControlOrders} orders from that group. You have ` +
         `${result.controlConverters}. This does not affect your bill — ` +
         `attributed revenue is tracked and charged as normal.`;
@@ -90,19 +90,16 @@ export function ResultState({
 
     case "not_measurable":
       body =
-        `Every shopper sees these placements by design — withholding an offer ` +
-        `at the payment step would cost you real sales — so there is no control ` +
-        `group here to compare against. Product pages, post-purchase and ` +
-        `customer account can all be measured.`;
-      action = { label: "Add a measurable placement", url: "/app/extensions" };
+        `This placement currently has no control group, so its incrementality cannot be measured. ` +
+        `Your attributed revenue is tracked and billed as normal.`;
       break;
 
     case "holdout_disabled":
       body =
         `The ${holdoutPercent}% control group is switched off, so every shopper is ` +
-        `seeing recommendations and there's no baseline left to compare them to. ` +
+        `seeing personalised recommendations and there's no baseline left to compare them to. ` +
         `Your billing carries on unaffected — but while it's off, we can't show ` +
-        `you what recommendations are actually adding.`;
+        `you what personalised recommendations are actually adding.`;
       action = { label: "Turn the control group back on", url: "/app/settings" };
       break;
 

@@ -1,7 +1,7 @@
 """
 Holdout Service for Incrementality Testing
 
-Determines whether a session should be held out (no offer shown) and logs
+Determines whether a session should be held out (shown a baseline offer) and logs
 impressions/outcomes to the offer_impressions table.
 """
 
@@ -20,27 +20,15 @@ logger = get_logger(__name__)
 
 # Default holdout percentage
 INITIAL_HOLDOUT_PERCENT = 10  # 10% initially
-SENTINEL_HOLDOUT_PERCENT = 2   # 2% after significance reached
 MIN_CONTROL_ORDERS = 100       # minimum control orders before reporting
 P_VALUE_THRESHOLD = 0.05       # significance threshold
 
 # Per-surface overrides. A surface absent here uses INITIAL_HOLDOUT_PERCENT.
-#
-# Checkout and thank-you are held at 0 deliberately, not by oversight. They only
-# became bucketable at all once the `_bb_session` cart attribute gave them a
-# stable identity, and that arrived long before they had the traffic to measure.
-# A 10% holdout across 21 impressions is about two control sessions — no
-# statistical signal whatsoever — bought by withholding offers from shoppers who
-# were already at the payment step. That is the worst possible trade: real
-# forgone revenue for noise.
-#
-# The capability is in place; only the number is off. Raise these once the
-# surface is doing enough volume to clear MIN_CONTROL_ORDERS in reasonable time,
-# and the experiment starts with no further code change.
-SURFACE_HOLDOUT_PERCENT = {
-    "mercury": 0,
-    "thank_you": 0,
-}
+# All surfaces run at the default holdout percent. Because we serve a non-personalized
+# baseline widget to control shoppers rather than withholding the widget entirely, there
+# is no revenue cost to holding out checkout or thank-you surfaces. If the baseline-swap
+# is ever reverted, these must be pinned back to 0.
+SURFACE_HOLDOUT_PERCENT = {}
 
 
 class HoldoutService:
@@ -55,8 +43,7 @@ class HoldoutService:
         The merchant's own switch wins over everything: `holdout_disabled` means
         no shopper is ever withheld an offer, on any surface.
 
-        Otherwise a surface may set its own rate — see SURFACE_HOLDOUT_PERCENT
-        for why checkout and thank-you are currently zero. Surfaces not listed
+        Otherwise a surface may set its own rate. Surfaces not listed
         get the shop-wide default.
 
         `surface` is optional so existing callers keep working; passing None

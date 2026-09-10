@@ -369,7 +369,7 @@ function MeasurementTab({
               <Text as="p" variant="bodyMd" fontWeight="medium">
                 {holdoutDisabled
                   ? "Holdout is off — impact is estimated, not measured against a control."
-                  : "Control group active — revenue is measured against shoppers who saw no recommendations."}
+                  : "Control group active — revenue is measured against shoppers who saw generic recommendations."}
               </Text>
               <Badge tone={holdoutDisabled ? "attention" : "success"}>
                 {holdoutDisabled ? "Off" : "Active"}

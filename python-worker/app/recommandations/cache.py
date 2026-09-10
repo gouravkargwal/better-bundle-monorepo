@@ -45,21 +45,10 @@ class RecommendationCacheService:
         category: Optional[str] = None,
         limit: int = 6,
         exclude_items: Optional[List[str]] = None,
+        is_control: bool = False,
     ) -> str:
         """
         Generate a unique cache key for recommendations
-
-        Args:
-            shop_id: Shop ID
-            context: Recommendation context
-            product_id: Product ID
-            user_id: User ID
-            session_id: Session ID
-            category: Category filter
-            limit: Number of recommendations
-
-        Returns:
-            Cache key string
         """
         # Create a deterministic key based on all parameters
         product_ids_str = ",".join(sorted(product_ids)) if product_ids else ""
@@ -74,6 +63,7 @@ class RecommendationCacheService:
             str(category or ""),
             str(limit),
             exclude_items_str,  # Include cart contents in cache key
+            str(is_control),
         ]
 
         # Join and hash to create a consistent key

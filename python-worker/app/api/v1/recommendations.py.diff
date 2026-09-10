@@ -1,0 +1,64 @@
+--- python-worker/app/api/v1/recommendations.py
++++ python-worker/app/api/v1/recommendations.py
+@@ -194,22 +194,5 @@
+     holdout_pct = HoldoutService.get_holdout_percent(shop, surface)
+-    if HoldoutService.is_held_out(
+-        shop_id=shop.id,
+-        customer_id=request.user_id,
+-        session_id=request.session_id,
+-        holdout_percent=holdout_pct,
+-        surface=surface,
+-    ):
+-        # A bot or a theme preview that lands in the control bucket must not be
+-        # logged either: control sessions are the counterfactual the billed lift
+-        # is measured against, so padding them understates the app's effect just
+-        # as recording fake impressions overstates the denominator.
+-        if skip_recording:
+-            logger.info(
+-                f"👻 Held-out {skip_reason} not recorded as control | surface={surface}"
+-            )
+-            return {
+-                "recommendations": [],
+-                "count": 0,
+-                "source": "holdout_control",
+-                "context": request.context,
+-                "timestamp": now_utc(),
+-                "holdout": {"is_control": True, "holdout_percent": holdout_pct},
+-            }
+-
+-        task = asyncio.create_task(
+-            HoldoutService.log_control_session(
+-                shop_id=shop.id,
+-                surface=surface,
+-                session_id=request.session_id,
+-                customer_id=request.user_id,
+-                metadata={
+-                    "context": request.context,
+-                    "impression_group_id": impression_group_id,
+-                },
+-                impression_group_id=impression_group_id,
+-            )
+-        )
+-        task.add_done_callback(
+-            lambda t: (
+-                logger.error(f"Control session logging failed: {t.exception()}")
+-                if t.exception()
+-                else None
+-            )
+-        )
+-        return {
+-            "recommendations": [],
+-            "count": 0,
+-            "source": "holdout_control",
+-            "context": request.context,
+-            "timestamp": now_utc(),
+-            "holdout": {"is_control": True, "holdout_percent": holdout_pct},
+-        }
++    is_control = HoldoutService.is_held_out(
++        shop_id=shop.id,
++        customer_id=request.user_id,
++        session_id=request.session_id,
++        holdout_percent=holdout_pct,
++        surface=surface,
++    )
+ 

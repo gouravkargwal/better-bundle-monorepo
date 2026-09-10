@@ -139,7 +139,7 @@ they already believe in the category. Our wedge is the billing model, not the id
 This is the strongest angle by a wide margin.
 
 ```
-site:*.myshopify.com "you may also like" "add to cart"
+inurl:/collections/ "you may also like" "add to cart"
 "frequently bought together" shop -amazon -ebay
 "complete the look" OR "pairs well with" online store
 "customers also bought" store collections
@@ -153,7 +153,7 @@ Big catalogs mean genuine co-purchase structure sitting unused in their orders.
 
 ```
 "shop by brand" online store -amazon
-site:*.myshopify.com "shop all" collections "brands"
+inurl:/collections/ "shop all" "brands"
 "authorized dealer" online store "thousands of products"
 "accessories" AND "shop by category" store
 ```
@@ -340,8 +340,35 @@ Whatever you write here is what the merchant reads.
 
 ### Step 8 — APPEND row to prospects.csv
 
-Create with header if missing. Dedupe by lowercased email. Quote fields containing
-commas/newlines.
+Do NOT use bash to append rows, as email bodies containing commas, quotes, and newlines will corrupt the CSV. Use this exact Python snippet to safely append the row to `prospects.csv`. Dedupe by lowercased email.
+
+```python
+import csv
+import os
+
+row = {
+    "company": company_name,
+    "domain": domain,
+    "contact_name": contact_name,
+    "person_title": title,
+    "email": email.lower(),
+    "email_type": "personal",
+    "email_confidence": confidence,
+    "email_method": method,
+    "website_info": info,
+    "niche": angle,
+    "subject": subject,
+    "body": body
+}
+file_path = "outreach/prospects.csv"
+file_exists = os.path.isfile(file_path)
+
+with open(file_path, "a", newline="") as f:
+    writer = csv.DictWriter(f, fieldnames=row.keys())
+    if not file_exists:
+        writer.writeheader()
+    writer.writerow(row)
+```
 
 ### Step 9 — UPDATE PROCESSED LOG (adds AND skips)
 
@@ -403,8 +430,9 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 
 **Shorter wins.** The best-performing email on record was 3 sentences / 58 words.
 **Aim for 50–80 words.** 110 is a hard maximum, not a target.
+**The body MUST be exactly 3 or 4 sentences total.** (The mailing engine splits sentences into single-line paragraphs, so run-on paragraphs will break formatting.)
 
-**Mandatory cut pass.** After drafting, count the words. Then delete in this order
+**Mandatory cut pass.** After drafting, count the words and sentences. Then delete in this order
 until under 80, and do not stop early because it "reads fine" — it read fine at 110
 too:
 
@@ -462,12 +490,13 @@ offer into one "line" and is why bodies drifted to 110 words.
 ### The concrete-pairing test (do this before writing beat 1)
 
 Name **one real pairing from their actual catalog**, using their own product
-vocabulary: "the tank someone reaches for after a nursing bra." Not "products that
-sell together." A merchant can verify a named pairing against their gut in under a
+vocabulary. To avoid bizarre hallucinations, explicitly look for: **One primary/expensive item + one complementary cheap accessory or consumable** (e.g., "the filters someone reaches for after buying an Espresso Machine", NOT two different Coffee Machines).
+
+A merchant can verify a named pairing against their gut in under a
 second, and that verification is what makes the rest of the email credible.
 
 Pull the two product names from their collection pages. If you cannot name a
-plausible pairing from their catalog, the hook is too generic — reach for a
+plausible main + accessory pairing from their catalog, the hook is too generic — reach for a
 different fact or skip the prospect.
 
 **One pairing, not three.** A list reads as a demo; a single example reads as
@@ -525,9 +554,10 @@ someone who looked.
 - **Shopify confirmed by fetch, not by appearance.**
 - **40+ products AND ≥1 volume signal.** Unverifiable → skip.
 - **Subject contains a specific fact.** Generic subjects fail.
-- **Body names one concrete pairing** in the merchant's own product vocabulary. A
+- **Body names one concrete pairing** (main item + accessory/consumable) in the merchant's own product vocabulary. A
   body that only says "products that sell together" fails the gate — rewrite it.
 - **Body ≤80 words** after the cut pass. 110 is the hard ceiling, not the target.
+- **Body is EXACTLY 3 or 4 sentences total.** No run-on paragraphs.
 - **No pre-install deliverable promised.** Any occurrence of "report", "audit",
   "teardown", "what it finds" or "no install" in a body is a fail.
 - **ZERO fabricated facts. ZERO rate/price figures. ZERO claims about their checkout

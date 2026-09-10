@@ -1,12 +1,4 @@
 """Per-surface holdout rates.
-
-A holdout costs the merchant real revenue: a held-out shopper is deliberately
-shown no offer. That price is worth paying only when the resulting control group
-is large enough to measure something. Checkout and thank-you became bucketable
-before they had that volume, so their rate is pinned at zero until they do.
-
-These tests exist to stop the zero being "fixed" by accident, and to keep the
-merchant's own kill switch absolute.
 """
 
 from dataclasses import dataclass
@@ -30,17 +22,10 @@ def test_merchant_switch_overrides_every_surface():
         assert HoldoutService.get_holdout_percent(shop, surface) == 0
 
 
-def test_checkout_and_thank_you_are_not_held_out_yet():
-    """Withholding offers at the payment step buys ~2 control sessions today."""
+def test_every_surface_uses_shop_default():
+    """All surfaces use the shop default holdout percent initially."""
     shop = FakeShop()
-    assert HoldoutService.get_holdout_percent(shop, "mercury") == 0
-    assert HoldoutService.get_holdout_percent(shop, "thank_you") == 0
-
-
-def test_other_surfaces_keep_the_shop_default():
-    """Phoenix is already collecting a usable control group; don't disturb it."""
-    shop = FakeShop()
-    for surface in ("phoenix", "apollo", "venus"):
+    for surface in ("phoenix", "apollo", "venus", "mercury", "thank_you"):
         assert (
             HoldoutService.get_holdout_percent(shop, surface)
             == INITIAL_HOLDOUT_PERCENT

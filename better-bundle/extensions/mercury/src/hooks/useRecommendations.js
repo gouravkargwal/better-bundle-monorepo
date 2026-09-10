@@ -145,14 +145,6 @@ export function useRecommendations({
         });
 
         if (response.success && response.recommendations) {
-          // Check holdout — control group gets empty recommendations without error
-          if (response.holdout?.is_control === true) {
-            setProducts([]);
-            hasFetchedRecommendations.current = true;
-            setLoading(false);
-            return;
-          }
-
           // Transform API response to component format
           const transformedProducts = response.recommendations.map(
             (rec) => ({

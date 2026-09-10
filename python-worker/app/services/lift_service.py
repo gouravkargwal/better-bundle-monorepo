@@ -116,7 +116,7 @@ def partition_shoppers(rows: Iterable[ShopperRow]) -> Arms:
     it should need nothing but a list of dataclasses.
 
     The unit is the **shopper**, not the impression. `is_held_out` buckets on
-    `md5(shop_id:identity)`, so the unit of analysis has to match the unit of
+    `md5(shop_id:surface:identity)`, so the unit of analysis has to match the unit of
     randomisation. Impression-level analysis is wrong twice over: treatment
     shoppers accumulate one row per offer while control shoppers are logged once
     per request, so the denominators aren't comparable; and attaching an order's

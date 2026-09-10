@@ -283,21 +283,22 @@ def test_aov_is_reported_but_never_as_a_lift():
 # ---------------------------------------------------------------------------
 
 
-def test_zero_holdout_surfaces_are_not_measurable():
+def test_all_surfaces_are_measurable_by_default():
     measurable, not_measurable = eligible_surfaces(FakeShop())
 
-    assert "mercury" in not_measurable
-    assert "thank_you" in not_measurable
+    assert not_measurable == []
+    assert "mercury" in measurable
+    assert "thank_you" in measurable
     assert "phoenix" in measurable
     assert "apollo" in measurable
     assert "venus" in measurable
 
 
-def test_a_single_zero_holdout_surface_is_not_measurable():
+def test_a_single_requested_surface_is_measurable():
     measurable, not_measurable = eligible_surfaces(FakeShop(), surface="mercury")
 
-    assert measurable == []
-    assert not_measurable == ["mercury"]
+    assert measurable == ["mercury"]
+    assert not_measurable == []
 
 
 def test_an_eligible_surface_is_measurable_even_with_no_data_yet():

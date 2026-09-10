@@ -13,7 +13,7 @@ of which had a storefront extension that could render the result. Those branches
 are gone along with the services behind them.
 
 The holdout and impression logic is unchanged and load-bearing: a held-out
-shopper is shown nothing and recorded as control, and every offer shown writes
+shopper is shown generic recommendations and recorded as control, and every offer shown writes
 an impression row whose id goes back to the extension for the outcome callback.
 That is what makes attributed revenue measurable rather than asserted.
 """
@@ -193,58 +193,13 @@ async def fetch_recommendations_logic(
     is_bucketable = bool(request.user_id or request.session_id)
     impression_group_id = str(uuid.uuid4())
     holdout_pct = HoldoutService.get_holdout_percent(shop, surface)
-    if HoldoutService.is_held_out(
+    is_control = HoldoutService.is_held_out(
         shop_id=shop.id,
         customer_id=request.user_id,
         session_id=request.session_id,
         holdout_percent=holdout_pct,
         surface=surface,
-    ):
-        # A bot or a theme preview that lands in the control bucket must not be
-        # logged either: control sessions are the counterfactual the billed lift
-        # is measured against, so padding them understates the app's effect just
-        # as recording fake impressions overstates the denominator.
-        if skip_recording:
-            logger.info(
-                f"👻 Held-out {skip_reason} not recorded as control | surface={surface}"
-            )
-            return {
-                "recommendations": [],
-                "count": 0,
-                "source": "holdout_control",
-                "context": request.context,
-                "timestamp": now_utc(),
-                "holdout": {"is_control": True, "holdout_percent": holdout_pct},
-            }
-
-        task = asyncio.create_task(
-            HoldoutService.log_control_session(
-                shop_id=shop.id,
-                surface=surface,
-                session_id=request.session_id,
-                customer_id=request.user_id,
-                metadata={
-                    "context": request.context,
-                    "impression_group_id": impression_group_id,
-                },
-                impression_group_id=impression_group_id,
-            )
-        )
-        task.add_done_callback(
-            lambda t: (
-                logger.error(f"Control session logging failed: {t.exception()}")
-                if t.exception()
-                else None
-            )
-        )
-        return {
-            "recommendations": [],
-            "count": 0,
-            "source": "holdout_control",
-            "context": request.context,
-            "timestamp": now_utc(),
-            "holdout": {"is_control": True, "holdout_percent": holdout_pct},
-        }
+    )
 
     # 4. The shopper's context products: cart contents at checkout, purchased
     # items post-purchase. Without them there is nothing to key an edge lookup on.
@@ -337,6 +292,7 @@ async def fetch_recommendations_logic(
         category=None,
         limit=limit,
         exclude_items=exclude_items,
+        is_control=is_control,
     )
     cached = await services.cache.get_cached_recommendations(cache_key, request.context)
     if cached:
@@ -347,11 +303,15 @@ async def fetch_recommendations_logic(
             "source": cached.get("source", "cache"),
             "context": request.context,
             "timestamp": now_utc(),
-            "holdout": {"is_control": False, "holdout_percent": holdout_pct},
+            "holdout": {"is_control": is_control, "holdout_percent": holdout_pct},
         }
 
     # 7. The lookup itself
-    candidates = await services.edges.recommend(
+    # We must fetch context-specific candidates for everyone to ensure the
+    # experiment arms remain perfectly comparable. If we only fetched baseline for 
+    # control, treatment would drop out on `no_edges` far more often than control
+    # drops out on `baseline_empty`, heavily skewing the populations.
+    context_candidates = await services.edges.recommend(
         shop_id=shop.id,
         context_product_ids=context_ids,
         surface=surface,
@@ -359,14 +319,27 @@ async def fetch_recommendations_logic(
         limit=limit,
         exclude_product_ids=exclude_items,
     )
-    if not candidates:
-        return _empty(request, "no_edges", holdout_pct)
+    if not context_candidates:
+        return _empty(request, "no_edges", holdout_pct, is_control=is_control)
 
-    source = (
-        "edges_observed"
-        if any(c["source"] == "observed" for c in candidates)
-        else "edges_prior"
-    )
+    if is_control:
+        candidates = await services.edges.recommend_baseline(
+            shop_id=shop.id,
+            surface=surface,
+            context_value=context_value,
+            limit=limit,
+            exclude_product_ids=exclude_items,
+        )
+        if not candidates:
+            return _empty(request, "baseline_empty", holdout_pct, is_control=is_control)
+        source = "baseline_control"
+    else:
+        candidates = context_candidates
+        source = (
+            "edges_observed"
+            if candidates and any(c.get("source") == "observed" for c in candidates)
+            else "edges_prior"
+        )
 
     # 8. Hydrate with product detail, drop anything unavailable
     enriched = await services.enrichment.enrich_items(
@@ -381,7 +354,7 @@ async def fetch_recommendations_logic(
         f"| source={source}"
     )
     if not final_items:
-        return _empty(request, "all_unavailable", holdout_pct)
+        return _empty(request, "all_unavailable", holdout_pct, is_control=is_control)
 
     # 9. Impressions. Written before the response so the extension always has an
     # impression_id to report an outcome against.
@@ -407,7 +380,7 @@ async def fetch_recommendations_logic(
             shop_id=shop.id,
             surface=surface,
             offer_type="upsell" if surface == "apollo" else "cross_sell",
-            is_control=False,
+            is_control=is_control,
             session_id=request.session_id,
             customer_id=request.user_id,
             offer_id=str(item.get("id", "")),
@@ -468,7 +441,7 @@ async def fetch_recommendations_logic(
         "source": source,
         "context": request.context,
         "timestamp": now_utc(),
-        "holdout": {"is_control": False, "holdout_percent": holdout_pct},
+        "holdout": {"is_control": is_control, "holdout_percent": holdout_pct},
     }
 
 
@@ -541,14 +514,16 @@ def _tag_url(
         return url
 
 
-def _empty(request: RecommendationRequest, reason: str, holdout_pct: int = 0) -> dict:
+def _empty(
+    request: RecommendationRequest, reason: str, holdout_pct: int = 0, is_control: bool = False
+) -> dict:
     return {
         "recommendations": [],
         "count": 0,
         "source": reason,
         "context": request.context,
         "timestamp": now_utc(),
-        "holdout": {"is_control": False, "holdout_percent": holdout_pct},
+        "holdout": {"is_control": is_control, "holdout_percent": holdout_pct},
     }
 
 

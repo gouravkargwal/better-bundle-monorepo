@@ -1,0 +1,29 @@
+--- python-worker/app/recommandations/edges/serving.py
++++ python-worker/app/recommandations/edges/serving.py
+@@ -93,2 +93,27 @@
+ 
++_BASELINE_SQL = text(
++    """
++    SELECT pd.product_id,
++           MAX(pe.edge_type) AS edge_type,
++           MAX(pe.blended_score) AS blended_score,
++           SUM(pe.observed_count) AS observed_count,
++           pd.title,
++           pd.price,
++           pd.product_type,
++           pd.total_inventory
++    FROM product_edges pe
++    JOIN product_data pd
++      ON pd.shop_id = pe.shop_id AND pd.product_id = pe.target_product_id
++    WHERE pe.shop_id = :shop_id
++      AND pe.edge_type = ANY(:edge_types)
++      AND pd.is_active = true
++      AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
++      AND NOT (pe.target_product_id = ANY(:exclude_ids))
++    GROUP BY pd.product_id, pd.title, pd.price, pd.product_type, pd.total_inventory
++    ORDER BY SUM(pe.blended_score) DESC
++    LIMIT :candidate_limit
++    """
++)
++
+ def price_ceiling(surface: str, context_value: float) -> Optional[float]:

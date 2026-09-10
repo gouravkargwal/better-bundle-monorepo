@@ -12,20 +12,56 @@ automatically_update_urls_on_dev = true
 api_version = "2026-07"
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/orders/paid"
-  topics = [ "orders/paid" ]
+  uri = "/webhooks/products/update"
+  topics = [ "products/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/inventory_levels/update"
+  topics = [ "inventory_levels/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/orders/updated"
+  topics = [ "orders/updated" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/products/create"
   topics = [ "products/create" ]
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks/collections/create"
+  topics = [ "collections/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/collections/delete"
   topics = [ "collections/delete" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/billing/approaching_cap"
-  topics = [ "app_subscriptions/approaching_capped_amount" ]
+  uri = "/webhooks/orders/paid"
+  topics = [ "orders/paid" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/refunds/create"
+  topics = [ "refunds/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/update"
+  topics = [ "customers/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/create"
+  topics = [ "customers/create" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/collections/update"
+  topics = [ "collections/update" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/billing/subscription_update"
+  topics = [ "app_subscriptions/update" ]
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/products/delete"
@@ -36,44 +72,8 @@ api_version = "2026-07"
   topics = [ "app/scopes_update" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/billing/subscription_update"
-  topics = [ "app_subscriptions/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/customers/create"
-  topics = [ "customers/create" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/collections/create"
-  topics = [ "collections/create" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/orders/updated"
-  topics = [ "orders/updated" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/collections/update"
-  topics = [ "collections/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/products/update"
-  topics = [ "products/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/customers/update"
-  topics = [ "customers/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/inventory_levels/update"
-  topics = [ "inventory_levels/update" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/app/uninstalled"
-  topics = [ "app/uninstalled" ]
-
-  [[webhooks.subscriptions]]
-  uri = "/webhooks/refunds/create"
-  topics = [ "refunds/create" ]
+  uri = "/webhooks/billing/approaching_cap"
+  topics = [ "app_subscriptions/approaching_capped_amount" ]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes

@@ -92,6 +92,30 @@ _CANDIDATES_SQL = text(
     """
 )
 
+_BASELINE_SQL = text(
+    """
+    SELECT pd.product_id,
+           MAX(pe.edge_type) AS edge_type,
+           MAX(pe.blended_score) AS blended_score,
+           SUM(pe.observed_count) AS observed_count,
+           pd.title,
+           pd.price,
+           pd.product_type,
+           pd.total_inventory
+    FROM product_edges pe
+    JOIN product_data pd
+      ON pd.shop_id = pe.shop_id AND pd.product_id = pe.target_product_id
+    WHERE pe.shop_id = :shop_id
+      AND pe.edge_type = ANY(:edge_types)
+      AND pd.is_active = true
+      AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
+      AND NOT (pe.target_product_id = ANY(:exclude_ids))
+    GROUP BY pd.product_id, pd.title, pd.price, pd.product_type, pd.total_inventory
+    ORDER BY SUM(pe.blended_score) DESC
+    LIMIT :candidate_limit
+    """
+)
+
 
 def price_ceiling(surface: str, context_value: float) -> Optional[float]:
     """Maximum price an offer may carry on this surface.
@@ -197,6 +221,77 @@ class EdgeRecommender:
             candidates = prefer_refills(head) + candidates[len(head) :]
 
         return candidates[:limit]
+
+    async def recommend_baseline(
+        self,
+        shop_id: str,
+        surface: str,
+        context_value: float = 0.0,
+        limit: int = DEFAULT_RETURN_LIMIT,
+        exclude_product_ids: Optional[Sequence[str]] = None,
+        margins: Optional[Dict[str, float]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return up to `limit` baseline offers, best first."""
+        exclude = {str(p) for p in (exclude_product_ids or [])}
+
+        candidates = await self._fetch_baseline_candidates(shop_id, sorted(exclude))
+        if not candidates:
+            logger.info(f"Shop {shop_id}: no baseline candidates on {surface}")
+            return []
+
+        ceiling = price_ceiling(surface, context_value)
+        if ceiling is not None:
+            affordable = [
+                c for c in candidates if float(c.get("price") or 0.0) <= ceiling
+            ]
+            if affordable:
+                candidates = affordable
+            else:
+                candidates = sorted(
+                    candidates, key=lambda c: float(c.get("price") or 0.0)
+                )[:limit]
+                logger.info(
+                    f"Shop {shop_id}: price ceiling {ceiling:.2f} excluded every "
+                    f"baseline candidate on {surface}; falling back to cheapest"
+                )
+
+        margins = margins or {}
+        candidates.sort(
+            key=lambda c: expected_value(c, margins.get(c["product_id"])),
+            reverse=True,
+        )
+
+        return candidates[:limit]
+
+    async def _fetch_baseline_candidates(
+        self, shop_id: str, exclude_ids: List[str]
+    ) -> List[Dict[str, Any]]:
+        async with get_transaction_context() as session:
+            rows = (
+                await session.execute(
+                    _BASELINE_SQL,
+                    {
+                        "shop_id": shop_id,
+                        "edge_types": list(RECOMMENDABLE),
+                        "exclude_ids": exclude_ids or [""],
+                        "candidate_limit": CANDIDATE_LIMIT,
+                    },
+                )
+            ).all()
+
+        return [
+            {
+                "product_id": r.product_id,
+                "edge_type": r.edge_type,
+                "blended_score": float(r.blended_score or 0.0),
+                "observed_count": int(r.observed_count or 0),
+                "title": r.title,
+                "price": float(r.price or 0.0),
+                "product_type": r.product_type,
+                "source": "observed" if (r.observed_count or 0) >= 5 else "prior",
+            }
+            for r in rows
+        ]
 
     async def _fetch_candidates(
         self, shop_id: str, context_ids: List[str], exclude_ids: List[str]

@@ -247,7 +247,7 @@ async def test_every_offer_shown_writes_a_treatment_impression(shop, source_prod
 # ---------------------------------------------------------------------------
 
 
-async def test_control_shopper_is_shown_nothing(shop, source_product):
+async def test_control_shopper_is_shown_baseline(shop, source_product):
     request = RecommendationRequest(
         shop_domain=shop.shop_domain,
         context="product_page",
@@ -256,9 +256,9 @@ async def test_control_shopper_is_shown_nothing(shop, source_product):
     )
     result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
-    assert result["count"] == 0
-    assert result["recommendations"] == []
-    assert result["source"] == "holdout_control"
+    assert result["count"] > 0
+    assert result["recommendations"] != []
+    assert result["source"] == "baseline_control"
     assert result["holdout"]["is_control"] is True
 
 
@@ -277,7 +277,7 @@ async def test_bucketing_is_stable_for_the_same_shopper(shop, source_product):
             user_id=identity,
         )
         result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
-        assert result["source"] == "holdout_control"
+        assert result["source"] == "baseline_control"
 
 
 async def test_anonymous_shopper_is_served_but_flagged_unbucketed(
@@ -296,7 +296,7 @@ async def test_anonymous_shopper_is_served_but_flagged_unbucketed(
     )
     result = await fetch_recommendations_logic(request, services, user_agent=SHOPPER_UA)
 
-    assert result["source"] != "holdout_control"
+    assert result["source"] != "baseline_control"
     if result["count"]:
         rows = await _fetch_all(
             "SELECT metadata FROM offer_impressions WHERE id = ANY(:ids)",

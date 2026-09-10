@@ -183,12 +183,13 @@ export function ProofPage({
                   Incremental revenue
                 </Text>{" "}
                 — how much <em>more</em> those shoppers spent than the{" "}
-                {holdoutPercent}% control group who were shown nothing. This is
+                {holdoutPercent}% control group who were shown generic recommendations. This is
                 a statistical estimate, it needs enough orders to be reliable,
                 and it is always smaller than attributed revenue.
               </Text>
               <Text as="p" tone="subdued">
                 We hold back {holdoutPercent}% of shoppers from seeing
+                personalised recommendations to create a clean comparison.
                 recommendations so there is always something to compare against.
                 Without that control group there is no way to tell a sale you
                 caused from one that would have happened anyway — so we would
