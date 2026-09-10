@@ -252,17 +252,24 @@ with tab3:
                 f"**{draft['company']}** → {draft['email']} "
                 f"({draft['confidence']} confidence)"
             ):
-                # Editable fields
+                # The widget key embeds a per-draft generation counter. Keyless inputs with a
+                # repeated label can hold their previous value across reruns, and a
+                # fixed key cannot be rewritten after instantiation — so regenerating
+                # the same draft would never reach the boxes. Bumping the counter on
+                # every regenerate gives each render a fresh key, which renders the
+                # DB value straight.
+                gen = st.session_state.get(f"gen_{draft['id']}", 0)
+                st.caption(f"🔧 debug: gen={gen} | draft.id={draft['id']} | db_subject={repr(draft['subject'])[:50]} | db_body={repr(draft['body'])[:60]}")
                 new_subject = st.text_input(
-                    "Subject",
+                    f"Subject — {draft['company']}",
                     value=draft["subject"],
-                    key=f"subject_{draft['id']}",
+                    key=f"subj_{draft['id']}_{gen}",
                 )
                 new_body = st.text_area(
-                    "Body",
+                    f"Body — {draft['company']}",
                     value=draft["body"],
                     height=200,
-                    key=f"body_{draft['id']}",
+                    key=f"body_{draft['id']}_{gen}",
                 )
 
                 col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
@@ -278,15 +285,13 @@ with tab3:
                             st.error(f"Error: {result.get('error')}")
                 with col2:
                     if st.button(f"🔄 Regenerate", key=f"regen_{draft['id']}"):
+                        print(f"[REGEN] clicked id={draft['id']} company={draft['company']} gen_before={gen}")
                         with st.spinner(f"Re-rolling draft for {draft['company']}..."):
                             res = engine.regenerate_draft(draft["id"])
+                        print(f"[REGEN] result success={res.get('success')} subject={res.get('subject','')[:40]}")
                         _clear_cache()
                         if res["success"]:
-                            # Push the new copy straight into the widget keys.
-                            # A keyed text_input reads from session_state, so
-                            # setting the keys is what actually moves the boxes.
-                            st.session_state[f"subject_{draft['id']}"] = res["subject"]
-                            st.session_state[f"body_{draft['id']}"] = res["body"]
+                            st.session_state[f"gen_{draft['id']}"] = gen + 1
                             st.session_state["draft_msg"] = (
                                 f"🔄 New draft for {draft['company']} — "
                                 f"review the boxes above, then Save or Approve"
@@ -327,6 +332,10 @@ with tab3:
         # Show draft message if set
         if "draft_msg" in st.session_state:
             st.success(st.session_state.pop("draft_msg"))
+
+# ---- Debug: raw draft data from get_drafts() ----
+    if st.checkbox("🔍 Debug: show raw get_drafts() output", value=False):
+        st.json(drafts)
 
     # ---- Rejected leads (accidental rejects are recoverable here) ----
     rejected = engine.get_rejected()
@@ -372,16 +381,17 @@ with tab4:
                 st.write(f"**Contact:** {d['contact_name'] or 'N/A'}")
                 st.write(f"**Last sent:** {d['last_sent_at'][:10] if d['last_sent_at'] else 'N/A'}")
 
+                gen = st.session_state.get(f"fgen_{d['id']}", 0)
                 edit_subject = st.text_input(
-                    "Subject",
+                    f"Subject — {d['company']}",
                     value=d["pending_followup_subject"],
-                    key=f"fu_sub_{d['id']}",
+                    key=f"fsubj_{d['id']}_{gen}",
                 )
                 edit_body = st.text_area(
-                    "Body",
+                    f"Body — {d['company']}",
                     value=d["pending_followup_body"],
                     height=220,
-                    key=f"fu_body_{d['id']}",
+                    key=f"fbody_{d['id']}_{gen}",
                 )
 
                 scol1, scol2, scol3, scol4 = st.columns([1, 1, 1, 2])
@@ -405,8 +415,7 @@ with tab4:
                             res = engine.regenerate_followup_draft(d["id"])
                         _clear_cache()
                         if res["success"]:
-                            st.session_state[f"fu_sub_{d['id']}"] = res["subject"]
-                            st.session_state[f"fu_body_{d['id']}"] = res["body"]
+                            st.session_state[f"fgen_{d['id']}"] = gen + 1
                             st.session_state["fu_msg"] = (
                                 f"🔄 New draft for {d['company']} — review & send above"
                             )

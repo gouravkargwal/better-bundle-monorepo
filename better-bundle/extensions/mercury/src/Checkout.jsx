@@ -46,6 +46,38 @@ function Extension() {
   // Phoenix already avoids this via Liquid's `request.design_mode`; checkout
   // extensions have no Liquid, so it has to be read from the JS API.
   const inEditor = Boolean(shopify.extension?.editor);
+
+  // Is the block actually on screen yet?
+  //
+  // Shopify pre-renders extensions for checkout steps the shopper has not
+  // reached, and `rendered` is false for the whole time an extension sits
+  // somewhere the shopper cannot see — the order summary that mobile collapses
+  // being the case that prompted this. Fetching regardless wrote an
+  // `offer_impressions` row for an offer nobody had been shown, inflating the
+  // denominator of the conversion rate the merchant is measured on. Same
+  // reasoning as the bot and theme-preview exclusions on the storefront: an
+  // offer nobody saw must not sit in that denominator.
+  //
+  // Latched, never un-set. Once the shopper has seen the offer the impression
+  // is a fact; collapsing a section or stepping backwards must not retract it
+  // or, worse, trigger a second fetch and a second row.
+  //
+  // Defaults to true when the API is absent so an older checkout behaves as
+  // before rather than silently never asking for a recommendation.
+  const [hasRendered, setHasRendered] = useState(
+    () => shopify.extension?.rendered?.value ?? true,
+  );
+  useEffect(() => {
+    const rendered = shopify.extension?.rendered;
+    if (!rendered || typeof rendered.subscribe !== "function") return;
+    if (rendered.value) {
+      setHasRendered(true);
+      return;
+    }
+    return rendered.subscribe((visible) => {
+      if (visible) setHasRendered(true);
+    });
+  }, []);
   const customerId = buyerIdentity?.customer?.value?.id || null;
 
   // Measurement identity, read from the cart (or minted onto it once).
@@ -112,7 +144,7 @@ function Extension() {
       // Nothing refetched after an acceptance either — see `hasAccepted`.
       // And nothing until the identity has resolved, so the impression is
       // written with a bucketing key rather than without one.
-      skip: inEditor || hasAccepted || sessionId === undefined,
+      skip: inEditor || hasAccepted || sessionId === undefined || !hasRendered,
       sessionId,
       context: "checkout_page",
       // One offer. Three cards made an ~800px block in the column the shopper
@@ -353,9 +385,12 @@ function Extension() {
       return null;
     }
 
-    // Same shape as the resolved row, so the Total and "Pay now" below do not
-    // shift as it resolves. The earlier skeleton mirrored the old tall card
-    // and flashed ~250px before collapsing to one line.
+    // Same shape as the resolved row, so nothing below shifts as it resolves.
+    // This matters more at PAYMENT1 than it did in the order summary: what sits
+    // underneath is now the card number, expiry and CVV fields, and a payment
+    // field jumping while someone types into it is worse than a total jumping.
+    // The earlier skeleton mirrored the old tall card and flashed ~250px before
+    // collapsing to one line.
     return (
       <s-section heading="Recommended for you">
         <s-stack

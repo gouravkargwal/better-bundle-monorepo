@@ -52,8 +52,12 @@ export function ProductCard({
   return (
     // Two groups with space-between, not three children in one row.
     //
-    // The price has to sit flush against the container edge, the way the cart
-    // line above puts "$24.17" there. The first attempt gave the middle column
+    // The price sits flush against the container edge, matching the row idiom of
+    // the column this now lives in: a checkout shipping-option row puts its
+    // "$5.00" there too. (It used to be justified by the cart line above it,
+    // back when this rendered inside the order summary — same layout, different
+    // reason, so the shape survived the move to PAYMENT1 unchanged.)
+    // The first attempt gave the middle column
     // `inlineSize="fill"` to absorb the spare width, but `fill` is not a valid
     // s-box value — Box takes px, % , 0 or auto, and `fill` only exists on
     // Button and Image. The invalid value was ignored, the box never grew, and
