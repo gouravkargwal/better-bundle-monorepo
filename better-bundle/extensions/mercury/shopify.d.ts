@@ -21,6 +21,12 @@ declare module './src/hooks/useRecommendations.js' {
 }
 
 //@ts-ignore
+declare module './src/hooks/useSettledSkeleton.js' {
+  const shopify: import('@shopify/ui-extensions/purchase.checkout.cart-line-list.render-after').Api;
+  const globalThis: { shopify: typeof shopify };
+}
+
+//@ts-ignore
 declare module './src/api/analytics.js' {
   const shopify:
     | import('@shopify/ui-extensions/purchase.checkout.cart-line-list.render-after').Api

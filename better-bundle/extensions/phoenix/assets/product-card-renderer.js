@@ -115,10 +115,17 @@ class ProductCardRenderer {
             </div>
           </div>
           
-          <!-- Line 2: Variant Dropdowns (2 side by side) -->
-          <div class="product-card__variants">
-            ${variantOptions}
-          </div>
+          <!-- Line 2: Variant Dropdowns.
+               No wrapper here: every branch of createDynamicVariantSelectors
+               already returns its own <div class="product-card__variants">.
+               Wrapping it again nested two identical flex containers, so every
+               .product-card__variants rule applied twice (gap included) and the
+               side-by-side row sat inside a column the CSS never accounted for
+               — which is why the two dropdowns in a card would not line up no
+               matter how the row was aligned.
+               It also means a product with no real variant choices now renders
+               nothing at all, instead of an empty gapped div. -->
+          ${variantOptions}
           
           <!-- Line 3: Add to Cart Button -->
           <!-- ✅ Backend ensures defaultVariant is in-stock, so button is always enabled initially -->
@@ -160,7 +167,7 @@ class ProductCardRenderer {
 
     // Count the number of selectors to determine layout
     const selectorCount = product.options.length;
-    const layoutClass = selectorCount === 2 ? 'two-dropdowns' : '';
+    const layoutClass = selectorCount >= 2 ? 'two-dropdowns' : '';
 
     return `
       <div class="product-card__variants ${layoutClass}">
@@ -217,7 +224,7 @@ class ProductCardRenderer {
 
     // Count the number of selectors to determine layout
     const selectorCount = product.options.length;
-    const layoutClass = selectorCount === 2 ? 'two-dropdowns' : '';
+    const layoutClass = selectorCount >= 2 ? 'two-dropdowns' : '';
 
     return `
       <div class="product-card__variants ${layoutClass}">
@@ -230,7 +237,7 @@ class ProductCardRenderer {
   createFallbackVariantSelector(product, defaultVariant) {
     return `
       <div class="product-card__variants">
-        <select class="variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
+        <select class="variant-select variant-selector" onchange="event.stopPropagation(); productCardManager.updateVariantPrice(this, '${product.id}')" onclick="event.stopPropagation()">
           ${product.variants.map((variant, i) => {
       const isSelected = variant.variant_id === defaultVariant?.variant_id;
       const variantTitle = variant.title || `Option ${i + 1}`;

@@ -8,6 +8,7 @@ import {
   getShopSettings,
   saveShopSettings,
 } from "../features/settings/services/settings.service";
+import { publishPhoenixEnabled } from "../features/settings/services/surfaceMetafield.server";
 import type { SurfaceKey, SettingsProduct } from "../features/settings/types/settings.types";
 import logger from "../utils/logger";
 
@@ -59,7 +60,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const { shop } = session;
 
   try {
@@ -95,7 +96,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return json({ success: false, error: "Shop not found" }, { status: 404 });
     }
 
-    return json({ success: true });
+    // Mirror the storefront flag where Liquid can see it, so the theme block
+    // stops rendering a skeleton for a surface the merchant just switched off.
+    // Best-effort by design — see surfaceMetafield.server.ts. The settings row
+    // above is already committed and the API already refuses a disabled
+    // surface, so a failed mirror costs a stale block, not a wrong one.
+    const mirrored = await publishPhoenixEnabled(
+      admin,
+      shop,
+      surfaces.phoenix,
+    );
+
+    return json({ success: true, mirrored });
   } catch (error) {
     logger.error({ error, shop }, "Settings save error");
     return json(

@@ -8,10 +8,16 @@
 <script src="{{ 'pino-browser.js' | asset_url }}" defer></script>
 
 <script>
-  window.enableAutoplay = {{ block.settings.enable_autoplay | default: true }};
+  {% comment %}
+    `| json`, not `| default: true`. Liquid's `default` filter treats false as
+    blank, so a merchant who unticked any of these checkboxes still got `true`
+    here — the settings were one-way. A checkbox setting is always a real
+    boolean once the block exists, so json is both correct and honest.
+  {% endcomment %}
+  window.enableAutoplay = {{ block.settings.enable_autoplay | json }};
   window.autoplayDelay = {{ block.settings.autoplay_delay | default: 2.5 | times: 1000 }};
-  window.showArrows = {{ block.settings.show_arrows | default: true }};
-  window.showPagination = {{ block.settings.show_pagination | default: true }};
+  window.showArrows = {{ block.settings.show_arrows | json }};
+  window.showPagination = {{ block.settings.show_pagination | json }};
   window.recommendationLimit = {{ block.settings.limit | default: 6 }};
   window.designMode = {{ request.design_mode | json }};
   // design_mode is the theme customiser; visual_preview_mode is a shareable

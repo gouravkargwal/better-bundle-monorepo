@@ -167,7 +167,7 @@ class ProductImageGallery {
     });
 
     // Observe the swiper wrapper for new slides
-    const swiperWrapper = document.querySelector('.swiper-wrapper');
+    const swiperWrapper = document.querySelector('.better-bundle-recommendations .swiper-wrapper');
     if (swiperWrapper) {
       observer.observe(swiperWrapper, { childList: true, subtree: true });
     }

@@ -1591,6 +1591,107 @@ def update_draft(prospect_id: int, subject: str, body: str) -> dict:
     return {"success": True}
 
 
+def regenerate_draft(prospect_id: int) -> dict:
+    """Re-roll a first-touch draft from the stored research context.
+
+    Email 1 is normally written by the discovery skill and shipped verbatim —
+    this is the escape hatch when the written copy isn't landing. It rebuilds
+    subject + body from the same LLM pipeline and the same fact guards used for
+    follow-ups, so the result still passes invented_numbers / banned_phrases
+    review. It deliberately replaces whatever was there, so review before
+    approving — the written copy is gone once this runs.
+    """
+    con = get_db()
+    p = con.execute("SELECT * FROM prospects WHERE id = ?", (prospect_id,)).fetchone()
+    if not p:
+        return {"success": False, "error": "Prospect not found"}
+    if p["status"] != "new":
+        return {"success": False, "error": f"Cannot regenerate — already {p['status']}"}
+
+    ctx = (p["followup_context"] or "").strip() or build_followup_context(p)
+    niche = (p["niche"] or "store").strip().lower()
+
+    # Subject: one specific fact from their research, lowercase, 4-7 words.
+    facts = [f.strip() for f in re.findall(r"\d[\d,.]*\s*[A-Za-z]+", ctx or "")]
+    hook = (p["first_subject"] or "").strip()
+    if not hook:
+        # Fall back to the first real number in the research if none was stored.
+        hook = (facts[0] if facts else f"{p['company']} and product feeds").lower()
+
+    retry = None
+    for attempt in range(2):
+        prompt = _first_touch_prompt(ctx, niche)
+        if retry:
+            prompt = prompt + f"\n\n{retry}"
+        body = llm(prompt)
+        bad_nums = invented_numbers(body, ctx)
+        bad_words = banned_phrases(body)
+        if not bad_nums and not bad_words:
+            subject = hook[:60]
+            con.execute(
+                "UPDATE prospects SET first_subject = ?, body = ? WHERE id = ?",
+                (subject, format_email(body, p["contact_name"]), prospect_id),
+            )
+            con.commit()
+            return {
+                "success": True,
+                "prospect_id": prospect_id,
+                "company": p["company"],
+                "email": p["email"],
+                "contact_name": p["contact_name"],
+                "subject": subject,
+                "body": format_email(body, p["contact_name"]),
+            }
+        if bad_nums:
+            retry = (
+                f"Your previous draft asserted {', '.join(bad_nums)}, which appears "
+                "nowhere in the context. Rewrite using no numbers beyond those in "
+                "the context."
+            )
+        else:
+            retry = (
+                f"Your previous draft used banned phrase(s) {', '.join(bad_words)}. "
+                "Rewrite in plain, direct language."
+            )
+
+    return {"success": False, "error": "Draft failed fact review after 2 attempts"}
+
+
+def _first_touch_prompt(ctx: str, niche: str = "store") -> str:
+    """Prompt for re-rolling a first-touch email from research context.
+
+    Same copy rules as the discovery skill: short, one specific true fact as the
+    hook, the mechanism gap, the offer with no monthly fee, an easy out. No
+    flattery, no links, no rate/price figures, no claims about their checkout or
+    product pages — those are unverifiable.
+    """
+    catalog = "their store" if niche != "agency" else "one client store"
+    return f"""Write the first cold email for BetterBundle, a Shopify app that reads a
+store's own order history to find which products genuinely sell together, then
+shows those pairings at checkout and after purchase. No monthly fee — it bills
+only on revenue it can attribute to its own recommendations. Free bundle report
+on {catalog}, built from their public catalog, no install needed.
+
+CONTEXT
+{ctx}
+
+Copy rules:
+- 50-80 words. Shorter is better.
+- Open with ONE specific, true observation from the context — a product count,
+  a brand count, a review total, or the app they run. No flattery.
+- Explain the gap in one sentence: recommendations keyed off collections or
+  tags are a guess; their order history already contains the real pairings.
+- State the mechanism and the free report. Never state a commission rate,
+  percentage, cap or dollar figure — that has never been fixed.
+- NEVER claim anything about their checkout, product pages, cart or homepage —
+  you cannot see those without placing an order.
+- No links. Plain text, no markdown.
+- Do NOT write a greeting or sign-off — those are added at send time.
+- End with an easy out: tell them to reply "no thanks" and you will stop.
+
+Return ONLY the body text."""
+
+
 def reject_prospect(prospect_id: int) -> dict:
     """Reject a prospect — mark as 'rejected' so never sent to again."""
     con = get_db()
@@ -1601,6 +1702,30 @@ def reject_prospect(prospect_id: int) -> dict:
         return {"success": False, "error": f"Cannot reject — already {p['status']}"}
 
     con.execute("UPDATE prospects SET status='rejected' WHERE id = ?", (prospect_id,))
+    con.commit()
+    return {"success": True, "company": p["company"]}
+
+
+def get_rejected() -> list:
+    """Rejected leads, most recent first. Accidental rejects are recoverable."""
+    con = get_db()
+    rows = con.execute(
+        "SELECT id, company, email, contact_name, created_at "
+        "FROM prospects WHERE status='rejected' ORDER BY id DESC"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def restore_prospect(prospect_id: int) -> dict:
+    """Bring a rejected lead back into the queue as a pending draft."""
+    con = get_db()
+    p = con.execute("SELECT * FROM prospects WHERE id = ?", (prospect_id,)).fetchone()
+    if not p:
+        return {"success": False, "error": "Prospect not found"}
+    if p["status"] != "rejected":
+        return {"success": False, "error": f"Cannot restore — status is {p['status']}"}
+
+    con.execute("UPDATE prospects SET status='new' WHERE id = ?", (prospect_id,))
     con.commit()
     return {"success": True, "company": p["company"]}
 
@@ -1692,6 +1817,60 @@ def save_followup_draft(prospect_id: int, subject: str, body: str) -> dict:
     )
     con.commit()
     return {"success": True}
+
+
+def regenerate_followup_draft(prospect_id: int) -> dict:
+    """Re-roll a pending follow-up draft.
+
+    Same as generate_followup_preview but keeps the existing seq — used when the
+    generated copy isn't right and a fresh variant is wanted without losing the
+    scheduling context.
+    """
+    con = get_db()
+    p = con.execute("SELECT * FROM prospects WHERE id = ?", (prospect_id,)).fetchone()
+    if not p:
+        return {"success": False, "error": "Prospect not found"}
+    if not p["pending_followup_seq"]:
+        return {"success": False, "error": "No pending follow-up draft to regenerate"}
+    seq = p["pending_followup_seq"]
+
+    has_bounce_or_unsub = not con.execute(
+        f"SELECT 1 FROM prospects WHERE id = ? AND {SUPPRESS_SQL}",
+        (prospect_id,),
+    ).fetchone()
+    if has_bounce_or_unsub:
+        return {"success": False, "error": "Prospect has bounced or unsubscribed — skipped"}
+
+    try:
+        body = generate_followup(p, seq)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    base = p["first_subject"] or f"{p['company']} and product feeds"
+    was_sent = con.execute(
+        "SELECT 1 FROM emails WHERE prospect_id = ? AND subject = ? LIMIT 1",
+        (p["id"], base),
+    ).fetchone()
+    subject = base if not was_sent or base.lower().startswith("re:") else f"Re: {base}"
+
+    con.execute(
+        """UPDATE prospects
+           SET pending_followup_subject = ?, pending_followup_body = ?
+           WHERE id = ?""",
+        (subject, body, prospect_id),
+    )
+    con.commit()
+
+    return {
+        "success": True,
+        "prospect_id": prospect_id,
+        "company": p["company"],
+        "email": p["email"],
+        "contact_name": p["contact_name"],
+        "seq": seq,
+        "subject": subject,
+        "body": body,
+    }
 
 
 def clear_followup_draft(prospect_id: int) -> None:

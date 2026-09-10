@@ -166,7 +166,7 @@ outreach-install:  ## Install outreach streamlit app dependencies
 	$(OUTREACH_DIR)/$(OUTREACH_VENV)/bin/pip install -r $(OUTREACH_DIR)/requirements.txt
 
 outreach:  ## Run the Skuvio Outreach Streamlit app
-	cd $(OUTREACH_DIR) && $(OUTREACH_VENV)/bin/streamlit run app.py
+	cd $(OUTREACH_DIR) && $(OUTREACH_VENV)/bin/streamlit run app.py --server.headless true --server.runOnSave true --server.fileWatcherType auto
 
 # ==================== remix app ====================
 

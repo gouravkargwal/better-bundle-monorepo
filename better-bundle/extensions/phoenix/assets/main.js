@@ -58,7 +58,7 @@ class RecommendationCarousel {
       // Set up timeout to prevent infinite loading
       const loadingTimeout = setTimeout(() => {
         this.hideCarousel();
-      }, 15000); // 15 second timeout
+      }, 5000); // give up well before a shopper has scrolled past
 
       // Show skeleton loading before API call
       if (window.productCardManager) {
@@ -117,7 +117,12 @@ class RecommendationCarousel {
 
   // Hide the entire carousel when API fails or no recommendations
   hideCarousel() {
-    const carouselContainer = document.querySelector('.shopify-app-block');
+    // Falls back to our own container: when `.shopify-app-block` was not found
+    // this returned silently and the shopper was left looking at a loading
+    // skeleton forever. Whatever else fails, the skeleton must come down.
+    const carouselContainer =
+      document.querySelector('.shopify-app-block') ||
+      document.querySelector('.better-bundle-recommendations');
     if (carouselContainer) {
       carouselContainer.style.display = 'none';
     }
@@ -151,7 +156,7 @@ document.addEventListener('DOMContentLoaded', async function () {
           carouselContainer.style.display = 'none';
         }
       }
-    }, 15000); // 15 second global timeout
+    }, 5000); // global backstop; the fetch itself aborts at 3s
 
     // Store global timeout reference for clearing
     window.globalFallbackTimeout = globalFallbackTimeout;
@@ -170,7 +175,7 @@ document.addEventListener('DOMContentLoaded', async function () {
       };
 
       // Initialize Swiper for design mode with proper horizontal layout
-      const swiper = new window.Swiper('.swiper', {
+      const swiper = new window.Swiper('.better-bundle-recommendations .swiper', {
         direction: 'horizontal', // Explicitly set horizontal direction
         slidesPerView: 1,
         spaceBetween: 20,
@@ -181,11 +186,11 @@ document.addEventListener('DOMContentLoaded', async function () {
           pauseOnMouseEnter: true,
         } : false,
         navigation: {
-          nextEl: '.swiper-button-next',
-          prevEl: '.swiper-button-prev',
+          nextEl: '.better-bundle-recommendations .swiper-button-next',
+          prevEl: '.better-bundle-recommendations .swiper-button-prev',
         },
         pagination: {
-          el: '.swiper-pagination',
+          el: '.better-bundle-recommendations .swiper-pagination',
           clickable: true,
         },
         breakpoints: {
@@ -209,7 +214,6 @@ document.addEventListener('DOMContentLoaded', async function () {
 
       window.swiper = swiper;
     } else {
-      // Initialize Swiper for skeleton loading in live mode
       window.swiperConfig = {
         enable_autoplay: window.enableAutoplay,
         autoplay_delay: window.autoplayDelay,
@@ -217,45 +221,16 @@ document.addEventListener('DOMContentLoaded', async function () {
         show_pagination: window.showPagination
       };
 
-      // Initialize Swiper for skeleton loading with proper horizontal layout
-      const swiper = new window.Swiper('.swiper', {
-        direction: 'horizontal', // Explicitly set horizontal direction
-        slidesPerView: 1,
-        spaceBetween: 20,
-        loop: true,
-        autoplay: window.enableAutoplay ? {
-          delay: window.autoplayDelay,
-          disableOnInteraction: true,
-          pauseOnMouseEnter: true,
-        } : false,
-        navigation: {
-          nextEl: '.swiper-button-next',
-          prevEl: '.swiper-button-prev',
-        },
-        pagination: {
-          el: '.swiper-pagination',
-          clickable: true,
-        },
-        breakpoints: {
-          640: {
-            slidesPerView: 2,
-            spaceBetween: 20,
-          },
-          768: {
-            slidesPerView: 3,
-            spaceBetween: 20,
-          },
-          1024: {
-            slidesPerView: 4,
-            spaceBetween: 20,
-          },
-        },
-        // Ensure proper horizontal layout
-        watchSlidesProgress: true,
-        watchSlidesVisibility: true,
-      });
-
-      window.swiper = swiper;
+      // No Swiper here. It used to be initialised twice on the same `.swiper`
+      // node — once on the skeleton, then again by SwiperManager on the real
+      // cards — which left two autoplay timers running, because destroy() only
+      // reaches the instance `window.swiper` currently points at. That is why
+      // the skeleton slid around before any product had loaded and why
+      // pauseOnMouseEnter did nothing: the orphaned timer had no listeners.
+      //
+      // The skeleton is sized by CSS instead (see recommendation-styles), so it
+      // looks right in the first frame without waiting on Swiper at all, and
+      // Swiper now initialises exactly once, on real content.
 
       // Initialize the carousel for live mode
       const carousel = new RecommendationCarousel();

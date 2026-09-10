@@ -34,4 +34,7 @@ if __name__ == "__main__":
         reload=settings.DEBUG,
         log_level="info" if not settings.DEBUG else "debug",
         log_config=None,  # Disable uvicorn's default logging config
+        # See Dockerfile.dev: keeps redirects on https behind the tunnel.
+        proxy_headers=True,
+        forwarded_allow_ips="*",
     )

@@ -11,6 +11,7 @@ import {
 } from "@shopify/ui-extensions-react/customer-account";
 import { ProductGrid } from "./components/ProductGrid";
 import { SkeletonGrid } from "./components/SkeletonGrid";
+import { useSettledSkeleton } from "./hooks/useSettledSkeleton";
 import { useRecommendations } from "./hooks/useRecommendations";
 
 export default reactExtension(
@@ -94,6 +95,8 @@ function OrderStatusWithRecommendations() {
     },
   });
 
+  const showSkeleton = useSettledSkeleton(loading);
+
   // No view reporting: the impression row is written server-side the moment
   // recommendations are served, so the client has nothing to add.
 
@@ -142,7 +145,15 @@ function OrderStatusWithRecommendations() {
     );
   }
 
+  // Two states while the request is out, not one. Until the delay elapses we
+  // render nothing at all, because we do not yet know whether anything is
+  // coming — the shopper could be in the holdout, or this order may have no
+  // recommendations. Painting a skeleton and then removing it reads as a
+  // crashed widget. See useSettledSkeleton.
   if (loading) {
+    if (!showSkeleton) {
+      return null;
+    }
     return (
       <BlockStack spacing="base">
         <Divider />

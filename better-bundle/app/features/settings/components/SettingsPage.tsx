@@ -71,21 +71,61 @@ export function SettingsPage({
   // renders the whole route as HTML. `response.json()` then threw on the
   // doctype and every save looked like a failure. The fetcher adds the `_data`
   // parameter that makes Remix return the action's JSON instead.
-  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const fetcher = useFetcher<{
+    success?: boolean;
+    error?: string;
+    /** Whether the storefront flag reached the theme. See saveResult below. */
+    mirrored?: boolean;
+  }>();
   const saving = fetcher.state !== "idle";
-  const saveResult =
-    !saving && fetcher.data
-      ? fetcher.data.success
-        ? {
-            tone: "success" as const,
-            message:
-              "Settings saved. Changes apply to new requests immediately.",
-          }
-        : {
-            tone: "critical" as const,
-            message: fetcher.data.error || "Failed to save settings.",
-          }
-      : null;
+
+  // What the merchant is told after a save.
+  //
+  // Serving decisions take effect on the next request, but the *storefront*
+  // block is Liquid: it reads a metafield to decide whether to render at all,
+  // and Shopify's copy of that value can lag a change by up to an hour or so.
+  // So "saved" is true immediately while "gone from my product pages" is not,
+  // and saying only the first invites a merchant to switch phoenix off, reload
+  // their store, still see the widget, and conclude the toggle is broken.
+  //
+  // `mirrored: false` means the metafield write itself failed. Recommendations
+  // still stop being served — the API is the authority — but the block will
+  // keep rendering its placeholder until a later save gets through.
+  const saveResult = (() => {
+    if (saving || !fetcher.data) return null;
+
+    if (!fetcher.data.success) {
+      return {
+        tone: "critical" as const,
+        message: fetcher.data.error || "Failed to save settings.",
+      };
+    }
+
+    if (!surfaces.phoenix && fetcher.data.mirrored === false) {
+      return {
+        tone: "warning" as const,
+        message:
+          "Settings saved — storefront recommendations have stopped being " +
+          "served. We couldn't update your theme, though, so the placeholder " +
+          "may keep appearing on product pages. Saving again usually fixes it.",
+      };
+    }
+
+    if (!surfaces.phoenix) {
+      return {
+        tone: "success" as const,
+        message:
+          "Settings saved. Storefront recommendations have stopped " +
+          "immediately; your product pages can take up to an hour to stop " +
+          "showing the placeholder, because Shopify caches theme data.",
+      };
+    }
+
+    return {
+      tone: "success" as const,
+      message: "Settings saved. Changes apply to new requests immediately.",
+    };
+  })();
   const [activeTab, setActiveTab] = useState(0);
 
   const [search, setSearch] = useState("");
@@ -264,6 +304,17 @@ function SurfacesTab({
                       <Text as="p" variant="bodySm" tone="subdued">
                         {SURFACE_DESCRIPTIONS[key]}
                       </Text>
+                      {/* Only the storefront surface is a Liquid theme block,
+                          so it is the only one whose "off" takes a while to
+                          show up on the shop. Saying so here — on the toggle
+                          itself — is what stops it reading as a broken switch
+                          when the widget is still there on the next reload. */}
+                      {key === "phoenix" && !enabled && (
+                        <Text as="p" variant="bodySm" tone="subdued">
+                          Stops serving immediately. Product pages can take up
+                          to an hour to stop showing the placeholder.
+                        </Text>
+                      )}
                     </BlockStack>
                   </div>
                 </Box>

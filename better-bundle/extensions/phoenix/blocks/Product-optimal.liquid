@@ -16,8 +16,46 @@
   renders nothing rather than firing a request that would be rejected.
 {% endcomment %}
 
+{% comment %}
+  Storefront recommendations switched off in the app.
+
+  Written by the admin settings page into an app-data metafield precisely so
+  this decision can be made here, before any HTML exists. Without it the block
+  ships its loading skeleton, JS starts, the API answers "surface_disabled", and
+  the shopper watches a widget paint and then vanish — which reads as broken
+  rather than switched off.
+
+  `.value` is load-bearing. `app.metafields.config.phoenix_enabled` is a
+  metafield *object*, and an object is truthy in Liquid even when the boolean it
+  wraps is false — so testing the bare path would render the block no matter
+  what the merchant chose. Only `.value` is the boolean.
+
+  `default: true, allow_false: true` is also deliberate: plain `default` treats
+  false as blank, so without allow_false the flag could never be off. The `true`
+  default covers a shop that has never saved settings and so has no metafield —
+  the previous, optimistic behaviour.
+
+  ponytail: Liquid's copy of an app metafield can lag a change by up to an hour
+  and Shopify does not reliably invalidate it. In that window this falls back to
+  exactly the old behaviour — block renders, API declines, widget hides — so a
+  stale read is late, never wrong.
+{% endcomment %}
+{% assign bb_phoenix_enabled = app.metafields.config.phoenix_enabled.value
+  | default: true, allow_false: true
+%}
+
+{% comment %}
+  Nested rather than one `and`/`or` chain: Liquid has no operator precedence and
+  evaluates right to left, so a flat condition here would be a trap for whoever
+  edits it next.
+
+  The theme customiser is exempt from the flag — a merchant editing the block
+  must be able to see it even while the surface is off.
+{% endcomment %}
 {% if product and product.id %}
-  {% render 'recommendation-base', context: 'product_page', product_id: product.id, dummy_data: dummy_data %}
+  {% if bb_phoenix_enabled or request.design_mode %}
+    {% render 'recommendation-base', context: 'product_page', product_id: product.id, dummy_data: dummy_data %}
+  {% endif %}
 {% endif %}
 
 {% schema %}
@@ -100,7 +138,8 @@
     { "type": "checkbox", "id": "show_arrows", "label": "Show Arrows", "default": true },
     { "type": "checkbox", "id": "show_pagination", "label": "Show Pagination", "default": true },
     { "type": "color", "id": "pagination_color", "label": "Pagination Color" },
-    { "type": "checkbox", "id": "enable_autoplay", "label": "Enable Autoplay", "default": true },
+    { "type": "checkbox", "id": "enable_autoplay", "label": "Enable autoplay (desktop only)", "default": true },
+    { "type": "paragraph", "content": "Autoplay is off on phones by design — it competes with scrolling, and there is no hover to pause it. Shoppers swipe instead." },
     {
       "type": "range",
       "id": "autoplay_delay",

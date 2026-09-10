@@ -24,10 +24,21 @@
     margin: 0;
     color: {% if block.settings.heading_color != blank %}{{ block.settings.heading_color }}{% else %}inherit{% endif %};
   }
-    .swiper {
-      height: auto; /* Auto height to adapt to any theme */
-      min-height: 500px; /* Minimum height for proper display */
-      --swiper-pagination-bottom: 20px; /* Position pagination properly */
+    .better-bundle-recommendations .swiper {
+      height: auto;
+      /* No min-height: a 500px floor reserved desktop-sized space on a phone
+         and left dead whitespace under short cards. */
+      --swiper-pagination-bottom: 20px;
+      padding-bottom: 32px; /* room for pagination, which sits outside the cards */
+    }
+
+    /* Stretch slides so every card in a row matches the tallest. */
+    .better-bundle-recommendations .swiper-wrapper {
+      align-items: stretch;
+    }
+
+    .better-bundle-recommendations .swiper-slide {
+      height: auto;
     }
   .swiper-button-next,
   .swiper-button-prev {
@@ -90,8 +101,12 @@
     flex-direction: column;
     width: 100%;
     max-width: 100%;
-    min-height: 480px;
-    max-height: 600px;
+    /* No fixed min/max height. 480px was applied at every viewport, so on a
+       phone — where the carousel shows one slide and the card is only ~350px
+       wide — it forced a card taller than it was wide. Height now follows the
+       content, and `height: 100%` inside a stretched swiper-slide keeps the
+       cards in a row equal to each other. */
+    height: 100%;
     background: {% if block.settings.card_bg != blank %}{{ block.settings.card_bg }}{% else %}transparent{% endif %};
     border-radius: {{ block.settings.card_border_radius | default: 8 }}px;
     overflow: hidden;
@@ -110,7 +125,9 @@
   .better-bundle-recommendations .product-card__image-container {
     position: relative;
     width: 100%;
-    height: 200px;
+    /* Square, not a fixed 200px: the image scales with the card so the whole
+       thing shrinks on a narrow screen instead of only the text shrinking. */
+    aspect-ratio: 1 / 1;
     overflow: hidden;
     border-radius: 4px 4px 0 0;
   }
@@ -205,6 +222,10 @@
     align-items: center;
     justify-content: center;
     width: 100%;
+    /* Stated, not derived from padding. It resolved to 31.5px on a phone —
+       under every touch-target guideline, and 8.5px shorter than the skeleton
+       claimed it would be. */
+    min-height: 44px;
     padding: 10px 14px;
     background: {% if block.settings.button_bg != blank %}{{ block.settings.button_bg }}{% else %}rgb(var(--color-button, 18 18 18)){% endif %};
     color: {% if block.settings.button_text != blank %}{{ block.settings.button_text }}{% else %}rgb(var(--color-button-text, 255 255 255)){% endif %};
@@ -215,7 +236,6 @@
     font-size: 14px;
     letter-spacing: 0;
     transition: all 0.2s ease;
-    margin-top: 2px;
   }
   .better-bundle-recommendations .product-card__btn:hover {
     background: {% if block.settings.button_bg != blank %}{{ block.settings.button_bg | color_darken: 10 }}{% else %}rgb(var(--color-button, 18 18 18)){% endif %};
@@ -230,7 +250,6 @@
     justify-content: space-between;
     align-items: center;
     gap: 8px;
-    margin-bottom: 8px;
   }
 
   .better-bundle-recommendations .product-card__quantity {
@@ -239,16 +258,60 @@
     gap: 4px;
   }
 
+  /* Neutralise the host theme's margins on our own layout children.
+     ---------------------------------------------------------------------
+     A theme app extension renders inside the merchant's stylesheet, so any
+     property we do not set ourselves, the theme may. This block was hit by a
+     lobotomised-owl rule (`* + *`, applied as the logical margin-block-start):
+     the SECOND .variant-option silently inherited `margin-top: 16px` while the
+     first did not, so the two dropdowns in a card sat 16px apart and the row
+     grew to 48px. Flex was behaving perfectly the whole time — it was faithfully
+     laying out an item that really did have a top margin.
+
+     Every row below spaces itself with `gap`, so a margin on a child is never
+     ours and never wanted. Stating zero is what makes our layout independent of
+     whatever theme it is dropped into. */
+  .better-bundle-recommendations .product-card__body > *,
+  .better-bundle-recommendations .product-card__variants > *,
+  .better-bundle-recommendations .product-card__price-quantity > *,
+  .better-bundle-recommendations .product-card__quantity > *,
+  .better-bundle-recommendations .variant-option > * {
+    margin: 0;
+  }
+
   .better-bundle-recommendations .product-card__variants {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
-  /* Two dropdowns side by side - use a more reliable approach */
-  .product-card__variants.two-dropdowns {
+  /* Side-by-side dropdowns. Applied at 2 or more options; wrap keeps a
+     three-option product from overflowing the card instead of dropping back to
+     a full-width stack that made that one card taller than the rest. */
+  .better-bundle-recommendations .product-card__variants.two-dropdowns {
     flex-direction: row;
+    /* nowrap, deliberately.
+       `wrap` was added here to stop three-option products overflowing, and it
+       caused the bug it was meant to prevent. With `flex: 1 1 45%` the basis and
+       the 6px gap resolve separately, so grow rounded the two options up to
+       261.4px inside a 261.3px row — a tenth of a pixel of overflow, enough to
+       push the second option onto a second line. The row's height was already
+       constrained, so the two lines were crammed into it and overlapped by
+       16px: the dropdowns appeared vertically offset rather than wrapped, which
+       is why it read as an alignment bug and not a layout one.
+       Without wrap the options simply divide the row and can never disagree
+       about which line they are on. */
+    flex-wrap: nowrap;
     gap: 6px;
+    align-items: flex-start;
+  }
+
+  .better-bundle-recommendations .product-card__variants.two-dropdowns .variant-option {
+    /* Basis 0, not 45%: free space is computed after the gap is subtracted, so
+       the options divide exactly what is left and cannot overflow no matter how
+       many there are or how the browser rounds. `min-width: 0` (inherited from
+       the base rule) lets them shrink below their content width. */
+    flex: 1 1 0;
   }
 
   /* Make dropdowns take full space */
@@ -263,23 +326,22 @@
   .better-bundle-recommendations .variant-select {
     width: 100%;
     box-sizing: border-box;
-    flex: 1;
+    /* One explicit height, and deliberately NOT `flex: 1`.
+       `.variant-option` is a column flex container, so `flex: 1` here stretched
+       the select along the block axis to fill whatever height its option
+       happened to have. That was invisible while the row stretched both options
+       to a shared height — and broke the moment the row gained `flex-wrap`,
+       because a wrapping line's cross-size no longer resolves to one height, so
+       each select fell back to its own content and the two dropdowns in a card
+       ended up different sizes. A control's height should be stated, not
+       inherited from its neighbour's content. */
+    height: 36px;
+    flex: none;
   }
-  .better-bundle-recommendations .variant-selector {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    background: #ffffff;
-    font-size: 14px;
-    color: #374151;
-    cursor: pointer;
-    transition: border-color 0.2s ease;
-  }
-  .better-bundle-recommendations .variant-selector:focus {
-    outline: none;
-    border-color: #000;
-  }
+  /* .variant-selector is only the JS hook for the no-options fallback card; it
+     carries .variant-select too, so all its metrics come from there. Giving it
+     its own padding and font-size is what made dropdowns different sizes from
+     one card to the next. */
   .better-bundle-recommendations .qty-btn {
     width: 32px;
     height: 32px;
@@ -407,12 +469,16 @@
     min-height: 200px;
   }
 
+  /* A second skeleton-title rule, at the same specificity as the
+     `.loading-placeholder .product-card__title` one further down — so which
+     height applied came down to source order. Its 20px lost, but its
+     `margin-bottom: 8px` had no competitor and survived, adding one extra gap
+     after the title and pushing the price row, variants and button 8px lower
+     than on the real card. Two rules describing one element is how that hides.
+     Geometry now lives in the `.loading-placeholder` rule alone. */
   .better-bundle-recommendations .product-card__title.loading-skeleton {
-    height: 20px;
     width: 85%;
-    margin-bottom: 8px;
     display: block !important;
-    min-height: 20px;
   }
 
   /* Price-quantity skeleton matching real layout */
@@ -439,14 +505,26 @@
 
   /* Variant skeleton matching real layout */
   .better-bundle-recommendations .product-card__variants .variant-label.loading-skeleton {
-    height: 14px;
+    /* Overrides the generic 20px shimmer minimum so the bar is exactly the
+       18px the real label occupies. */
+    min-height: 18px;
+    /* Width only. Height, display and margin all come from the real
+       `.variant-label` rule, deliberately.
+       This used to force `display: block !important`, which beat the mobile
+       rule that hides labels — so on a phone the skeleton showed two labels the
+       real card does not, making the placeholder 18px per option taller than
+       the thing it stands in for. Any geometry stated here is a second source
+       of truth that has to be kept in step with the real card by hand, and it
+       wasn't. */
     width: 60px;
-    margin-bottom: 4px;
-    display: block !important;
   }
 
   .better-bundle-recommendations .product-card__variants .variant-select.loading-skeleton {
-    height: 32px;
+    /* No height. The real select is 36px, dropping to 32px below 640px; this
+       rule pinned 32px at every width, so above the mobile breakpoint the
+       skeleton's variants row came out 4px shorter than the card's and the
+       button below it sat 4px high. Height comes from `.variant-select` so the
+       two can only ever agree. */
     width: 100%;
     border-radius: 6px;
     display: block !important;
@@ -454,10 +532,9 @@
 
 
   .better-bundle-recommendations .product-card__btn.loading-skeleton {
-    height: 40px;
+    height: 44px;
     width: 100%;
     border-radius: 6px;
-    margin-top: 8px;
     display: block !important;
   }
 
@@ -509,8 +586,7 @@
 
   /* Product Card Skeleton */
   .better-bundle-recommendations .loading-placeholder .product-card {
-    min-height: 480px;
-    max-height: 600px;
+    height: 100%;
     background: #ffffff;
     border: 1px solid #f1f5f9;
     border-radius: 8px;
@@ -518,7 +594,7 @@
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__image {
-    height: 200px;
+    aspect-ratio: 1 / 1;
     width: 100%;
     border-radius: 4px 4px 0 0;
     display: block;
@@ -526,15 +602,16 @@
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__title {
-    height: 20px;
+    /* 44px, matching the real title's two-line min-height. A 20px bar here
+       reserved one line where the card renders two, so the variants row and
+       button sat ~24px too high and then jumped down on resolve. */
+    height: 44px;
     width: 80%;
-    margin-bottom: 8px;
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__price {
     height: 24px;
     width: 60%;
-    margin-bottom: 16px;
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__price-quantity {
@@ -542,7 +619,6 @@
     justify-content: space-between;
     align-items: center;
     gap: 8px;
-    margin-bottom: 8px;
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__quantity {
@@ -565,14 +641,14 @@
     display: inline-block;
   }
 
-  .better-bundle-recommendations .loading-placeholder .product-card__variants {
-    margin-bottom: 8px;
-  }
+  /* No margin-bottom override: the real card's variants row has none, and an
+     8px difference here is 8px the whole lower half of the card shifts by when
+     the skeleton is replaced. */
 
   .better-bundle-recommendations .loading-placeholder .product-card__variants .variant-select {
-    height: 32px;
-    width: 100%;
-    margin-bottom: 6px;
+    /* Only the chevron is suppressed — there is nothing to choose yet. Height
+       and width come from the real `.variant-select`, so the two cannot drift.
+       The 6px bottom margin that used to be here existed on no real card. */
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -580,19 +656,80 @@
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__btn {
-    height: 40px;
+    height: 44px;
     width: 100%;
-    margin-top: 16px;
   }
 
   /* Carousel Skeleton */
   .better-bundle-recommendations .loading-placeholder .swiper {
     height: auto;
-    min-height: 500px;
   }
 
-  .better-bundle-recommendations .loading-placeholder .swiper-slide {
+  /* Skeleton slide sizing.
+     Swiper is no longer initialised on the skeleton (see main.js), and its own
+     stylesheet gives every uninitialised .swiper-slide `width: 100%`. That made
+     each placeholder card full-bleed, so the merchant saw one enormous card
+     with the rest clipped. Set the widths ourselves, matching SwiperManager's
+     breakpoints, so the placeholder is the right shape before any JS runs.
+     The padding stands in for Swiper's spaceBetween. */
+  .better-bundle-recommendations .swiper-slide.loading-placeholder {
     height: auto;
+    box-sizing: border-box;
+    /* Swiper sizes a slide as (container - spaceBetween x (perView - 1)) / perView
+       and separates slides with margin-right. Reproducing that arithmetic
+       exactly is what makes the placeholder occupy the box the real slide will.
+       This previously used a rounded 83.3333% plus a padding-right standing in
+       for the gap — but padding is inside the slide, so it shrank the card and
+       with it the 1:1 image, by 8px. */
+    width: calc((100% - 2px) / 1.2);
+    margin-right: 10px;
+  }
+
+  /* Matches centeredSlides at the mobile breakpoint: the first slide starts
+     half the leftover width in, so a sliver of the previous card shows. Scoped
+     A margin on the slide, NOT padding on the wrapper: padding shrinks the
+     wrapper's content box, which is the very box the slide's
+     `width: calc(100% ...)` resolves against, so the inset compounded into the
+     width and made every placeholder 24px narrower than the real slide —
+     shrinking its 1:1 image to match. A margin leaves the basis alone. */
+  .better-bundle-recommendations .swiper-slide.loading-placeholder:first-child {
+    margin-left: calc((100% - ((100% - 2px) / 1.2)) / 2);
+  }
+
+  @media (min-width: 640px) {
+    .better-bundle-recommendations .swiper-slide.loading-placeholder {
+      width: calc((100% - 12px) / 2);
+      margin-right: 12px;
+    }
+
+    /* centeredSlides is off above 640px, so no inset. */
+    .better-bundle-recommendations .swiper-slide.loading-placeholder:first-child {
+      margin-left: 0;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .better-bundle-recommendations .swiper-slide.loading-placeholder {
+      width: calc((100% - 30px) / 3);
+      margin-right: 15px;
+    }
+
+    /* centeredSlides is off above 640px, so no inset. */
+    .better-bundle-recommendations .swiper-slide.loading-placeholder:first-child {
+      margin-left: 0;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .better-bundle-recommendations .swiper-slide.loading-placeholder {
+      width: calc((100% - 54px) / 4);
+      margin-right: 18px;
+    }
+
+    /* centeredSlides is off above 640px, so no inset. */
+    .better-bundle-recommendations .swiper-slide.loading-placeholder:first-child {
+      margin-left: 0;
+    }
   }
 
   /* Heading Skeleton */
@@ -607,9 +744,11 @@
   }
 
   /* Simple Variant Selectors */
-  .better-bundle-recommendations .variant-option {
-    margin-bottom: 6px;
-  }
+  /* No margin-bottom on .variant-option. The row spaces itself with `gap`, and
+     this rule sits AFTER the margin reset above at equal specificity, so it won
+     on source order and quietly added 6px to the real card that the skeleton
+     never had. A distance owned by `gap` must not also be expressed as a
+     margin — whichever is later becomes the truth by accident. */
 
   .better-bundle-recommendations .variant-label {
     display: block;
@@ -618,6 +757,18 @@
     font-size: 13px;
     color: #374151;
     flex-shrink: 0; /* Prevent label from shrinking */
+    /* Exactly one line, always.
+       Option names are the merchant's words, not ours — "Size" fits on one
+       line at 45% of a card, "Sleeve Length" does not. A wrapped label made its
+       option taller, which pushed its dropdown down while the neighbour's
+       stayed put, so the two controls in a card were no longer on the same
+       line. Stating the height decouples the row's alignment from how long a
+       merchant chose to name an option. */
+    height: 18px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .better-bundle-recommendations .variant-select {
@@ -675,6 +826,64 @@
   }
 
   /* Responsive Design */
+  @media (max-width: 639px) {
+    /* Everything inside the card steps down together. Shrinking only the width
+       and leaving 14px type and 16px padding is what made the card feel
+       oversized relative to the phone. */
+    .better-bundle-recommendations .product-card__body {
+      padding: 10px;
+    }
+
+    .better-bundle-recommendations .product-card__title {
+      font-size: 13px;
+    }
+
+    .better-bundle-recommendations .product-card__price {
+      font-size: 14px;
+    }
+
+    .better-bundle-recommendations .variant-select {
+      font-size: 12px;
+      padding: 5px 8px;
+      padding-right: 24px;
+      height: 32px;
+    }
+
+    .better-bundle-recommendations .product-card__btn {
+      font-size: 13px;
+      padding: 8px 10px;
+    }
+
+    /* Keep the dropdowns side by side. Stacking them here was the wrong
+       instinct: the complaint about mobile is that the card is too TALL, and a
+       column adds a whole row per option. At ~325px of card width two selects
+       sit at ~150px each, which is comfortably tappable. */
+    .better-bundle-recommendations .product-card__variants.two-dropdowns {
+      flex-direction: row;
+    }
+
+    /* The label duplicates the select's own placeholder ("Select Color"), so on
+       a phone it is 18px of height per option buying nothing.
+       `!important` is required, not decorative: the base `.loading-skeleton`
+       rule sets `display: block !important` so that empty shimmer bars render
+       at all, and without matching that here the SKELETON kept showing two
+       labels the real card hides — making the placeholder taller than the card
+       it stands in for on every phone. */
+    .better-bundle-recommendations .variant-label,
+    .better-bundle-recommendations .variant-label.loading-skeleton {
+      display: none !important;
+    }
+
+    .better-bundle-recommendations .product-card__variants {
+      gap: 6px;
+    }
+
+    .better-bundle-recommendations .variant-option {
+      gap: 0;
+      margin-bottom: 0;
+    }
+  }
+
   @media (max-width: 768px) {
     .better-bundle-recommendations .color-swatch {
       width: 32px;

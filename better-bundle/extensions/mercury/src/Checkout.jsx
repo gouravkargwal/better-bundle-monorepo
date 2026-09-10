@@ -1,6 +1,7 @@
 import { render } from "preact";
 import { useState, useEffect, useMemo, useRef } from "preact/hooks";
 import { useRecommendations } from "./hooks/useRecommendations.js";
+import { useSettledSkeleton } from "./hooks/useSettledSkeleton.js";
 import { recordOfferOutcome } from "./api/analytics.js";
 import { ProductCard } from "./components/ProductCard.jsx";
 import { getOptionValueFromVariant } from "./utils/productUtils.js";
@@ -125,6 +126,8 @@ function Extension() {
       cartValue: cartValue,
       checkoutStep: "order_summary",
     });
+
+  const showSkeleton = useSettledSkeleton(loading);
 
   // No view reporting: the impression row is written server-side the moment
   // recommendations are served.
@@ -342,6 +345,14 @@ function Extension() {
   }
 
   if (loading) {
+    // Nothing until the wait is long enough to need acknowledging. Checkout is
+    // the most expensive place in the funnel to flash a widget that then
+    // disappears, and this row disappears whenever the shop has no offer for
+    // the cart. See useSettledSkeleton.
+    if (!showSkeleton) {
+      return null;
+    }
+
     // Same shape as the resolved row, so the Total and "Pay now" below do not
     // shift as it resolves. The earlier skeleton mirrored the old tall card
     // and flashed ~250px before collapsing to one line.

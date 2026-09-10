@@ -265,7 +265,7 @@ with tab3:
                     key=f"body_{draft['id']}",
                 )
 
-                col1, col2, col3 = st.columns([1, 1, 3])
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
                 with col1:
                     if st.button(f"💾 Save Draft", key=f"save_{draft['id']}"):
                         result = engine.update_draft(
@@ -277,6 +277,24 @@ with tab3:
                         else:
                             st.error(f"Error: {result.get('error')}")
                 with col2:
+                    if st.button(f"🔄 Regenerate", key=f"regen_{draft['id']}"):
+                        with st.spinner(f"Re-rolling draft for {draft['company']}..."):
+                            res = engine.regenerate_draft(draft["id"])
+                        _clear_cache()
+                        if res["success"]:
+                            # Push the new copy straight into the widget keys.
+                            # A keyed text_input reads from session_state, so
+                            # setting the keys is what actually moves the boxes.
+                            st.session_state[f"subject_{draft['id']}"] = res["subject"]
+                            st.session_state[f"body_{draft['id']}"] = res["body"]
+                            st.session_state["draft_msg"] = (
+                                f"🔄 New draft for {draft['company']} — "
+                                f"review the boxes above, then Save or Approve"
+                            )
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {res.get('error')}")
+                with col3:
                     if st.button(f"🚫 Reject", key=f"reject_{draft['id']}"):
                         result = engine.reject_prospect(draft["id"])
                         if result["success"]:
@@ -285,7 +303,7 @@ with tab3:
                             st.rerun()
                         else:
                             st.error(f"Error: {result.get('error')}")
-                with col3:
+                with col4:
                     if st.button(
                         f"✅ Approve & Send",
                         key=f"approve_{draft['id']}",
@@ -309,6 +327,29 @@ with tab3:
         # Show draft message if set
         if "draft_msg" in st.session_state:
             st.success(st.session_state.pop("draft_msg"))
+
+    # ---- Rejected leads (accidental rejects are recoverable here) ----
+    rejected = engine.get_rejected()
+    if rejected:
+        st.divider()
+        with st.expander(f"⛔ {len(rejected)} rejected — click to restore", expanded=False):
+            st.caption(
+                "Rejected leads sit out of the send queue. Restore one to put it "
+                "back as a pending draft."
+            )
+            for r in rejected:
+                rc1, rc2 = st.columns([5, 1])
+                rc1.write(f"**{r['company']}** · {r['email']} · {r['contact_name'] or 'N/A'}")
+                if rc2.button("♻️ Restore", key=f"restore_{r['id']}"):
+                    res = engine.restore_prospect(r["id"])
+                    if res["success"]:
+                        _clear_cache()
+                        st.session_state["draft_msg"] = (
+                            f"♻️ Restored {res['company']} — it is back in the draft queue"
+                        )
+                        st.rerun()
+                    else:
+                        st.error(f"Error: {res.get('error')}")
 
 # TAB 4: Follow-ups
 with tab4:
@@ -343,7 +384,7 @@ with tab4:
                     key=f"fu_body_{d['id']}",
                 )
 
-                scol1, scol2, scol3 = st.columns([1, 1, 3])
+                scol1, scol2, scol3, scol4 = st.columns([1, 1, 1, 2])
                 with scol1:
                     if st.button("💾 Save", key=f"fu_save_{d['id']}"):
                         res = engine.save_followup_draft(d["id"], edit_subject, edit_body)
@@ -359,6 +400,20 @@ with tab4:
                         st.session_state["fu_msg"] = f"🗑️ Draft discarded for {d['company']}"
                         st.rerun()
                 with scol3:
+                    if st.button("🔄 Regenerate", key=f"fu_regen_{d['id']}"):
+                        with st.spinner(f"Re-rolling follow-up for {d['company']}..."):
+                            res = engine.regenerate_followup_draft(d["id"])
+                        _clear_cache()
+                        if res["success"]:
+                            st.session_state[f"fu_sub_{d['id']}"] = res["subject"]
+                            st.session_state[f"fu_body_{d['id']}"] = res["body"]
+                            st.session_state["fu_msg"] = (
+                                f"🔄 New draft for {d['company']} — review & send above"
+                            )
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {res.get('error')}")
+                with scol4:
                     if st.button("✅ Save & Send", key=f"fu_send_{d['id']}", type="primary"):
                         # Save edits first, then send
                         engine.save_followup_draft(d["id"], edit_subject, edit_body)

@@ -79,7 +79,11 @@ class RecommendationAPI {
 
       // Create AbortController for timeout with retry logic
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      // 3s, not 10s: the server answers this in ~130ms, so three seconds is
+      // already 20x headroom over a slow mobile connection. Ten seconds only
+      // ever meant ten seconds of skeleton for a shopper who was never going
+      // to see a recommendation.
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
 
       // Use JWT authentication for the request
       // Pass customerId for customer-specific token generation
@@ -90,7 +94,13 @@ class RecommendationAPI {
         },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
-        keepalive: true, // Keep connection alive for better performance
+        // No `keepalive`. It was added here as "keep the connection alive for
+        // better performance", but that is not what the flag does — it marks a
+        // request as allowed to outlive the page, for unload beacons (see
+        // attribution.js, where it is correct). Chrome services keepalive
+        // requests on a separate low-priority, quota-limited path, which is why
+        // this call took seconds in the browser while the server answered in
+        // ~130ms.
         customerId: customerId || null, // Pass customerId for token context
       });
 
@@ -114,7 +124,7 @@ class RecommendationAPI {
       }
     } catch (error) {
       if (error.name === 'AbortError') {
-        this.logger.error('⏰ API: Request timed out after 10 seconds');
+        this.logger.error('⏰ API: Request timed out after 3 seconds');
       } else {
         this.logger.error('❌ API: Error fetching recommendations from unified API:', error);
       }

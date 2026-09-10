@@ -104,67 +104,18 @@ class ProductCardManager {
     this.skeletonState = state;
   }
 
-  // Show skeleton loading during API calls
+  // The skeleton is already in the page.
+  //
+  // This used to clear .swiper-wrapper and rebuild four placeholder slides from
+  // a second copy of the markup, then initialise Swiper on them. That is why a
+  // shopper saw two different skeletons in sequence: the Liquid one from
+  // skeleton-loader.liquid, then this one, whose markup had drifted from it
+  // (no image-container, no &nbsp; fillers). Rendering it a second time from JS
+  // bought nothing — the server already shipped it in the initial HTML, which
+  // is both earlier and free — and kept two copies of the same markup that had
+  // to be edited in lockstep.
   showSkeletonLoading() {
-    const swiperWrapper = document.querySelector(".swiper-wrapper");
-    if (!swiperWrapper) {
-      this.logger.error('❌ ProductCardManager: Swiper wrapper not found');
-      return;
-    }
-
     this.setSkeletonState('loading');
-
-    // Check if skeleton already exists and is visible
-    const existingSkeleton = swiperWrapper.querySelector('.loading-placeholder:not(.fade-out)');
-    if (existingSkeleton) {
-      return;
-    }
-
-    // Clear existing content
-    swiperWrapper.innerHTML = '';
-
-    // Create skeleton slides matching actual product card structure
-    for (let i = 0; i < 4; i++) {
-      const slide = document.createElement('div');
-      slide.className = 'swiper-slide loading-placeholder';
-      slide.innerHTML = `
-        <div class="product-card">
-          <div class="product-card__image loading-skeleton"></div>
-          <div class="product-card__body">
-            <h4 class="product-card__title loading-skeleton"></h4>
-            
-            <!-- Line 1: Price and Quantity on same line -->
-            <div class="product-card__price-quantity">
-              <p class="product-card__price loading-skeleton"></p>
-              <div class="product-card__quantity">
-                <button class="qty-btn loading-skeleton"></button>
-                <input type="number" class="qty-input loading-skeleton">
-                <button class="qty-btn loading-skeleton"></button>
-              </div>
-            </div>
-            
-            <!-- Line 2: Variant Dropdowns -->
-            <div class="product-card__variants two-dropdowns">
-              <div class="variant-option">
-                <label class="variant-label loading-skeleton"></label>
-                <select class="variant-select loading-skeleton"></select>
-              </div>
-              <div class="variant-option">
-                <label class="variant-label loading-skeleton"></label>
-                <select class="variant-select loading-skeleton"></select>
-              </div>
-            </div>
-            
-            <!-- Line 3: Add to Cart Button -->
-            <button class="product-card__btn loading-skeleton"></button>
-          </div>
-        </div>
-      `;
-      swiperWrapper.appendChild(slide);
-    }
-
-    // Initialize Swiper for skeleton
-    this.initializeSwiper();
   }
 
   // Update product cards with real recommendations
@@ -174,7 +125,7 @@ class ProductCardManager {
     context = "cart",
     trackRecommendationView = null,
   ) {
-    const swiperWrapper = document.querySelector(".swiper-wrapper");
+    const swiperWrapper = document.querySelector(".better-bundle-recommendations .swiper-wrapper");
     if (!swiperWrapper) {
       this.logger.error('❌ ProductCardManager: Swiper wrapper not found');
       return;

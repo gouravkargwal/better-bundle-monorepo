@@ -52,20 +52,24 @@ recommendations.**
   review counts, apps detectable in their storefront HTML, and anything printed on
   their own pages.
 
-### The free offer (the hook)
+### The offer (the hook)
 
-A **free bundle report**: run their public catalog and hand them candidate pairings.
-No install needed.
+**There is no pre-install deliverable. Never promise a report, an audit, a teardown
+or "what it finds" before install — we cannot produce any of it without their orders.**
 
-**Be precise about what the report is.** Pre-install you only have their public
-catalog, so the report is **catalog-based** — pairings inferred from product type,
-tags, vendor and collection co-membership. It is NOT their order history. The
-honest and stronger framing is exactly that distinction:
+The offer is that **install itself is the free trial**, because the billing model
+already removes the risk:
 
-> "This is what your catalog suggests. Install it and it reads your actual orders,
-> which is where the real pairings are."
+> "No monthly fee, no card — billed only on revenue it attributes. If it finds
+> nothing, it costs nothing. First sync shows your top pairings."
 
-Never present the free report as based on their sales data.
+That last sentence is the report; it just lands after install, where it's real.
+
+**Why this matters more than it looks:** the body argues that collection-based
+guessing is worthless and only order history is truth. Offering a catalog-based
+report contradicts the argument in the same email — you'd be selling the merchant
+the exact method you just told them not to trust. The risk-reversal close is
+shorter, honest, and doesn't undercut the wedge.
 
 ---
 
@@ -400,6 +404,18 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 **Shorter wins.** The best-performing email on record was 3 sentences / 58 words.
 **Aim for 50–80 words.** 110 is a hard maximum, not a target.
 
+**Mandatory cut pass.** After drafting, count the words. Then delete in this order
+until under 80, and do not stop early because it "reads fine" — it read fine at 110
+too:
+
+1. Any second example of the same point (a second pairing, a second store fact).
+2. Any sentence restating the wedge in different words.
+3. Adjectives and hedges: "real", "genuinely", "actually", "already", "simply".
+4. The second half of any sentence containing "which means" or "so that".
+
+If two sentences make the same argument, the shorter one survives. Record the final
+word count in the log line for the row.
+
 ### Hard rules
 
 - NEVER fabricate numbers, metrics or observations. Only facts literally visible on
@@ -423,20 +439,39 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 - **Do NOT add blank lines.** The same function splits sentences into paragraphs and
   puts the closing question on its own line. Write plain sentences; start with the HOOK.
 
-### 4-line structure
+### 3-beat structure
 
-1. **HOOK** — one specific TRUE observation. Their product count, brand count, the
-   app they run, their review total. No flattery.
-2. **WEDGE** — tie it to the mechanism gap. Their order history already contains
-   which products sell together; recommendation tools that key off collections or
-   tags are guessing at it.
-3. **MECHANISM + OFFER** — BetterBundle reads their own orders and surfaces pairings at
-   checkout and after purchase; no monthly fee, billed only on attributed revenue.
-   Free catalog-based bundle report, no install.
-4. **CTA** (rotate, never repeat within a batch):
-   - "want me to send what it finds?"
-   - "want the bundle report?"
-   - "reply 'no thanks' if you want me to stop reaching out."
+Three beats, not four. The old fourth beat crammed mechanism + billing + a free
+offer into one "line" and is why bodies drifted to 110 words.
+
+1. **HOOK + WEDGE, fused into one sentence** — a specific TRUE observation that
+   *already implies* the gap. Not "you have 109 products." Rather: "With 109
+   products, your buyers are forming pairs collections can't see." The fact and
+   the problem in one breath; two separate sentences waste the reader's best
+   attention on a fact they already know about themselves.
+2. **MECHANISM + RISK REVERSAL** — reads their own orders, shows pairings at
+   checkout and after purchase; no monthly fee, no card, billed only on attributed
+   revenue. Close it with the asymmetry: *"if it finds nothing, it costs nothing."*
+3. **CTA** — one short question. Rotate, never repeat within a batch:
+   - "worth a look?"
+   - "want me to walk you through it?"
+   - "open to trying it on one collection?"
+
+**Never promise a pre-install report or "what it finds."** See The offer above.
+
+### The concrete-pairing test (do this before writing beat 1)
+
+Name **one real pairing from their actual catalog**, using their own product
+vocabulary: "the tank someone reaches for after a nursing bra." Not "products that
+sell together." A merchant can verify a named pairing against their gut in under a
+second, and that verification is what makes the rest of the email credible.
+
+Pull the two product names from their collection pages. If you cannot name a
+plausible pairing from their catalog, the hook is too generic — reach for a
+different fact or skip the prospect.
+
+**One pairing, not three.** A list reads as a demo; a single example reads as
+someone who looked.
 
 ### Angle by prospect type (pick ONE, matching `niche`)
 
@@ -461,21 +496,25 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 - **BODY VARIATION (CRITICAL):** no two consecutive emails may share sentence
   structure. Rotate:
 
-  **A:** "[Company] lists [N] products across [M] brands. Collection-based
-  recommendations guess at what goes together — your orders already know..."
+  **A — pairing-first:** "The [product B] someone reaches for after a [product A] —
+  that pattern is in your orders, not your collections..."
 
-  **B:** "I noticed you run [app]. It bills monthly regardless of what it returns.
-  BetterBundle reads your own order history and only bills on revenue it can
-  attribute..."
+  **B — billing-first (has_app):** "You pay [app] every month whether it earns it or
+  not. BetterBundle bills only on revenue it can attribute..."
 
-  **C:** "[N] reviews on [product type] tells me you have real order volume. That
-  volume contains pairings nothing is reading..."
+  **C — scale-first:** "With [N] products across [M] brands, your buyers are forming
+  pairs collections can't see..."
 
-  **D:** "[Specific fact] caught my eye. Quick question: when a customer buys
-  [type], do you know what they most often add alongside it? That answer is in your
-  orders..."
+  **D — question-first:** "When someone buys a [type], what do they most often add
+  alongside it? Your order history has the answer; your recommendations don't..."
 
   Track the last pattern used; pick a different one next.
+
+- **The wedge sentence must be rewritten every time.** "Collections guess, your
+  orders know" is the idea, never the wording. If the phrase "collection-based
+  recommendations" appeared in the previous row, it is banned in this one — say it
+  in their product vocabulary instead ("shelving these next to each other in a
+  collection isn't the same as knowing they get bought together").
 
 ---
 
@@ -486,6 +525,11 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 - **Shopify confirmed by fetch, not by appearance.**
 - **40+ products AND ≥1 volume signal.** Unverifiable → skip.
 - **Subject contains a specific fact.** Generic subjects fail.
+- **Body names one concrete pairing** in the merchant's own product vocabulary. A
+  body that only says "products that sell together" fails the gate — rewrite it.
+- **Body ≤80 words** after the cut pass. 110 is the hard ceiling, not the target.
+- **No pre-install deliverable promised.** Any occurrence of "report", "audit",
+  "teardown", "what it finds" or "no install" in a body is a fail.
 - **ZERO fabricated facts. ZERO rate/price figures. ZERO claims about their checkout
   or product pages.**
 
@@ -493,6 +537,36 @@ Set `niche` to the angle used: `has_app`, `multi_brand`, or `consumable`.
 
 Public pages only. No LinkedIn scraping, no purchased lists. B2B only. US + UK only.
 Research and draft ONLY — never send email.
+
+## Social-Media Channel Policy (which channels may feed an email search)
+
+**Allowed — treat as public pages, same as their own website:**
+- **Instagram** — public business bios, "Link in bio" → Linktree/Carrd/Splash pages, story highlights, pinned posts.
+- **TikTok** — public bio, link-in-bio landing pages, pinned comments the owner sticks.
+- **X / Twitter, Facebook, YouTube, Pinterest** — public bios and linked landing pages.
+- **Google Business Profile / store locator pages** — publicly listed contact info.
+- **Press articles, podcast show notes, founder interviews** — bylines and author bios.
+
+**Banned — never scrape, never import, never use as an email source:**
+- **LinkedIn.** Four independent reasons, any one sufficient:
+  1. **Terms of Service.** LinkedIn's ToS prohibits automated scraping and unauthorized data extraction. Violating it risks account suspension.
+  2. **Not a public page.** The compliance rule is "public pages only." Most LinkedIn profile data (email, phone) sits behind a login wall and is not publicly viewable without an account.
+  3. **No genuine consent.** A LinkedIn contact email is gated by the member's own privacy settings and often only visible to paid Sales Navigator subscribers. It was not published for the purpose of receiving cold B2B marketing email, so using it would be an unsolicited contact the recipient never agreed to.
+  4. **Data-protection exposure.** BetterBundle targets the UK among others. Scraping personal data from LinkedIn into a marketing list is a GDPR/privacy exposure regardless of where the server sits.
+
+**How to use the allowed channels:**
+- Read the public bio and any linked landing page the store voluntarily points to.
+- If an email is published there by the store itself, it qualifies as **L1 published (HIGH)** — same tier as an email on their own site.
+- If only a name appears, the name may be used as the basis for an **L2 inferred + SMTP-verified** address — the greeting is built from the first name alone, so a wrong surname never reaches them. Mark confidence MEDIUM, method `inferred_smtp`.
+- **Never** scrape follower lists, DM contacts, commenters, or "people also follow" graphs. Public bios and linked pages only.
+- **Social metrics may qualify a prospect but must NEVER appear in the email.**
+  Follower counts, likes and post frequency are fine as an internal volume signal.
+  In the body they land badly for two reasons: followers are not orders, so the
+  number doesn't support any claim we make; and "your Instagram shows 32K followers"
+  reads as surveillance rather than research. Catalog facts (product count, brands,
+  review totals, apps in their HTML) are what a merchant expects a vendor to have
+  looked at. Hook from those only.
+
 
 ## Finish
 

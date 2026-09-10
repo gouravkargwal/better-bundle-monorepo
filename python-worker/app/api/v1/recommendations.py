@@ -551,7 +551,14 @@ def _empty(request: RecommendationRequest, reason: str, holdout_pct: int = 0) ->
     }
 
 
-@router.post("/", response_model=RecommendationResponse)
+# "" and not "/": with a trailing slash the registered path becomes
+# /api/v1/recommendations/ and every client posting to the unslashed path gets a
+# 307. Behind the dev tunnel that redirect is emitted as http:// (uvicorn cannot
+# see the original scheme), so the browser blocks it as mixed content — the POST
+# never leaves the page, nothing reaches this worker, and the storefront sits on
+# its loading skeleton forever with no failed request visible in the network tab.
+# Every other route in this API is unslashed; this was the only exception.
+@router.post("", response_model=RecommendationResponse)
 async def get_recommendations(
     request: RecommendationRequest,
     authorization: str = Header(None),
