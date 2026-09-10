@@ -1114,6 +1114,16 @@ BANNED_PHRASES = (
     "closing this file", "circling back", "circle back", "touching base",
     "touch base", "moving forward", "reach out regarding your",
     "reaching out regarding your",
+    # Claims about THEIR pages. We cannot see a merchant's product page, cart,
+    # checkout or thank-you page without placing an order, so any possessive
+    # form is an unverifiable assertion — the skill bans it and the model still
+    # wrote it twice in the first batch. Banned here so the guard is
+    # deterministic rather than an instruction. Note this only catches "your X":
+    # describing where OUR app shows pairings ("at checkout, after purchase")
+    # is legitimate and must keep passing.
+    "your product page", "your collection page", "your checkout",
+    "your cart", "your homepage", "your thank-you page", "your thank you page",
+    "your existing recommendations",
 )
 
 
@@ -1127,6 +1137,15 @@ def _demo_followup_review():
     sent = "I am closing this file and will not reach out again."
     assert banned_phrases(sent) == ["closing this file"]
     assert banned_phrases("I will stop reaching out. BetterBundle finds bundles.") == []
+    # The two real violations from the first sent batch (Miansai, Kospet).
+    assert banned_phrases(
+        "I noticed you run a 'You May Also Like' block on your product pages."
+    ) == ["your product page"]
+    assert banned_phrases("your collection pages can't learn from those patterns") == [
+        "your collection page"
+    ]
+    # Describing where OUR app shows pairings must still pass.
+    assert banned_phrases("It shows those pairings at checkout and after purchase.") == []
     assert invented_numbers("We fixed 4,000 SKUs.", "Catalog: 900 items") == ["4,000"]
     assert invented_numbers("The report covers 5 pairings.", "Catalog: 900") == []
     out = format_email("I will stop reaching out. BetterBundle only bills on "
@@ -1616,10 +1635,11 @@ def regenerate_draft(prospect_id: int) -> dict:
     ctx = (p["followup_context"] or "").strip() or build_followup_context(p)
     niche = (p["niche"] or "store").strip().lower()
     previous = (p["body"] or "").strip()
+    sent = _recent_sent_bodies()
 
     retry = None
     for attempt in range(2):
-        prompt = _first_touch_prompt(ctx, niche, previous=previous)
+        prompt = _first_touch_prompt(ctx, niche, previous=previous, sent=sent)
         if retry:
             prompt = prompt + f"\n\n{retry}"
         text = llm(prompt)
@@ -1697,18 +1717,43 @@ def _fallback_subject(p, ctx: str) -> str:
     return hook.lower()[:60]
 
 
-def _first_touch_prompt(ctx: str, niche: str = "store", previous: str = None) -> str:
+def _recent_sent_bodies(limit: int = 8) -> str:
+    """The last few first-touch bodies actually sent, as anti-examples.
+
+    Without these the model only ever sees one prior draft — this prospect's
+    own — so it happily reproduces the same skeleton across the whole batch.
+    The first nine sent emails shared "no monthly fee, no card" 9/9 and "if it
+    finds nothing, it costs nothing" 9/9 for exactly this reason.
+    """
+    con = get_db()
+    rows = con.execute(
+        "SELECT body FROM emails WHERE seq = 1 AND body IS NOT NULL "
+        "ORDER BY id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return "\n\n---\n\n".join((r["body"] or "").strip() for r in rows if (r["body"] or "").strip())
+
+
+def _first_touch_prompt(
+    ctx: str, niche: str = "store", previous: str = None, sent: str = None
+) -> str:
     """Prompt for re-rolling a first-touch email from research context.
 
-    Same copy rules as the discovery skill: short, one specific true fact as the
-    hook, the mechanism gap, a direct free-trial ask as the CTA, and an easy out.
-    The offer is that install itself is the free trial — no monthly fee, no card,
-    billed only on revenue the app attributes, so if it finds nothing it costs
-    nothing. Never promise a report or audit before install; that undercuts the
-    "order history is the only truth" argument in the same email. No flattery,
-    no links, no rate/price figures, no claims about their checkout or product
-    pages — those are unverifiable. Returns subject + body so a re-roll visibly
-    changes both, and steers away from the previous draft when given one.
+    Same copy rules as the discovery skill: three beats (hook+wedge fused,
+    mechanism+risk reversal, one-question CTA), one named pairing from their
+    own catalog, 50-80 words. The offer is that install itself is the free
+    trial — no monthly fee, no card, billed only on revenue the app
+    attributes, so if it finds nothing it costs nothing. Never promise a report
+    or audit before install; that undercuts the "order history is the only
+    truth" argument in the same email. No flattery, no links, no rate/price
+    figures, no claims about their pages — those are unverifiable. Every fact
+    must trace to one span of the context; welding two true facts into a third
+    is how the Topeca row went out wrong.
+
+    Returns subject + body so a re-roll visibly changes both. Steers away from
+    `previous` (this prospect's last draft) and from `sent` (bodies already
+    mailed to other prospects) — the second is what stops the batch converging
+    on one template.
     """
     vary = ""
     if previous:
@@ -1718,9 +1763,18 @@ def _first_touch_prompt(ctx: str, niche: str = "store", previous: str = None) ->
             "from the context to open with, and say the same pitch in fresh words.\n\n"
             + previous
         )
+    if sent:
+        vary += (
+            "\n\nALREADY-SENT EMAILS (to other stores) — these are ANTI-EXAMPLES.\n"
+            "Reuse NO sentence and NO sentence structure from them. If a phrasing\n"
+            "appears below, it is banned in this email: find another way to say it.\n"
+            "The pitch is the same; the words must be new every time. If your draft\n"
+            "could be swapped with one of these by changing the store name, it has\n"
+            "failed.\n\n" + sent
+        )
     return f"""Write the first cold email for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
-shows those pairings on product pages, in the cart and at checkout.
+shows those pairings at checkout and after purchase.
 
 The offer: install is the free trial. No monthly fee, no card — the app bills
 only on revenue it can attribute to its own recommendations, so if it finds
@@ -1729,23 +1783,44 @@ nothing, it costs nothing.
 CONTEXT
 {ctx}
 
-Structure, 50-80 words (shorter is better):
-1. Open with ONE specific, true observation from the context — a product count,
-   a brand count, a review total, or the app they run. No flattery.
-2. The gap, in one sentence: recommendations keyed off collections or tags are
-   a guess; their order history already contains the real pairings.
-3. The hook, as a direct question: would they like to try the extension free?
-   Name the risk-free terms in plain words — no monthly fee, no card, billed
-   only on revenue it attributes, so if it finds nothing it costs nothing.
-   Never state a commission rate, percentage, cap or dollar figure.
-4. An easy out: tell them to reply "no thanks" and you will stop.
+THREE beats, 50-80 words total. Exactly 3 or 4 sentences — the mailer splits
+sentences into their own paragraphs, so never write a run-on:
+1. HOOK + WEDGE FUSED INTO ONE SENTENCE. A specific true observation from the
+   context that already implies the gap. Not "you have 109 products." Rather:
+   "With 109 products, your buyers are forming pairs collections can't see."
+   Two separate sentences waste the reader's best attention on a fact they
+   already know about themselves.
+2. MECHANISM + RISK REVERSAL. Reads their own orders, shows pairings at
+   checkout and after purchase; no monthly fee, no card, billed only on
+   attributed revenue. Never state a commission rate, percentage, cap or
+   dollar figure.
+3. CTA — one short question ("worth a look?", "open to trying it on one
+   collection?"). Not a paragraph.
+
+Name ONE real pairing from their catalog in their own product vocabulary,
+structured as one primary/expensive item plus one cheap accessory or
+consumable — "the filters someone reaches for after an espresso machine", NOT
+two machines. One pairing, never a list: a list reads as a demo, one example
+reads as someone who looked. A body that only says "products that sell
+together" is a failed draft.
 
 Copy rules:
+- Every fact must trace to ONE span of the context. Do NOT weld two true facts
+  into a third — "family-run since 1850 in El Salvador, roasting in Tulsa"
+  must never become "roasting in Tulsa since 1850". Both halves true, sentence
+  false. If a claim needs two spans, cut it to the half you can point at.
+  Prefer catalog facts over heritage facts; a product count cannot be
+  recombined into a falsehood.
 - NEVER promise a report, audit, teardown or "what it finds" before install —
   we cannot produce any of it without their orders. The trial itself is the offer.
-- NEVER claim anything about their checkout, product pages, cart or homepage —
-  you cannot see those without placing an order.
-- No links. Plain text, no markdown.
+- NEVER claim anything about THEIR checkout, product pages, collection pages,
+  cart or homepage — you cannot see those without placing an order. Saying
+  where OUR app shows pairings is fine; "your product pages" is not.
+- Do not restate the wedge in different words, and do not reuse the wording
+  "collection-based recommendations" or "if it finds nothing, it costs
+  nothing" if it appears in an earlier email below. The idea is fixed; the
+  wording is never reused.
+- No links. Plain text, no markdown. No blank lines.
 - Do NOT write a greeting or sign-off — those are added at send time.
 {vary}
 

@@ -300,10 +300,15 @@ class ProductEnrichment:
                                         if isinstance(v, dict)
                                         else None
                                     )
+                                    inv_policy = (
+                                        v.get("inventory_policy", "DENY")
+                                        if isinstance(v, dict)
+                                        else "DENY"
+                                    )
                                     # None = unlimited stock, > 0 = in stock, <= 0 = out of stock
                                     if inv is None or (
                                         isinstance(inv, int) and inv > 0
-                                    ):
+                                    ) or (str(inv_policy).upper() == "CONTINUE"):
                                         any_variant_instock = True
                                         # Store first in-stock variant for default selection
                                         if in_stock_variant is None:
@@ -327,9 +332,10 @@ class ProductEnrichment:
                             if default_variant and isinstance(default_variant, dict):
                                 try:
                                     inv = default_variant.get("inventory")
+                                    inv_policy = default_variant.get("inventory_policy", "DENY")
                                     first_variant_instock = inv is None or (
                                         isinstance(inv, int) and inv > 0
-                                    )
+                                    ) or (str(inv_policy).upper() == "CONTINUE")
                                 except Exception:
                                     pass
 

@@ -70,12 +70,17 @@ class GraphQLProductAdapter(BaseAdapter):
                         if node.get("inventory_quantity") is not None
                         else None
                     ),
+                    inventory_policy=node.get("inventory_policy"),
                 )
             )
 
         # Derive key product fields - now using snake_case field names
-        total_inventory = payload.get("total_inventory")  # Updated to snake_case
-        if total_inventory is None and variants:
+        has_untracked = any(vi.inventory is None for vi in variants)
+        has_continue = any((vi.inventory_policy or "").upper() == "CONTINUE" for vi in variants)
+        
+        if has_untracked or has_continue:
+            total_inventory = None
+        else:
             total_inventory = sum([vi.inventory or 0 for vi in variants])
 
         price = variants[0].price if variants else None

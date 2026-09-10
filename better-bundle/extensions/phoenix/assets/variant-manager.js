@@ -174,7 +174,8 @@ class VariantManager {
     const qtyInput = productCard.querySelector('.qty-input');
     if (qtyInput) {
       const inv = typeof variant.inventory === 'number' ? variant.inventory : null;
-      if (inv !== null && inv >= 1) {
+      const policy = variant.inventory_policy || "DENY";
+      if (inv !== null && inv >= 1 && policy.toUpperCase() !== "CONTINUE") {
         qtyInput.max = String(inv);
         if (parseInt(qtyInput.value) > inv) qtyInput.value = String(inv);
       } else {
@@ -186,7 +187,8 @@ class VariantManager {
     const addToCartBtn = productCard.querySelector('.product-card__btn');
     if (addToCartBtn) {
       const inventory = typeof variant.inventory === 'number' ? variant.inventory : undefined;
-      const isAvailable = inventory === undefined || inventory > 0;
+      const policy = variant.inventory_policy || "DENY";
+      const isAvailable = inventory === undefined || inventory > 0 || policy.toUpperCase() === "CONTINUE";
 
       if (isAvailable) {
         addToCartBtn.disabled = false;

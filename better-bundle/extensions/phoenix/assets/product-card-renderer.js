@@ -389,11 +389,11 @@ class ProductCardRenderer {
     if (currentVariant && variantManager) {
       variantManager.updateAvailability(currentVariant, productCard);
     } else {
-      // Fallback: enable button if no variant found
-      button.disabled = false;
-      button.textContent = 'Add to cart';
-      button.style.opacity = '1';
-      button.style.cursor = 'pointer';
+      // Fallback: disable button if no variant found
+      button.disabled = true;
+      button.textContent = 'Unavailable';
+      button.style.opacity = '0.6';
+      button.style.cursor = 'not-allowed';
     }
   }
 }

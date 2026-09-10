@@ -338,6 +338,24 @@ found, and any recommendation app detected. No invented numbers.
 `first_subject`/`body` and `generate_email` sends them as written — no LLM rewrite.
 Whatever you write here is what the merchant reads.
 
+**MANDATORY FIRST — read what has already gone out.** The anti-template rules below
+are unenforceable if you cannot see the sent copy, and "the previous row" is not
+enough: the whole point is not to converge on a house template across batches.
+
+```bash
+sqlite3 outreach/outreach.db \
+  "SELECT subject, body FROM emails WHERE seq=1 ORDER BY id DESC LIMIT 8;"
+```
+
+Treat every line of that output as an **anti-example**. Reuse no sentence and no
+sentence structure from it. Then apply the swap test before you write the row:
+*if this draft could be sent to any of those stores by changing the name and the
+number, it has failed* — rewrite it, do not append it.
+
+Paid for in production: the first nine sent emails shared "no monthly fee, no card"
+9/9 and "if it finds nothing, it costs nothing" 9/9, and three were structurally
+identical. Two of those landing in one inbox reads as a mail merge.
+
 ### Step 8 — APPEND row to prospects.csv
 
 Do NOT use bash to append rows, as email bodies containing commas, quotes, and newlines will corrupt the CSV. Use this exact Python snippet to safely append the row to `prospects.csv`. Dedupe by lowercased email.
@@ -448,6 +466,23 @@ word count in the log line for the row.
 
 - NEVER fabricate numbers, metrics or observations. Only facts literally visible on
   their pages or returned by the qualification commands.
+- **NEVER RECOMBINE TWO TRUE FACTS INTO A THIRD.** This is not fabrication and the
+  fabrication rule does not catch it — every word is sourced, and the sentence is
+  still false. Each claim must map to ONE span of the research, not to two spans
+  welded together. Before writing any fact, ask: *can I point at the single phrase
+  this came from?* If it takes two, cut it to whichever half you can source.
+
+  Paid for in production (Topeca, row 2): research said *"family-run since 1850 in
+  El Salvador, roasting in Tulsa, OK."* Two facts — a founding date in El Salvador,
+  a roastery in Oklahoma. The email said **"You have been roasting in Tulsa since
+  1850."** Nobody roasted coffee in Tulsa in 1850. Every noun was true; the sentence
+  was not. To the recipient that reads as a bot that skimmed the About page and got
+  it backwards, which discredits the one thing the email is selling — that we read
+  data carefully.
+
+  Dates, places and origin stories are the highest-risk facts for this because they
+  sit next to each other in About-page prose. Safest move: **prefer catalog facts
+  over heritage facts.** A product count cannot be recombined into a falsehood.
 - **NEVER state a commission rate, cap, percentage or dollar figure.** Not decided.
 - **NEVER claim product-page / homepage / cart recommendations.** Not shipped.
 - **NEVER claim anything about their checkout or thank-you page.** Unverifiable.
@@ -562,6 +597,9 @@ someone who looked.
   "teardown", "what it finds" or "no install" in a body is a fail.
 - **ZERO fabricated facts. ZERO rate/price figures. ZERO claims about their checkout
   or product pages.**
+- **Every fact traces to ONE span of the research.** Point at the phrase for each
+  claim before approving the row. Two spans welded into one sentence is a fail even
+  though both halves are true — see the recombining rule.
 
 ## Compliance
 

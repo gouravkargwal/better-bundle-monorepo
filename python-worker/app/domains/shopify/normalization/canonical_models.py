@@ -132,6 +132,7 @@ class CanonicalVariant(BaseModel):
     sku: Optional[str] = None
     barcode: Optional[str] = None
     inventory: Optional[int] = None
+    inventory_policy: Optional[str] = None
 
 
 class CanonicalProduct(BaseModel):
