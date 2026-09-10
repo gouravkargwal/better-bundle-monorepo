@@ -31,6 +31,7 @@ from app.core.kafka.consumer_manager import KafkaConsumerManager
 
 from app.api.v1.recommendations import router as recommendations_router
 from app.api.v1.edges_status import router as edges_status_router
+from app.api.v1.impact import router as impact_router
 from app.domains.billing.api.billing_api import router as billing_api_router
 from app.routes.auth_routes import router as auth_router
 from app.api.v1.outcome import router as outcome_router
@@ -153,6 +154,10 @@ FastAPIInstrumentor.instrument_app(app)
 # Include API routers
 app.include_router(recommendations_router)
 app.include_router(edges_status_router)
+# Incrementality. Serves a real measured lift, or an explicit reason there
+# isn't one — replacing a dashboard that reported a literal p-value of 0.01
+# and a confidence interval of revenue ± 10%.
+app.include_router(impact_router)
 app.include_router(billing_api_router)
 app.include_router(auth_router)
 app.include_router(outcome_router)

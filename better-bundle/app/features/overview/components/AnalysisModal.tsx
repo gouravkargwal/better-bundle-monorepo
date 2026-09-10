@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Text, Button, Banner } from "@shopify/polaris";
+import {
+  Banner,
+  BlockStack,
+  Button,
+  Modal,
+  ProgressBar,
+  Spinner,
+  Text,
+} from "@shopify/polaris";
 
 interface AnalysisModalProps {
   /** Whether AI is already known to be ready from loader data */
@@ -110,161 +118,70 @@ export function AnalysisModal({
   const showRetry = stage === "error";
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 9999,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(255, 255, 255, 0.92)",
-        backdropFilter: "blur(4px)",
-      }}
+    <Modal
+      open
+      // No onClose: this is a blocking setup step, not a dismissible dialog.
+      // The merchant leaves it by finishing, retrying, or the timeout button.
+      onClose={() => {}}
+      title={
+        stage === "complete"
+          ? "Your recommendations are ready"
+          : stage === "error"
+            ? "Analysis didn't finish"
+            : stage === "timeout"
+              ? "This is taking longer than usual"
+              : "Setting up your recommendations"
+      }
+      {...(stage === "timeout"
+        ? { primaryAction: { content: "Continue anyway", onAction: onComplete } }
+        : {})}
+      {...(stage === "error"
+        ? {
+            primaryAction: {
+              content: "Retry analysis",
+              loading: retriggering,
+              onAction: handleRetrigger,
+            },
+          }
+        : {})}
     >
-      <div
-        style={{
-          maxWidth: "420px",
-          width: "90%",
-          padding: "clamp(24px, 4vw, 48px)",
-          textAlign: "center",
-        }}
-      >
-        {/* Animated icon */}
-        <div
-          style={{
-            width: "64px",
-            height: "64px",
-            borderRadius: "50%",
-            background:
-              stage === "complete"
-                ? "linear-gradient(135deg, #10B981, #059669)"
-                : stage === "error"
-                  ? "linear-gradient(135deg, #EF4444, #DC2626)"
-                  : "linear-gradient(135deg, #667eea, #764ba2)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            margin: "0 auto 20px",
-            animation:
-              stage === "complete" || stage === "error"
-                ? undefined
-                : "modalPulse 1.5s ease-in-out infinite",
-            boxShadow:
-              stage === "complete"
-                ? "0 4px 20px rgba(16, 185, 129, 0.3)"
-                : stage === "error"
-                  ? "0 4px 20px rgba(239, 68, 68, 0.3)"
-                  : "0 4px 20px rgba(102, 126, 234, 0.3)",
-            transition: "all 0.3s ease",
-          }}
-        >
-          <span style={{ color: "white", fontSize: "28px" }}>
-            {stage === "complete" ? "✓" : stage === "error" ? "✗" : "⚡"}
-          </span>
-        </div>
+      <Modal.Section>
+        <BlockStack gap="400" inlineAlign="center">
+          {stage !== "complete" && stage !== "error" && (
+            <Spinner accessibilityLabel="Analysing your catalogue" size="large" />
+          )}
 
-        {/* Title */}
-        <Text as="h2" variant="headingLg" fontWeight="bold" tone="base">
-          {stage === "complete"
-            ? "AI Recommendations Ready!"
-            : stage === "error"
-              ? "Analysis Failed"
-              : "Setting Up AI Recommendations"}
-        </Text>
-
-        {/* Description */}
-        <div style={{ marginTop: "8px" }}>
-          <Text as="p" variant="bodyMd" tone="subdued">
+          <Text as="p" alignment="center" tone="subdued">
             {stage === "complete"
-              ? "Your store's AI is trained and ready to recommend."
+              ? "We've analysed your catalogue and built your recommendations."
               : stage === "timeout"
-                ? "Analysis is taking longer than expected. You can continue setting up."
-                : stage === "error"
-                  ? detail
-                  : detail}
+                ? "You can carry on — analysis will keep running in the background."
+                : detail ||
+                  "We're analysing your catalogue and order history to build personalised recommendations. This usually takes a few minutes."}
           </Text>
-        </div>
 
-        {/* Progress bar */}
-        {stage !== "error" && (
-          <div style={{ marginTop: "24px" }}>
-            <div
-              style={{
-                height: "6px",
-                backgroundColor: "rgba(102, 126, 234, 0.15)",
-                borderRadius: "3px",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  height: "100%",
-                  width: `${Math.round(progress * 100)}%`,
-                  background:
-                    stage === "complete"
-                      ? "linear-gradient(90deg, #10B981, #059669)"
-                      : "linear-gradient(90deg, #667eea, #764ba2)",
-                  borderRadius: "3px",
-                  transition: "width 0.5s ease",
-                }}
+          {stage !== "error" && stage !== "timeout" && (
+            <BlockStack gap="100" inlineAlign="center">
+              <ProgressBar
+                progress={Math.round(progress * 100)}
+                size="small"
+                tone={stage === "complete" ? "success" : "primary"}
               />
-            </div>
-            <div style={{ marginTop: "8px" }}>
-              <Text as="p" variant="bodySm" tone="subdued">
-                {stage === "complete"
-                  ? "100%"
-                  : stage === "timeout"
-                    ? ""
-                    : `${Math.round(progress * 100)}%`}
+              <Text as="span" variant="bodySm" tone="subdued">
+                {stage === "complete" ? "100%" : `${Math.round(progress * 100)}%`}
               </Text>
-            </div>
-          </div>
-        )}
+            </BlockStack>
+          )}
 
-        {/* Error banner with retry */}
-        {showRetry && (
-          <div style={{ marginTop: "20px" }}>
+          {stage === "error" && (
             <Banner tone="critical">
-              <Text as="p" variant="bodyMd" tone="critical">
+              <Text as="p">
                 {detail || "Something went wrong during analysis."}
               </Text>
             </Banner>
-            <div style={{ marginTop: "16px" }}>
-              <Button
-                variant="primary"
-                loading={retriggering}
-                onClick={handleRetrigger}
-              >
-                Retry Analysis
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Timeout action */}
-        {stage === "timeout" && (
-          <div style={{ marginTop: "20px" }}>
-            <Button variant="primary" onClick={onComplete}>
-              Continue to Dashboard
-            </Button>
-          </div>
-        )}
-
-        {/* Trial reminder */}
-        <div style={{ marginTop: "20px" }}>
-          <Text as="p" variant="bodySm" tone="subdued">
-            14-day free trial · Cancel anytime
-          </Text>
-        </div>
-      </div>
-
-      <style>{`
-        @keyframes modalPulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.06); }
-        }
-      `}</style>
-    </div>
+          )}
+        </BlockStack>
+      </Modal.Section>
+    </Modal>
   );
 }

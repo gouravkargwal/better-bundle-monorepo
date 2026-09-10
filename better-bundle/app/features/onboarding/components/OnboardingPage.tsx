@@ -1,6 +1,7 @@
 // features/onboarding/components/OnboardingPage.tsx
 import { useNavigation, Form } from "@remix-run/react";
 import {
+  Box,
   Page,
   Card,
   Banner,
@@ -11,7 +12,6 @@ import {
   Badge,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import type {
   OnboardingData,
   OnboardingError,
@@ -78,188 +78,154 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
     .replace(/\.0$/, "");
 
   return (
-    <Page>
+    <Page
+      title="Get started"
+      subtitle="We'll analyse your products and orders, then start showing recommendations across your store."
+    >
       <TitleBar title="Get Started" />
       <BlockStack gap="300">
-        <HeroHeader
-          title="Turn your store's data into smarter recommendations"
-          subtitle="BetterBundle analyzes your products, orders, and shoppers — then starts showing smart offers across your storefront in minutes."
-          variant="gradient"
-          align="left"
-        />
 
         <BlockStack gap="400">
           {/* How it works */}
           <Card>
-            <div style={{ padding: "24px" }}>
-              <BlockStack gap="400">
-                <InlineStackHeader
-                  title="⚡ How it works"
-                  subtitle="Setup takes about 2 minutes — most of it happens automatically."
-                  badge={<Badge tone="info" size="large">~2 min setup</Badge>}
-                />
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: "12px",
-                  }}
-                >
-                  {STEPS.map((step, i) => (
-                    <div
-                      key={step.title}
-                      style={{
-                        padding: "16px",
-                        backgroundColor: "#EFF6FF",
-                        borderRadius: "12px",
-                        border: "1px solid #BFDBFE",
-                      }}
-                    >
-                      <BlockStack gap="200">
-                        <InlineStack gap="200" blockAlign="center">
-                          <span style={{ fontSize: "20px" }}>{step.icon}</span>
-                          <Text as="p" variant="bodySm" tone="subdued">
-                            Step {i + 1}
-                          </Text>
-                        </InlineStack>
-                        <Text as="p" variant="bodyMd" fontWeight="semibold">
-                          {step.title}
-                        </Text>
+            <BlockStack gap="400">
+              <InlineStackHeader
+                title="⚡ How it works"
+                subtitle="Setup takes about 2 minutes — most of it happens automatically."
+                badge={<Badge tone="info" size="large">~2 min setup</Badge>}
+              />
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                {STEPS.map((step, i) => (
+                  <Box
+                    key={step.title}
+                    padding="400"
+                    background="bg-surface-info"
+                    borderRadius="300"
+                  >
+                    <BlockStack gap="200">
+                      <InlineStack gap="200" blockAlign="center">
+                        <span style={{ fontSize: "20px" }}>{step.icon}</span>
                         <Text as="p" variant="bodySm" tone="subdued">
-                          {step.description}
+                          Step {i + 1}
                         </Text>
-                      </BlockStack>
-                    </div>
-                  ))}
-                </div>
-              </BlockStack>
-            </div>
+                      </InlineStack>
+                      <Text as="p" variant="bodyMd" fontWeight="semibold">
+                        {step.title}
+                      </Text>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {step.description}
+                      </Text>
+                    </BlockStack>
+                  </Box>
+                ))}
+              </div>
+            </BlockStack>
+
           </Card>
 
           {/* Data transparency */}
           <Card>
-            <div style={{ padding: "24px" }}>
-              <BlockStack gap="400">
-                <InlineStackHeader
-                  title="🔒 What we read from your store"
-                  subtitle="Only what's needed to build smart recommendations — nothing else."
-                  badge={<Badge tone="success" size="large">Read-only</Badge>}
-                />
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(220px, 1fr))",
-                    gap: "12px",
-                  }}
-                >
-                  {DATA_ITEMS.map((item) => (
-                    <div
-                      key={item.label}
-                      style={{
-                        padding: "16px",
-                        backgroundColor: "#F5F3FF",
-                        borderRadius: "12px",
-                        border: "1px solid #DDD6FE",
-                      }}
-                    >
-                      <BlockStack gap="100">
-                        <InlineStack gap="200" blockAlign="center">
-                          <span style={{ fontSize: "18px" }}>{item.icon}</span>
-                          <Text as="p" variant="bodyMd" fontWeight="semibold">
-                            {item.label}
-                          </Text>
-                        </InlineStack>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {item.detail}
+            <BlockStack gap="400">
+              <InlineStackHeader
+                title="🔒 What we read from your store"
+                subtitle="Only what's needed to build smart recommendations — nothing else."
+                badge={<Badge tone="success" size="large">Read-only</Badge>}
+              />
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(220px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                {DATA_ITEMS.map((item) => (
+                  <Box
+                    key={item.label}
+                    padding="400"
+                    background="bg-surface-secondary"
+                    borderRadius="300"
+                  >
+                    <BlockStack gap="100">
+                      <InlineStack gap="200" blockAlign="center">
+                        <span style={{ fontSize: "18px" }}>{item.icon}</span>
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          {item.label}
                         </Text>
-                      </BlockStack>
-                    </div>
-                  ))}
-                </div>
-              </BlockStack>
-            </div>
+                      </InlineStack>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {item.detail}
+                      </Text>
+                    </BlockStack>
+                  </Box>
+                ))}
+              </div>
+            </BlockStack>
+
           </Card>
 
           {/* Pricing */}
           <Card>
-            <div style={{ padding: "24px" }}>
-              <BlockStack gap="400">
-                <InlineStackHeader
-                  title="💳 Simple pricing"
-                  subtitle="You only pay when we generate revenue for you — nothing upfront."
-                  badge={<Badge tone="success" size="large">No monthly fee</Badge>}
-                />
+            <BlockStack gap="400">
+              <InlineStackHeader
+                title="💳 Simple pricing"
+                subtitle="You only pay when we generate revenue for you — nothing upfront."
+                badge={<Badge tone="success" size="large">No monthly fee</Badge>}
+              />
 
-                <div
-                  style={{
-                    padding: "24px",
-                    backgroundColor: "#F0FDF4",
-                    borderRadius: "12px",
-                    border: "2px solid #22C55E",
-                    textAlign: "center",
-                  }}
-                >
+              <Box padding="500" background="bg-surface-success" borderRadius="300">
+                <BlockStack gap="100">
+                  <Text as="h3" variant="heading2xl" fontWeight="bold">
+                    {ratePercent}% of the revenue we generate
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Free until we&apos;ve driven {plan.symbol}
+                    {plan.trial_revenue_threshold.toLocaleString()} in sales
+                  </Text>
+                </BlockStack>
+              </Box>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(240px, 1fr))",
+                  gap: "12px",
+                }}
+              >
+                <Box padding="400" background="bg-surface-warning" borderRadius="300">
                   <BlockStack gap="100">
-                    <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {ratePercent}% of the revenue we generate
+                    <Text as="p" variant="bodyMd" fontWeight="semibold">
+                      🎯 Always capped
                     </Text>
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      Free until we&apos;ve driven {plan.symbol}
-                      {plan.trial_revenue_threshold.toLocaleString()} in sales
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Never more than {plan.symbol}
+                      {plan.cap_amount.toLocaleString()} in 30 days — no
+                      surprise charges.
                     </Text>
                   </BlockStack>
-                </div>
+                </Box>
+                <Box padding="400" background="bg-surface-info" borderRadius="300">
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="semibold">
+                      💳 No credit card required
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      You approve the charge in Shopify before anything is
+                      billed.
+                    </Text>
+                  </BlockStack>
+                </Box>
+              </div>
+            </BlockStack>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(240px, 1fr))",
-                    gap: "12px",
-                  }}
-                >
-                  <div
-                    style={{
-                      padding: "16px",
-                      backgroundColor: "#FEF3C7",
-                      borderRadius: "12px",
-                      border: "1px solid #FCD34D",
-                    }}
-                  >
-                    <BlockStack gap="100">
-                      <Text as="p" variant="bodyMd" fontWeight="semibold">
-                        🎯 Always capped
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Never more than {plan.symbol}
-                        {plan.cap_amount.toLocaleString()} in 30 days — no
-                        surprise charges.
-                      </Text>
-                    </BlockStack>
-                  </div>
-                  <div
-                    style={{
-                      padding: "16px",
-                      backgroundColor: "#EFF6FF",
-                      borderRadius: "12px",
-                      border: "1px solid #BFDBFE",
-                    }}
-                  >
-                    <BlockStack gap="100">
-                      <Text as="p" variant="bodyMd" fontWeight="semibold">
-                        💳 No credit card required
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        You approve the charge in Shopify before anything is
-                        billed.
-                      </Text>
-                    </BlockStack>
-                  </div>
-                </div>
-              </BlockStack>
-            </div>
           </Card>
 
           {error && (
@@ -276,51 +242,30 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
           )}
 
           {/* CTA */}
-          <div
-            style={{
-              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              borderRadius: "16px",
-              padding: "32px 24px",
-              textAlign: "center",
-              boxShadow:
-                "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
-              border: "1px solid rgba(255, 255, 255, 0.1)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <BlockStack gap="200" inlineAlign="center">
-              <Text
-                as="h3"
-                variant="headingLg"
-                fontWeight="bold"
-                tone="text-inverse"
-              >
-                Ready to boost your revenue?
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h3" variant="headingMd">
+                Ready to start?
               </Text>
-              <Text as="p" variant="bodyMd" tone="text-inverse-secondary">
-                Start free — no credit card required. Your recommendations can
-                be live in minutes.
+              <Text as="p" tone="subdued">
+                No credit card required, and nothing to pay until
+                recommendations have earned you your first $1,000. Setup takes
+                about two minutes — you can add placements to your theme while
+                we analyse your catalogue.
               </Text>
-              <div style={{ marginTop: "12px" }}>
-                <Form method="post" name="onboarding-form">
-                  <Button
-                    submit
-                    variant="primary"
-                    size="large"
-                    loading={isLoading}
-                    disabled={isLoading}
-                  >
-                    {isLoading ? "Activating..." : "Start Free"}
-                  </Button>
-                </Form>
-              </div>
-              <Text as="p" variant="bodySm" tone="text-inverse-secondary">
-                ⚡ Setup takes ~2 minutes. You can set up theme extensions while
-                AI analyzes your catalog.
-              </Text>
+              <Form method="post" name="onboarding-form">
+                <Button
+                  submit
+                  variant="primary"
+                  size="large"
+                  loading={isLoading}
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Setting up…" : "Start free"}
+                </Button>
+              </Form>
             </BlockStack>
-          </div>
+          </Card>
         </BlockStack>
       </BlockStack>
     </Page>

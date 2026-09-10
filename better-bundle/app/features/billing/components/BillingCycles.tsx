@@ -1,14 +1,15 @@
 import {
-  Card,
-  Text,
-  DataTable,
   Badge,
+  BlockStack,
   Button,
+  Card,
+  DataTable,
+  EmptyState,
   InlineStack,
   Pagination,
-  BlockStack,
+  Text,
 } from "@shopify/polaris";
-import { surfaces, radii } from "../../../components/UI/design.tokens";
+import { NOTHING_FOUND } from "../../../components/UI/illustrations";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "@remix-run/react";
 
@@ -77,31 +78,15 @@ export function BillingCycles({
 
         <div style={{ marginTop: "16px" }}>
           {cycles.length === 0 ? (
-            <div
-              style={{
-                padding: "48px 24px",
-                textAlign: "center",
-                backgroundColor: surfaces.slate.bg,
-                borderRadius: radii.lg,
-                border: `1px solid ${surfaces.slate.border}`,
-              }}
+            <EmptyState
+              heading="No billing cycles yet"
+              image={NOTHING_FOUND}
             >
-              <Text as="p" variant="headingMd" fontWeight="bold" tone="subdued">
-                No billing cycles found
-              </Text>
-              <BlockStack gap="050">
-              <Text
-                as="p"
-                variant="bodyMd"
-                tone="subdued"
-              >
-                {data?.subscriptionType === "TRIAL" ||
+              <Text as="p">{data?.subscriptionType === "TRIAL" ||
                 data?.subscriptionStatus === "TRIAL"
                   ? "Billing cycles will appear once your trial ends and subscription becomes active."
-                  : "Billing cycles will appear once your subscription is active and you start generating commissions."}
-              </Text>
-              </BlockStack>
-            </div>
+                  : "Billing cycles will appear once your subscription is active and you start generating commissions."}</Text>
+            </EmptyState>
           ) : (
             <DataTable
               columnContentTypes={["text", "text", "text", "text", "text"]}

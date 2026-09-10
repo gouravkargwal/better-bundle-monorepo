@@ -1,95 +1,66 @@
 import { NavMenu } from "@shopify/app-bridge-react";
-import { useLocation } from "@remix-run/react";
-import NavItem from "./NavItem";
+import { Link } from "@remix-run/react";
+
+/**
+ * The merchant navigation.
+ *
+ * Six items, down from seven. Two changes worth explaining:
+ *
+ * - **Preview merged into Setup.** Previewing is the "did my install work"
+ *   check — the same task as installing, minutes later — and it was holding a
+ *   permanent slot for something a merchant does once.
+ * - **Impact renamed Proof.** The page answers one question ("would I have got
+ *   those sales anyway?"), and "Impact" was vague enough that it overlapped
+ *   with Overview in merchants' heads as well as in the code.
+ *
+ * Labels are the information architecture; the paths behind them are unchanged.
+ * In an embedded app the merchant never sees a URL, so renaming routes would
+ * cost redirect stubs and every internal link while buying nothing.
+ *
+ * `useLocation` and the old `NavItem` wrapper are gone: App Bridge's `NavMenu`
+ * derives the active item itself, and `NavItem` accepted an `isActive` prop
+ * that it then ignored — so every one of those computed booleans was dead.
+ */
 
 interface EnhancedNavMenuProps {
   isOnboarded: boolean;
 }
 
 export function EnhancedNavMenu({ isOnboarded }: EnhancedNavMenuProps) {
-  const location = useLocation();
-
-  // Not onboarded → show minimal nav
   if (!isOnboarded) {
     return (
       <NavMenu>
-        <NavItem
-          to="/app/onboarding"
-          isActive={location.pathname === "/app/onboarding"}
-          prefetch="intent"
-        >
-          Get Started
-        </NavItem>
-
-        <NavItem
-          to="/app/help"
-          isActive={location.pathname === "/app/help"}
-          prefetch="intent"
-        >
-          Help & Support
-        </NavItem>
+        <Link to="/app/onboarding" rel="home" prefetch="intent">
+          Get started
+        </Link>
+        <Link to="/app/help" prefetch="intent">
+          Help &amp; support
+        </Link>
       </NavMenu>
     );
   }
 
-  // Onboarded → show full menu
   return (
     <NavMenu>
-      <NavItem
-        to="/app/overview"
-        isActive={location.pathname === "/app/overview"}
-        prefetch="intent"
-      >
-        Overview
-      </NavItem>
-
-      <NavItem
-        to="/app/impact"
-        isActive={location.pathname.startsWith("/app/impact")}
-        prefetch="intent"
-      >
-        Impact
-      </NavItem>
-
-      <NavItem
-        to="/app/extensions"
-        isActive={location.pathname === "/app/extensions"}
-        prefetch="intent"
-      >
-        Extensions
-      </NavItem>
-
-      <NavItem
-        to="/app/preview"
-        isActive={location.pathname === "/app/preview"}
-        prefetch="intent"
-      >
-        Preview
-      </NavItem>
-
-      <NavItem
-        to="/app/billing"
-        isActive={location.pathname.startsWith("/app/billing")}
-        prefetch="intent"
-      >
+      {/* App Bridge treats the first child as the home link. */}
+      <Link to="/app/overview" rel="home" prefetch="intent">
+        Home
+      </Link>
+      <Link to="/app/impact" prefetch="intent">
+        Proof
+      </Link>
+      <Link to="/app/extensions" prefetch="intent">
+        Setup
+      </Link>
+      <Link to="/app/billing" prefetch="intent">
         Billing
-      </NavItem>
-
-      <NavItem
-        to="/app/settings"
-        isActive={location.pathname === "/app/settings"}
-        prefetch="intent"
-      >
+      </Link>
+      <Link to="/app/settings" prefetch="intent">
         Settings
-      </NavItem>
-
-      <NavItem
-        to="/app/help"
-        isActive={location.pathname === "/app/help"}
-        prefetch="intent"
-      >
-        Help & Support
-      </NavItem>
+      </Link>
+      <Link to="/app/help" prefetch="intent">
+        Help &amp; support
+      </Link>
     </NavMenu>
   );
 }

@@ -1,6 +1,8 @@
 // features/settings/components/SettingsPage.tsx
 import { useCallback, useMemo, useState } from "react";
+import { useFetcher } from "@remix-run/react";
 import {
+  Box,
   Page,
   Card,
   BlockStack,
@@ -14,8 +16,8 @@ import {
   EmptyState,
   Tabs,
 } from "@shopify/polaris";
+import { NOTHING_FOUND } from "../../../components/UI/illustrations";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 import {
   SURFACE_LABELS,
   SURFACE_DESCRIPTIONS,
@@ -64,11 +66,26 @@ export function SettingsPage({
   const [excludedProductIds, setExcludedProductIds] = useState<string[]>(
     initialExcludedProductIds,
   );
-  const [saving, setSaving] = useState(false);
-  const [saveResult, setSaveResult] = useState<{
-    tone: "success" | "critical";
-    message: string;
-  } | null>(null);
+  // useFetcher, not a bare fetch(): with `v3_singleFetch: false` a plain POST
+  // to a route path is a *document* request, so Remix runs the action and then
+  // renders the whole route as HTML. `response.json()` then threw on the
+  // doctype and every save looked like a failure. The fetcher adds the `_data`
+  // parameter that makes Remix return the action's JSON instead.
+  const fetcher = useFetcher<{ success?: boolean; error?: string }>();
+  const saving = fetcher.state !== "idle";
+  const saveResult =
+    !saving && fetcher.data
+      ? fetcher.data.success
+        ? {
+            tone: "success" as const,
+            message:
+              "Settings saved. Changes apply to new requests immediately.",
+          }
+        : {
+            tone: "critical" as const,
+            message: fetcher.data.error || "Failed to save settings.",
+          }
+      : null;
   const [activeTab, setActiveTab] = useState(0);
 
   const [search, setSearch] = useState("");
@@ -94,40 +111,12 @@ export function SettingsPage({
     );
   }, []);
 
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setSaveResult(null);
-    try {
-      const response = await fetch("/app/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          surfaces,
-          holdoutDisabled,
-          excludedProductIds,
-        }),
-      });
-      const result = await response.json();
-      if (result.success) {
-        setSaveResult({
-          tone: "success",
-          message: "Settings saved. Changes apply to new requests immediately.",
-        });
-      } else {
-        setSaveResult({
-          tone: "critical",
-          message: result.error || "Failed to save settings.",
-        });
-      }
-    } catch {
-      setSaveResult({
-        tone: "critical",
-        message: "Failed to save settings. Please try again.",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }, [surfaces, holdoutDisabled, excludedProductIds]);
+  const handleSave = useCallback(() => {
+    fetcher.submit(
+      { surfaces, holdoutDisabled, excludedProductIds },
+      { method: "POST", encType: "application/json" },
+    );
+  }, [fetcher, surfaces, holdoutDisabled, excludedProductIds]);
 
   const tabs = [
     { id: "surfaces", content: "🎛️ Surfaces" },
@@ -136,15 +125,12 @@ export function SettingsPage({
   ];
 
   return (
-    <Page>
+    <Page
+      title="Settings"
+      subtitle="Choose where recommendations appear, how they're measured, and which products to exclude."
+    >
       <TitleBar title="Settings" />
       <BlockStack gap="300">
-        <HeroHeader
-          title="Control where and how recommendations appear"
-          subtitle="Choose which surfaces show offers, how revenue is measured, and which products are never recommended."
-          variant="subtle"
-          align="left"
-        />
 
         {error && (
           <Banner tone="critical">
@@ -218,79 +204,74 @@ function SurfacesTab({
   return (
     <BlockStack gap="500">
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text variant="headingMd" as="h3">
-                  🎛️ Recommendation Surfaces
-                </Text>
-                <Text as="p" tone="subdued">
-                  Turn surfaces off to hide recommendations there — the widget
-                  stays installed but shows nothing.
-                </Text>
-              </BlockStack>
-              <Badge tone="info" size="large">
-                {`${surfacesOn} of 5 on`}
-              </Badge>
-            </InlineStack>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                🎛️ Recommendation Surfaces
+              </Text>
+              <Text as="p" tone="subdued">
+                Turn surfaces off to hide recommendations there — the widget
+                stays installed but shows nothing.
+              </Text>
+            </BlockStack>
+            <Badge tone="info" size="large">
+              {`${surfacesOn} of 5 on`}
+            </Badge>
+          </InlineStack>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: "12px",
-              }}
-            >
-              {SURFACE_ORDER.map((key) => {
-                const enabled = surfaces[key];
-                return (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            {SURFACE_ORDER.map((key) => {
+              const enabled = surfaces[key];
+              return (
+                <Box
+                  key={key}
+                  padding="400"
+                  background={
+                    enabled ? "bg-surface-success" : "bg-surface-secondary"
+                  }
+                  borderRadius="300"
+                >
                   <div
-                    key={key}
                     style={{
-                      padding: "16px",
-                      backgroundColor: enabled ? "#F0FDF4" : "#FAFAFA",
-                      borderRadius: "12px",
-                      border: `2px solid ${enabled ? "#BBF7D0" : "#E5E7EB"}`,
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "12px",
+                      fontSize: "22px",
+                      lineHeight: 1,
+                      flexShrink: 0,
+                      marginTop: "2px",
                     }}
                   >
-                    <div
-                      style={{
-                        fontSize: "22px",
-                        lineHeight: 1,
-                        flexShrink: 0,
-                        marginTop: "2px",
-                      }}
-                    >
-                      {SURFACE_EMOJI[key]}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <BlockStack gap="050">
-                        <InlineStack align="space-between" blockAlign="center">
-                          <Text as="p" variant="bodyMd" fontWeight="semibold">
-                            {SURFACE_LABELS[key]}
-                          </Text>
-                          <Checkbox
-                            checked={enabled}
-                            onChange={() => onToggleSurface(key)}
-                            label={SURFACE_LABELS[key]}
-                            labelHidden
-                          />
-                        </InlineStack>
-                        <Text as="p" variant="bodySm" tone="subdued">
-                          {SURFACE_DESCRIPTIONS[key]}
-                        </Text>
-                      </BlockStack>
-                    </div>
+                    {SURFACE_EMOJI[key]}
                   </div>
-                );
-              })}
-            </div>
-          </BlockStack>
-        </div>
+                  <div style={{ flex: 1 }}>
+                    <BlockStack gap="050">
+                      <InlineStack align="space-between" blockAlign="center">
+                        <Text as="p" variant="bodyMd" fontWeight="semibold">
+                          {SURFACE_LABELS[key]}
+                        </Text>
+                        <Checkbox
+                          checked={enabled}
+                          onChange={() => onToggleSurface(key)}
+                          label={SURFACE_LABELS[key]}
+                          labelHidden
+                        />
+                      </InlineStack>
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {SURFACE_DESCRIPTIONS[key]}
+                      </Text>
+                    </BlockStack>
+                  </div>
+                </Box>
+              );
+            })}
+          </div>
+        </BlockStack>
+
       </Card>
     </BlockStack>
   );
@@ -308,46 +289,44 @@ function MeasurementTab({
   return (
     <BlockStack gap="500">
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text variant="headingMd" as="h3">
-                  🧪 Revenue Measurement
-                </Text>
-                <Text as="p" tone="subdued">
-                  A small % of shoppers see no offers (control group) so we can
-                  measure the true revenue lift your recommendations drive.
-                </Text>
-              </BlockStack>
-              <Checkbox
-                checked={!holdoutDisabled}
-                onChange={onToggleHoldout}
-                label="Holdout testing"
-              />
-            </InlineStack>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                🧪 Revenue Measurement
+              </Text>
+              <Text as="p" tone="subdued">
+                A small % of shoppers see no offers (control group) so we can
+                measure the true revenue lift your recommendations drive.
+              </Text>
+            </BlockStack>
+            <Checkbox
+              checked={!holdoutDisabled}
+              onChange={onToggleHoldout}
+              label="Holdout testing"
+            />
+          </InlineStack>
 
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: holdoutDisabled ? "#FEF3C7" : "#F0FDF4",
-                borderRadius: "12px",
-                border: `1px solid ${holdoutDisabled ? "#FCD34D" : "#BBF7D0"}`,
-              }}
-            >
-              <InlineStack align="space-between" blockAlign="center">
-                <Text as="p" variant="bodyMd" fontWeight="medium">
-                  {holdoutDisabled
-                    ? "Holdout is off — impact is estimated, not measured against a control."
-                    : `Control group active · ${shopCurrency === "USD" ? "$" : shopCurrency} revenue measured causally`}
-                </Text>
-                <Badge tone={holdoutDisabled ? "attention" : "success"}>
-                  {holdoutDisabled ? "Off" : "Active"}
-                </Badge>
-              </InlineStack>
-            </div>
-          </BlockStack>
-        </div>
+          <Box
+            padding="400"
+            background={
+              holdoutDisabled ? "bg-surface-warning" : "bg-surface-success"
+            }
+            borderRadius="300"
+          >
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="p" variant="bodyMd" fontWeight="medium">
+                {holdoutDisabled
+                  ? "Holdout is off — impact is estimated, not measured against a control."
+                  : "Control group active — revenue is measured against shoppers who saw no recommendations."}
+              </Text>
+              <Badge tone={holdoutDisabled ? "attention" : "success"}>
+                {holdoutDisabled ? "Off" : "Active"}
+              </Badge>
+            </InlineStack>
+          </Box>
+        </BlockStack>
+
       </Card>
     </BlockStack>
   );
@@ -371,127 +350,126 @@ function ExclusionsTab({
   return (
     <BlockStack gap="500">
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="300">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text variant="headingMd" as="h3">
-                  🚫 Excluded Products
-                </Text>
-                <Text as="p" tone="subdued">
-                  These products will never be recommended — great for gift
-                  cards, low-margin items, or products you'd rather not upsell.
-                </Text>
-              </BlockStack>
-              {excludedCount > 0 && (
-                <Badge tone="attention" size="large">
-                  {`${excludedCount} excluded`}
-                </Badge>
-              )}
-            </InlineStack>
-
-            <TextField
-              label="Search products"
-              value={search}
-              onChange={onSearch}
-              autoComplete="off"
-              placeholder="Search your catalog to exclude products..."
-            />
-
-            {filteredProducts.length === 0 ? (
-              <EmptyState
-                heading="No products match"
-                image=""
-                children={
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    {search
-                      ? "Try a different search."
-                      : "No products synced yet. Analysis needs to complete before products appear here."}
-                  </Text>
-                }
-              />
-            ) : (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-                  gap: "8px",
-                  maxHeight: "320px",
-                  overflowY: "auto",
-                  padding: "4px",
-                }}
-              >
-                {filteredProducts.slice(0, 200).map((product) => {
-                  const excluded = excludedProductIds.includes(
-                    product.productId,
-                  );
-                  return (
-                    <div
-                      key={product.productId}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px",
-                        border: excluded
-                          ? "2px solid #FCA5A5"
-                          : "1px solid #e5e7eb",
-                        borderRadius: "8px",
-                        background: excluded ? "#FEF2F2" : "#FAFAFA",
-                      }}
-                    >
-                      {product.imageUrl ? (
-                        <img
-                          src={product.imageUrl}
-                          alt=""
-                          width="32"
-                          height="32"
-                          style={{
-                            borderRadius: "4px",
-                            objectFit: "cover",
-                            flexShrink: 0,
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 32,
-                            height: 32,
-                            borderRadius: 4,
-                            background: "#E5E7EB",
-                            flexShrink: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 12,
-                            color: "#6B7280",
-                          }}
-                        >
-                          {product.title.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <Text
-                        as="p"
-                        variant="bodySm"
-                        fontWeight={excluded ? "semibold" : "regular"}
-                      >
-                        {product.title}
-                      </Text>
-                      <div style={{ marginLeft: "auto" }}>
-                        <Checkbox
-                          checked={excluded}
-                          onChange={() => onToggleExclusion(product.productId)}
-                          label={product.title}
-                          labelHidden
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+        <BlockStack gap="300">
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h3">
+                🚫 Excluded Products
+              </Text>
+              <Text as="p" tone="subdued">
+                These products will never be recommended — great for gift
+                cards, low-margin items, or products you'd rather not upsell.
+              </Text>
+            </BlockStack>
+            {excludedCount > 0 && (
+              <Badge tone="attention" size="large">
+                {`${excludedCount} excluded`}
+              </Badge>
             )}
-          </BlockStack>
-        </div>
+          </InlineStack>
+
+          <TextField
+            label="Search products"
+            value={search}
+            onChange={onSearch}
+            autoComplete="off"
+            placeholder="Search your catalog to exclude products..."
+          />
+
+          {filteredProducts.length === 0 ? (
+            <EmptyState
+              heading="No products match"
+              image={NOTHING_FOUND}
+              children={
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {search
+                    ? "Try a different search."
+                    : "No products synced yet. Analysis needs to complete before products appear here."}
+                </Text>
+              }
+            />
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+                gap: "8px",
+                maxHeight: "320px",
+                overflowY: "auto",
+                padding: "4px",
+              }}
+            >
+              {filteredProducts.slice(0, 200).map((product) => {
+                const excluded = excludedProductIds.includes(
+                  product.productId,
+                );
+                return (
+                  <div
+                    key={product.productId}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "8px",
+                      border: excluded
+                        ? "2px solid #FCA5A5"
+                        : "1px solid #e5e7eb",
+                      borderRadius: "8px",
+                      background: excluded ? "#FEF2F2" : "#FAFAFA",
+                    }}
+                  >
+                    {product.imageUrl ? (
+                      <img
+                        src={product.imageUrl}
+                        alt=""
+                        width="32"
+                        height="32"
+                        style={{
+                          borderRadius: "4px",
+                          objectFit: "cover",
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 4,
+                          background: "#E5E7EB",
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 12,
+                          color: "#6B7280",
+                        }}
+                      >
+                        {product.title.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <Text
+                      as="p"
+                      variant="bodySm"
+                      fontWeight={excluded ? "semibold" : "regular"}
+                    >
+                      {product.title}
+                    </Text>
+                    <div style={{ marginLeft: "auto" }}>
+                      <Checkbox
+                        checked={excluded}
+                        onChange={() => onToggleExclusion(product.productId)}
+                        label={product.title}
+                        labelHidden
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </BlockStack>
+
       </Card>
     </BlockStack>
   );

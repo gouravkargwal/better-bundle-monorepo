@@ -1,4 +1,5 @@
 import {
+  Box,
   Card,
   BlockStack,
   Text,
@@ -58,118 +59,103 @@ export function SubscriptionSuspended({
       </Card>
 
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="500">
-            {/* Header */}
-            <InlineStack align="space-between" blockAlign="center">
-              <div>
-                <Text as="h2" variant="headingMd" fontWeight="semibold">
-                  Subscription Suspended
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  Your Better Bundle services are currently paused
-                </Text>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
-                <AlertTriangleIcon />
-                <Text as="span" variant="bodyMd" tone="critical">
-                  Suspended
-                </Text>
-              </div>
-            </InlineStack>
-
-            <Banner tone="critical">
-              <Text as="p">
-                BetterBundle services are currently suspended. Please contact
-                support or reactivate your subscription to continue.
+        <BlockStack gap="500">
+          {/* Header */}
+          <InlineStack align="space-between" blockAlign="center">
+            <div>
+              <Text as="h2" variant="headingMd" fontWeight="semibold">
+                Subscription Suspended
               </Text>
-            </Banner>
-
-            {/* Subscription Details */}
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Your Better Bundle services are currently paused
+              </Text>
+            </div>
             <div
               style={{
-                padding: "20px",
-                backgroundColor: "#FEF2F2",
-                borderRadius: "12px",
-                border: "1px solid #FECACA",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              <BlockStack gap="300">
-                <Text as="h3" variant="headingMd" fontWeight="semibold">
-                  Subscription Details
-                </Text>
-                <BlockStack gap="200">
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Status:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      Suspended
-                    </Text>
-                  </InlineStack>
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Plan:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {subscriptionData.planName}
-                    </Text>
-                  </InlineStack>
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Rate:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      {ratePercent}% of attributed revenue
-                    </Text>
-                  </InlineStack>
-                </BlockStack>
-              </BlockStack>
+              <AlertTriangleIcon />
+              <Text as="span" variant="bodyMd" tone="critical">
+                Suspended
+              </Text>
             </div>
+          </InlineStack>
 
-            {/* Action Buttons */}
+          <Banner tone="critical">
+            <Text as="p">
+              BetterBundle services are currently suspended. Please contact
+              support or reactivate your subscription to continue.
+            </Text>
+          </Banner>
+
+          {/* Subscription Details */}
+          <Box padding="500" background="bg-surface-critical" borderRadius="300">
             <BlockStack gap="300">
-              <Button
-                variant="primary"
-                size="large"
-                onClick={handleReactivate}
-                icon={RefreshIcon}
-                fullWidth
-              >
-                Reactivate Subscription
-              </Button>
-
-              <Button
-                variant="tertiary"
-                onClick={() => (window.location.href = "/app/support")}
-              >
-                Contact Support
-              </Button>
-            </BlockStack>
-
-            {/* Info */}
-            <div
-              style={{
-                padding: "16px",
-                backgroundColor: "#FEF3C7",
-                borderRadius: "8px",
-                border: "1px solid #FDE68A",
-              }}
-            >
-              <Text as="p" variant="bodyMd">
-                <strong>Why was my subscription suspended?</strong> This usually
-                happens due to payment issues or manual suspension. Contact
-                support for assistance.
+              <Text as="h3" variant="headingMd" fontWeight="semibold">
+                Subscription Details
               </Text>
-            </div>
+              <BlockStack gap="200">
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Status:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    Suspended
+                  </Text>
+                </InlineStack>
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Plan:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    {subscriptionData.planName}
+                  </Text>
+                </InlineStack>
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Rate:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    {ratePercent}% of attributed revenue
+                  </Text>
+                </InlineStack>
+              </BlockStack>
+            </BlockStack>
+          </Box>
+
+          {/* Action Buttons */}
+          <BlockStack gap="300">
+            <Button
+              variant="primary"
+              size="large"
+              onClick={handleReactivate}
+              icon={RefreshIcon}
+              fullWidth
+            >
+              Reactivate Subscription
+            </Button>
+
+            <Button
+              variant="tertiary"
+              onClick={() => (window.location.href = "/app/support")}
+            >
+              Contact Support
+            </Button>
           </BlockStack>
-        </div>
+
+          {/* Info */}
+          <Box padding="400" background="bg-surface-warning" borderRadius="300">
+            <Text as="p" variant="bodyMd">
+              <strong>Why was my subscription suspended?</strong> This usually
+              happens due to payment issues or manual suspension. Contact
+              support for assistance.
+            </Text>
+          </Box>
+        </BlockStack>
+
       </Card>
     </BlockStack>
   );

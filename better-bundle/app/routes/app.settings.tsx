@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { SettingsPage } from "../features/settings/components/SettingsPage";
@@ -134,3 +135,5 @@ export default function SettingsRoute() {
     />
   );
 }
+
+export const ErrorBoundary = routeErrorBoundary;

@@ -1,17 +1,23 @@
 // app/routes/app.overview.tsx
 //
-// Merchant landing dashboard. Two states:
-//  - Edges servable → the real Overview page (KPIs, surface status, top products).
-//  - Still analyzing → the "Analyzing your catalog…" modal, which polls the
-//    worker and hands off to the dashboard when the pipeline is ready.
+// Home — the page the merchant lands on. Two states:
+//  - Edges servable → the Home page (cycle money, placements, top products).
+//  - Still analysing → the "Setting up…" modal, which polls the worker and
+//    hands off once the pipeline is ready.
+//
+// The path stays /app/overview: in an embedded app the merchant never sees a
+// URL, so renaming the route would cost a redirect stub and rewriting every
+// internal link while buying nothing. The nav label and the component are what
+// the merchant and the next developer read, and both now say Home.
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useRevalidator } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import { Card, Page, Text, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { getOverviewData } from "../features/overview/services/overview.service";
-import { OverviewPage } from "../features/overview/components/OverviewPage";
+import { getHomeData } from "../features/overview/services/home.service";
+import { HomePage } from "../features/overview/components/HomePage";
 import { AnalysisModal } from "../features/overview/components/AnalysisModal";
 import logger from "../utils/logger";
 
@@ -19,27 +25,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
   try {
-    const data = await getOverviewData(session.shop);
+    const data = await getHomeData(session.shop);
     return json({
       ok: true as const,
       ...data,
     });
   } catch (error) {
-    logger.error({ error, shop: session.shop }, "Overview loader error");
+    logger.error({ error, shop: session.shop }, "Home loader error");
     return json(
       {
         ok: false as const,
         error:
           error instanceof Error
             ? error.message
-            : "Failed to load overview data",
+            : "Failed to load your dashboard",
       },
       { status: 500 },
     );
   }
 };
 
-export default function OverviewRoute() {
+export default function Home() {
   const loaderData = useLoaderData<typeof loader>();
   const { revalidate } = useRevalidator();
 
@@ -52,11 +58,11 @@ export default function OverviewRoute() {
   if (!loaderData.ok) {
     return (
       <Page>
-        <TitleBar title="Overview" />
+        <TitleBar title="Home" />
         <Card>
           <div style={{ padding: "24px", textAlign: "center" }}>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Failed to load overview data. Please reload the page.
+              Failed to load your dashboard. Please reload the page.
             </Text>
           </div>
         </Card>
@@ -71,17 +77,17 @@ export default function OverviewRoute() {
     return (
       <>
         <Page>
-          <TitleBar title="Overview" />
+          <TitleBar title="Home" />
           <BlockStack gap="300">
             <Card>
               <BlockStack gap="200" inlineAlign="center">
                 <Text as="h2" variant="headingLg" fontWeight="bold" tone="subdued">
-                  Setting up your AI recommendations
+                  Analysing your catalogue
                 </Text>
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  We're analyzing your catalog, order history, and customers to
-                  build personalized recommendations. This usually takes a few
-                  minutes.
+                  We're reading your products and past orders to work out which
+                  items sell together. This usually takes a few minutes — you
+                  can leave this page and come back.
                 </Text>
               </BlockStack>
             </Card>
@@ -93,5 +99,7 @@ export default function OverviewRoute() {
     );
   }
 
-  return <OverviewPage data={loaderData} />;
+  return <HomePage data={loaderData} />;
 }
+
+export const ErrorBoundary = routeErrorBoundary;

@@ -60,10 +60,11 @@ export function ResultState({
     case "significant":
       headline = money(result.incrementalRevenue);
       body =
-        `Shoppers who saw recommendations spent ${pct(result.conversionLiftRel)} more than ` +
-        `the ${holdoutPercent}% who didn't. Over ${window} that's revenue you wouldn't ` +
-        `otherwise have had. We're 95% confident the true figure is between ` +
-        `${money(result.incrementalRevenueLower)} and ${money(result.incrementalRevenueUpper)}.`;
+        `Shoppers who saw recommendations spent ${pct(result.conversionLiftRel)} more ` +
+        `than the ${holdoutPercent}% who saw none. Over ${window} that's money you ` +
+        `wouldn't otherwise have made. We're 95% confident the real figure sits ` +
+        `between ${money(result.incrementalRevenueLower)} and ` +
+        `${money(result.incrementalRevenueUpper)}.`;
       action = { label: "See what you were charged", url: "/app/billing" };
       break;
 
@@ -71,35 +72,37 @@ export function ResultState({
       // A point estimate, as a percentage. Deliberately no currency: an
       // interval that straddles zero is not a revenue figure.
       body =
-        `Shoppers who saw recommendations spent about the same as the control group. ` +
-        `The difference so far (${pct(result.conversionLiftRel)}) is small enough that it ` +
-        `could be normal week-to-week variation, so we won't claim it as a lift.`;
+        `Shoppers who saw recommendations spent about the same as those who ` +
+        `did not. The ${pct(result.conversionLiftRel)} difference observed so far is ` +
+        `within normal week-to-week variation, so we are not reporting it as a ` +
+        `lift. Adding placements increases the volume needed to settle it.`;
       action = { label: "Add another placement", url: "/app/extensions" };
       break;
 
     case "insufficient_data":
       body =
-        `We can't tell yet. Measuring lift reliably needs about ` +
-        `${result.minControlOrders} orders from the control group — you have ` +
-        `${result.controlConverters}. This doesn't affect your billing: attributed ` +
-        `revenue is tracked and charged as usual, and you can see it on Home.`;
+        `Not enough data yet. To confirm recommendations caused a sale we ` +
+        `compare against the shoppers who were shown none, which needs about ` +
+        `${result.minControlOrders} orders from that group. You have ` +
+        `${result.controlConverters}. This does not affect your bill — ` +
+        `attributed revenue is tracked and charged as normal.`;
       break;
 
     case "not_measurable":
       body =
-        `Checkout and thank-you page recommendations are shown to every shopper by ` +
-        `design, so there's no control group there to compare against. To measure ` +
-        `lift, use a placement that supports one: product pages, post-purchase, or ` +
-        `customer account.`;
+        `Every shopper sees these placements by design — withholding an offer ` +
+        `at the payment step would cost you real sales — so there is no control ` +
+        `group here to compare against. Product pages, post-purchase and ` +
+        `customer account can all be measured.`;
       action = { label: "Add a measurable placement", url: "/app/extensions" };
       break;
 
     case "holdout_disabled":
       body =
-        `There's nothing to compare against. The ${holdoutPercent}% control group is ` +
-        `switched off, so every shopper sees recommendations and we have no baseline ` +
-        `for what they'd have spent without them. Your billing is unaffected — but ` +
-        `until it's back on, we can't prove any of it was incremental.`;
+        `The ${holdoutPercent}% control group is switched off, so every shopper is ` +
+        `seeing recommendations and there's no baseline left to compare them to. ` +
+        `Your billing carries on unaffected — but while it's off, we can't show ` +
+        `you what recommendations are actually adding.`;
       action = { label: "Turn the control group back on", url: "/app/settings" };
       break;
 

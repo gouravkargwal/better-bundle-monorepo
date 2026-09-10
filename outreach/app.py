@@ -21,8 +21,8 @@ def _cached_pipeline_report(date_filter):
     return engine.get_pipeline_report(date_filter=date_filter)
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _cached_brevo_stats(date_filter):
-    return engine.get_brevo_stats(date_filter=date_filter)
+def _cached_delivery_stats(date_filter):
+    return engine.get_delivery_stats(date_filter=date_filter)
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _cached_followups_due():
@@ -30,7 +30,7 @@ def _cached_followups_due():
 
 def _clear_cache():
     _cached_pipeline_report.clear()
-    _cached_brevo_stats.clear()
+    _cached_delivery_stats.clear()
     _cached_followups_due.clear()
 
 
@@ -99,12 +99,14 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### ⚙️ Settings")
-    st.write(f"Brevo API: {'✅' if engine.BREVO_KEY else '❌'}")
+    st.write(f"Elastic Email API: {'✅' if engine.EE_API_KEY else '❌'}")
     st.write(f"Gmail: {'✅' if engine.GMAIL_APP_PASS else '❌'}")
     st.write(f"Gemini: {'✅' if engine.GEMINI_API_KEY else '❌'}")
 
 # ---------- MAIN TABS ----------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📤 Send", "🔥 Hot Leads", "📝 Drafts", "📧 Follow-ups", "📈 Reports"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["📤 Send", "🔥 Hot Leads", "📝 Drafts", "📧 Follow-ups", "📈 Reports", "🧪 Test"]
+)
 
 # TAB 1: Send
 with tab1:
@@ -448,9 +450,9 @@ with tab5:
     else:
         st.caption("📅 Showing all data")
 
-    st.markdown("### 📡 Brevo Delivery Stats")
+    st.markdown("### 📡 Delivery Stats")
 
-    if st.button("🔄 Sync status from Brevo"):
+    if st.button("🔄 Sync status"):
         with st.spinner("Fetching delivery events..."):
             res = engine.sync_email_status()
         _clear_cache()
@@ -461,7 +463,7 @@ with tab5:
     if "sync_msg" in st.session_state:
         st.success(st.session_state.pop("sync_msg"))
 
-    stats = _cached_brevo_stats(selected_date)
+    stats = _cached_delivery_stats(selected_date)
 
     # Replies first: it is the only metric here that cannot be faked by a machine.
     c1, c2, c3, c4 = st.columns(4)
@@ -496,8 +498,8 @@ with tab5:
         st.caption(f"{stats['pending']} sends have no events yet — click Sync.")
     if stats["stale"]:
         st.warning(
-            f"❌ {stats['stale']} sends were accepted by Brevo but never processed — "
-            f"no event after {engine.STALE_AFTER_HOURS}h. These never reached anyone."
+            f"❌ {stats['stale']} sends were accepted by Elastic Email but never "
+            f"produced an event — no event after {engine.STALE_AFTER_HOURS}h. These never reached anyone."
         )
         if st.button(f"📤 Resend {stats['stale']} dropped sends"):
             with st.spinner("Resending..."):
@@ -598,6 +600,20 @@ with tab5:
             )
     else:
         st.info("No data for this date. Import prospects or pick another date.")
+
+# TAB 6: Test
+with tab6:
+    st.markdown("### End-to-end smoke test")
+    st.caption(
+        "Sends ONE real email, then waits for the Elastic Email event and checks "
+        "it landed in the IMAP inbox. Point it at an address you own."
+    )
+    to = st.text_input("Send test to", value=engine.GMAIL_USER or "")
+    wait = st.slider("Seconds to wait for the delivery event", 30, 180, 90, 15)
+    if st.button("🧪 Run smoke test", type="primary", disabled=not to):
+        for ok, label, detail in engine.smoke_test(to, wait_secs=wait):
+            (st.success if ok else st.error)(f"**{label}** — {detail}")
+        _clear_cache()
 
 # ---------- FOOTER ----------
 st.divider()

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Box,
   BlockStack,
   Button,
   Card,
@@ -81,18 +82,115 @@ export function TrialCompleted({
       </Card>
 
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="400">
-            {/* Status Banner */}
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#FEF3C7",
-                borderRadius: "12px",
-                border: "1px solid #FCD34D",
-              }}
-            >
-              <InlineStack gap="300" align="start" blockAlign="center">
+        <BlockStack gap="400">
+          {/* Status Banner */}
+          <Box padding="500" background="bg-surface-warning" borderRadius="300">
+            <InlineStack gap="300" align="start" blockAlign="center">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: "40px",
+                  minHeight: "40px",
+                  padding: "12px",
+                  backgroundColor: "#F59E0B15",
+                  borderRadius: "16px",
+                  border: "2px solid #F59E0B30",
+                }}
+              >
+                <Icon source={AlertTriangleIcon} tone="base" />
+              </div>
+              <BlockStack gap="100">
+                <Text as="span" tone="caution">
+                  <Text as="h3" variant="headingMd" fontWeight="bold">
+                    Services Currently Paused
+                  </Text>
+                </Text>
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Your Better Bundle features are paused until billing is
+                  configured. Setup takes less than 2 minutes.
+                </Text>
+              </BlockStack>
+            </InlineStack>
+          </Box>
+
+          {/* Plan Details */}
+          <Box padding="500" background="bg-surface-secondary" borderRadius="300">
+            <BlockStack gap="300">
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
+                <Text as="span">
+                  <Text as="h3" variant="headingMd" fontWeight="bold">
+                    💡 Flat Rate Pricing Plan
+                  </Text>
+                </Text>
+              </Box>
+
+              <BlockStack gap="200">
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Plan:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="bold">
+                    Pro
+                  </Text>
+                </InlineStack>
+
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Price:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="bold">
+                    {ratePercent}% of attributed revenue
+                  </Text>
+                </InlineStack>
+
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Monthly Maximum:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="bold">
+                    {formatCurrency(trialData.cappedAmount)}
+                  </Text>
+                </InlineStack>
+
+                <InlineStack align="space-between">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    What You Get:
+                  </Text>
+                  <Text as="p" variant="bodyMd" fontWeight="bold">
+                    Full access to all features
+                  </Text>
+                </InlineStack>
+              </BlockStack>
+
+              <div
+                style={{
+                  padding: "12px",
+                  backgroundColor: "#FFFFFF",
+                  borderRadius: "8px",
+                  border: "1px solid #E2E8F0",
+                }}
+              >
+                <Text as="p" variant="bodySm" tone="subdued">
+                  ✅ Cancel anytime • No monthly fee • You only pay on sales
+                  we generate
+                </Text>
+              </div>
+            </BlockStack>
+          </Box>
+
+          {/* Plan Selection Card */}
+          <div
+            style={{
+              padding: "20px",
+              backgroundColor: "#FFFFFF",
+              borderRadius: "12px",
+              border: "2px solid #3B82F6",
+            }}
+          >
+            <BlockStack gap="400">
+              <InlineStack gap="200" align="start" blockAlign="center">
                 <div
                   style={{
                     display: "flex",
@@ -101,223 +199,90 @@ export function TrialCompleted({
                     minWidth: "40px",
                     minHeight: "40px",
                     padding: "12px",
-                    backgroundColor: "#F59E0B15",
+                    backgroundColor: "#3B82F615",
                     borderRadius: "16px",
-                    border: "2px solid #F59E0B30",
+                    border: "2px solid #3B82F630",
                   }}
                 >
-                  <Icon source={AlertTriangleIcon} tone="base" />
+                  <Icon source={CreditCardIcon} tone="base" />
                 </div>
                 <BlockStack gap="100">
-                  <div style={{ color: "#92400E" }}>
-                    <Text as="h3" variant="headingMd" fontWeight="bold">
-                      Services Currently Paused
-                    </Text>
-                  </div>
-                  <Text as="p" variant="bodyMd" tone="subdued">
-                    Your Better Bundle features are paused until billing is
-                    configured. Setup takes less than 2 minutes.
+                  <Text as="h3" variant="headingMd" fontWeight="bold">
+                    Continue with Pay As You Go
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    {ratePercent}% of the revenue we generate, capped at{" "}
+                    {formatCurrency(trialData.cappedAmount)}
                   </Text>
                 </BlockStack>
               </InlineStack>
-            </div>
 
-            {/* Plan Details */}
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#F8FAFC",
-                borderRadius: "12px",
-                border: "1px solid #E2E8F0",
-              }}
-            >
-              <BlockStack gap="300">
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#DBEAFE",
-                    borderRadius: "12px",
-                    border: "1px solid #BAE6FD",
-                  }}
-                >
-                  <div style={{ color: "#0C4A6E" }}>
-                    <Text as="h3" variant="headingMd" fontWeight="bold">
-                      💡 Flat Rate Pricing Plan
-                    </Text>
-                  </div>
-                </div>
-
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
                 <BlockStack gap="200">
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Plan:
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
                     </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      Pro
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      AI-powered product recommendations
                     </Text>
                   </InlineStack>
-
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Price:
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
                     </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      {ratePercent}% of attributed revenue
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Detailed attribution & analytics
                     </Text>
                   </InlineStack>
-
-                  <InlineStack align="space-between">
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
+                    </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Monthly Maximum:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      {formatCurrency(trialData.cappedAmount)}
-                    </Text>
-                  </InlineStack>
-
-                  <InlineStack align="space-between">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      What You Get:
-                    </Text>
-                    <Text as="p" variant="bodyMd" fontWeight="bold">
-                      Full access to all features
+                      Priority support
                     </Text>
                   </InlineStack>
                 </BlockStack>
+              </Box>
 
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "8px",
-                    border: "1px solid #E2E8F0",
-                  }}
-                >
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    ✅ Cancel anytime • No monthly fee • You only pay on sales
-                    we generate
-                  </Text>
-                </div>
-              </BlockStack>
-            </div>
-
-            {/* Plan Selection Card */}
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#FFFFFF",
-                borderRadius: "12px",
-                border: "2px solid #3B82F6",
-              }}
-            >
-              <BlockStack gap="400">
-                <InlineStack gap="200" align="start" blockAlign="center">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: "40px",
-                      minHeight: "40px",
-                      padding: "12px",
-                      backgroundColor: "#3B82F615",
-                      borderRadius: "16px",
-                      border: "2px solid #3B82F630",
-                    }}
-                  >
-                    <Icon source={CreditCardIcon} tone="base" />
-                  </div>
-                  <BlockStack gap="100">
-                    <Text as="h3" variant="headingMd" fontWeight="bold">
-                      Continue with Pay As You Go
-                    </Text>
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      {ratePercent}% of the revenue we generate, capped at{" "}
-                      {formatCurrency(trialData.cappedAmount)}
-                    </Text>
-                  </BlockStack>
-                </InlineStack>
-
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#F0F9FF",
-                    borderRadius: "8px",
-                    border: "1px solid #BAE6FD",
-                  }}
-                >
-                  <BlockStack gap="200">
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        AI-powered product recommendations
-                      </Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Detailed attribution & analytics
-                      </Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Priority support
-                      </Text>
-                    </InlineStack>
-                  </BlockStack>
-                </div>
-
-                <div
-                  style={{
-                    padding: "12px",
-                    backgroundColor: "#FEF3C7",
-                    borderRadius: "8px",
-                    border: "1px solid #FCD34D",
-                  }}
-                >
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You are charged {ratePercent}% of the revenue we
-                    attribute to our recommendations, never more than{" "}
-                    {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
-                    A month we generate nothing costs you nothing.
-                  </Text>
-                </div>
-              </BlockStack>
-            </div>
-
-            {/* Error Display */}
-            {error && (
-              <Banner tone="critical">
-                <Text as="p">{error}</Text>
-              </Banner>
-            )}
-
-            {/* Action Buttons */}
-            <BlockStack gap="300">
-              <Button
-                variant="primary"
-                size="large"
-                onClick={handleSetupBilling}
-                loading={isLoading}
-                fullWidth
-              >
-                Continue to Shopify Approval
-              </Button>
-
-              <Text as="p" variant="bodySm" tone="subdued" alignment="center">
-                You'll be redirected to Shopify to review and approve your
-                subscription
-              </Text>
+              <Box padding="400" background="bg-surface-warning" borderRadius="300">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  💡 You are charged {ratePercent}% of the revenue we
+                  attribute to our recommendations, never more than{" "}
+                  {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
+                  A month we generate nothing costs you nothing.
+                </Text>
+              </Box>
             </BlockStack>
+          </div>
+
+          {/* Error Display */}
+          {error && (
+            <Banner tone="critical">
+              <Text as="p">{error}</Text>
+            </Banner>
+          )}
+
+          {/* Action Buttons */}
+          <BlockStack gap="300">
+            <Button
+              variant="primary"
+              size="large"
+              onClick={handleSetupBilling}
+              loading={isLoading}
+              fullWidth
+            >
+              Continue to Shopify Approval
+            </Button>
+
+            <Text as="p" variant="bodySm" tone="subdued" alignment="center">
+              You'll be redirected to Shopify to review and approve your
+              subscription
+            </Text>
           </BlockStack>
-        </div>
+        </BlockStack>
+
       </Card>
 
       {/* Help Section */}
@@ -331,20 +296,13 @@ export function TrialCompleted({
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#DBEAFE",
-                  borderRadius: "12px",
-                  border: "1px solid #BAE6FD",
-                }}
-              >
-                <div style={{ color: "#0C4A6E" }}>
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
+                <Text as="span">
                   <Text as="h3" variant="headingMd" fontWeight="bold">
                     ℹ️ How It Works
                   </Text>
-                </div>
-              </div>
+                </Text>
+              </Box>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm">
                   <strong>1.</strong> Click "Continue to Shopify Approval"
@@ -367,20 +325,13 @@ export function TrialCompleted({
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#FEF3C7",
-                  borderRadius: "12px",
-                  border: "1px solid #FCD34D",
-                }}
-              >
-                <div style={{ color: "#92400E" }}>
+              <Box padding="400" background="bg-surface-warning" borderRadius="300">
+                <Text as="span" tone="caution">
                   <Text as="h3" variant="headingMd" fontWeight="bold">
                     💡 Good to Know
                   </Text>
-                </div>
-              </div>
+                </Text>
+              </Box>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>Capped Pricing:</strong> Your bill can never exceed{" "}

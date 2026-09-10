@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Box,
   Card,
   BlockStack,
   Text,
@@ -111,171 +112,149 @@ export function SubscriptionPending({
 
       {/* Main Action Card */}
       <Card>
-        <div style={{ padding: "24px" }}>
-          <BlockStack gap="400">
-            {/* Status Banner */}
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#FEF3C7",
-                borderRadius: "12px",
-                border: "1px solid #FCD34D",
-              }}
-            >
-              <BlockStack gap="300">
-                <InlineStack gap="300" align="start" blockAlign="center">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      minWidth: "40px",
-                      minHeight: "40px",
-                      padding: "12px",
-                      backgroundColor: "#F59E0B15",
-                      borderRadius: "16px",
-                      border: "2px solid #F59E0B30",
-                    }}
-                  >
-                    <Icon source={ClockIcon} tone="base" />
-                  </div>
-                  <BlockStack gap="100">
-                    <div style={{ color: "#92400E" }}>
-                      <Text as="h3" variant="headingMd" fontWeight="bold">
-                        Next Step: Approve Subscription in Shopify
-                      </Text>
-                    </div>
-                    <Text as="p" variant="bodyMd" tone="subdued">
-                      Your flat-rate subscription is waiting for approval by a
-                      store owner or admin
-                    </Text>
-                  </BlockStack>
-                  <Badge tone="attention" size="large">
-                    Pending
-                  </Badge>
-                </InlineStack>
-              </BlockStack>
-            </div>
-
-            {/* Plan Details */}
-            <div
-              style={{
-                padding: "20px",
-                backgroundColor: "#F8FAFC",
-                borderRadius: "12px",
-                border: "1px solid #E2E8F0",
-              }}
-            >
-              <BlockStack gap="300">
-                <InlineStack align="space-between" blockAlign="center">
-                  <BlockStack gap="100">
-                    <Text as="p" variant="bodySm" tone="subdued">
-                      Flat Rate Plan
-                    </Text>
-                    <Text as="h3" variant="headingLg" fontWeight="bold">
-                      {subscriptionData.planName}
-                    </Text>
-                  </BlockStack>
-                  <Badge tone="info">Ready for Approval</Badge>
-                </InlineStack>
-
+        <BlockStack gap="400">
+          {/* Status Banner */}
+          <Box padding="500" background="bg-surface-warning" borderRadius="300">
+            <BlockStack gap="300">
+              <InlineStack gap="300" align="start" blockAlign="center">
                 <div
                   style={{
-                    padding: "16px",
-                    backgroundColor: "#FFFFFF",
-                    borderRadius: "8px",
-                    border: "1px solid #E2E8F0",
-                  }}
-                >
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Rate:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        {ratePercent}% of attributed revenue
-                      </Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Billing Cycle:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        Every 30 Days
-                      </Text>
-                    </InlineStack>
-                    <InlineStack align="space-between">
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Status:
-                      </Text>
-                      <Text as="p" variant="bodyMd" fontWeight="bold">
-                        Pending Approval
-                      </Text>
-                    </InlineStack>
-                  </BlockStack>
-                </div>
-
-                <div
-                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    minWidth: "40px",
+                    minHeight: "40px",
                     padding: "12px",
-                    backgroundColor: "#DBEAFE",
-                    borderRadius: "8px",
-                    border: "1px solid #BAE6FD",
+                    backgroundColor: "#F59E0B15",
+                    borderRadius: "16px",
+                    border: "2px solid #F59E0B30",
                   }}
                 >
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    💡 You are charged {ratePercent}% of the revenue we
-                    attribute to our recommendations, capped at{" "}
-                    {formatCurrency(subscriptionData.cappedAmount)} per 30-day
-                    cycle. No monthly fee.
-                  </Text>
+                  <Icon source={ClockIcon} tone="base" />
                 </div>
-              </BlockStack>
-            </div>
+                <BlockStack gap="100">
+                  <Text as="span" tone="caution">
+                    <Text as="h3" variant="headingMd" fontWeight="bold">
+                      Next Step: Approve Subscription in Shopify
+                    </Text>
+                  </Text>
+                  <Text as="p" variant="bodyMd" tone="subdued">
+                    Your flat-rate subscription is waiting for approval by a
+                    store owner or admin
+                  </Text>
+                </BlockStack>
+                <Badge tone="attention" size="large">
+                  Pending
+                </Badge>
+              </InlineStack>
+            </BlockStack>
+          </Box>
 
-            {/* Action Buttons */}
-            {subscriptionData.confirmationUrl ? (
-              <BlockStack gap="300">
-                <Button
-                  variant="primary"
-                  size="large"
-                  onClick={handleApproveSubscription}
-                  fullWidth
-                  disabled={cancelling}
-                >
-                  Open Shopify Approval Page
-                </Button>
+          {/* Plan Details */}
+          <Box padding="500" background="bg-surface-secondary" borderRadius="300">
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Flat Rate Plan
+                  </Text>
+                  <Text as="h3" variant="headingLg" fontWeight="bold">
+                    {subscriptionData.planName}
+                  </Text>
+                </BlockStack>
+                <Badge tone="info">Ready for Approval</Badge>
+              </InlineStack>
 
-                {/* ✅ NEW: Cancel Button */}
-                <Button
-                  size="large"
-                  onClick={handleCancelSubscription}
-                  loading={cancelling}
-                  tone="critical"
-                  fullWidth
-                >
-                  Cancel This Subscription
-                </Button>
-              </BlockStack>
-            ) : (
-              <Banner tone="warning">
+              <div
+                style={{
+                  padding: "16px",
+                  backgroundColor: "#FFFFFF",
+                  borderRadius: "8px",
+                  border: "1px solid #E2E8F0",
+                }}
+              >
                 <BlockStack gap="200">
-                  <InlineStack gap="200" align="start">
-                    <Icon source={AlertTriangleIcon} tone="warning" />
-                    <BlockStack gap="100">
-                      <Text as="p" variant="bodyMd" fontWeight="semibold">
-                        Approval link not found
-                      </Text>
-                      <Text as="p" variant="bodySm">
-                        Please contact support if this issue persists.
-                      </Text>
-                    </BlockStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Rate:
+                    </Text>
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      {ratePercent}% of attributed revenue
+                    </Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Billing Cycle:
+                    </Text>
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      Every 30 Days
+                    </Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Status:
+                    </Text>
+                    <Text as="p" variant="bodyMd" fontWeight="bold">
+                      Pending Approval
+                    </Text>
                   </InlineStack>
                 </BlockStack>
-              </Banner>
-            )}
-          </BlockStack>
-        </div>
+              </div>
+
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
+                <Text as="p" variant="bodySm" tone="subdued">
+                  💡 You are charged {ratePercent}% of the revenue we
+                  attribute to our recommendations, capped at{" "}
+                  {formatCurrency(subscriptionData.cappedAmount)} per 30-day
+                  cycle. No monthly fee.
+                </Text>
+              </Box>
+            </BlockStack>
+          </Box>
+
+          {/* Action Buttons */}
+          {subscriptionData.confirmationUrl ? (
+            <BlockStack gap="300">
+              <Button
+                variant="primary"
+                size="large"
+                onClick={handleApproveSubscription}
+                fullWidth
+                disabled={cancelling}
+              >
+                Open Shopify Approval Page
+              </Button>
+
+              {/* ✅ NEW: Cancel Button */}
+              <Button
+                size="large"
+                onClick={handleCancelSubscription}
+                loading={cancelling}
+                tone="critical"
+                fullWidth
+              >
+                Cancel This Subscription
+              </Button>
+            </BlockStack>
+          ) : (
+            <Banner tone="warning">
+              <BlockStack gap="200">
+                <InlineStack gap="200" align="start">
+                  <Icon source={AlertTriangleIcon} tone="warning" />
+                  <BlockStack gap="100">
+                    <Text as="p" variant="bodyMd" fontWeight="semibold">
+                      Approval link not found
+                    </Text>
+                    <Text as="p" variant="bodySm">
+                      Please contact support if this issue persists.
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
+            </Banner>
+          )}
+        </BlockStack>
+
       </Card>
 
       {/* Help & Info Cards */}
@@ -290,20 +269,13 @@ export function SubscriptionPending({
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#DBEAFE",
-                  borderRadius: "12px",
-                  border: "1px solid #BAE6FD",
-                }}
-              >
-                <div style={{ color: "#0C4A6E" }}>
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
+                <Text as="span">
                   <Text as="h3" variant="headingMd" fontWeight="bold">
                     ℹ️ What Happens Next
                   </Text>
-                </div>
-              </div>
+                </Text>
+              </Box>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm">
                   <strong>1.</strong> Click "Open Shopify Approval Page" above
@@ -331,20 +303,13 @@ export function SubscriptionPending({
         <Card>
           <div style={{ padding: "20px" }}>
             <BlockStack gap="300">
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#FEF3C7",
-                  borderRadius: "12px",
-                  border: "1px solid #FCD34D",
-                }}
-              >
-                <div style={{ color: "#92400E" }}>
+              <Box padding="400" background="bg-surface-warning" borderRadius="300">
+                <Text as="span" tone="caution">
                   <Text as="h3" variant="headingMd" fontWeight="bold">
                     💡 Need Help?
                   </Text>
-                </div>
-              </div>
+                </Text>
+              </Box>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>Who can approve?</strong> Only store owners and admins

@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import {
+  Box,
   Page,
   Card,
   BlockStack,
@@ -10,8 +11,6 @@ import {
   Button,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
-import { HeroHeader } from "../components/UI/HeroHeader";
-import { surfaces, radii } from "../components/UI/design.tokens";
 import { authenticate } from "../shopify.server";
 import { useLoaderData } from "@remix-run/react";
 
@@ -34,15 +33,12 @@ export default function HelpPage() {
   const whatsappLink = `https://wa.me/${phone.replace(/\D/g, "")}?text=Hello%20BetterBundle%20support`;
 
   return (
-    <Page>
+    <Page
+      title="Help"
+      subtitle="Reach out by email or WhatsApp — we usually reply within a few hours."
+    >
       <TitleBar title="Help & Support" />
       <BlockStack gap="300">
-        <HeroHeader
-          title="Get help when you need it"
-          subtitle="Reach out by email or WhatsApp — we usually reply within a few hours, no ticket required."
-          variant="subtle"
-          align="left"
-        />
 
         <Card>
           <div style={{ padding: "24px" }}>
@@ -81,14 +77,7 @@ export default function HelpPage() {
                 }}
               >
                 {/* Email */}
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#EFF6FF",
-                    borderRadius: "12px",
-                    border: "1px solid #BFDBFE",
-                  }}
-                >
+                <Box padding="500" background="bg-surface-info" borderRadius="300">
                   <BlockStack gap="200">
                     <InlineStack align="space-between" blockAlign="center">
                       <Text as="h3" variant="bodyLg" fontWeight="semibold">
@@ -108,16 +97,10 @@ export default function HelpPage() {
                       </Text>
                     </PolarisLink>
                   </BlockStack>
-                </div>
+                </Box>
 
                 {/* WhatsApp */}
-                <div
-                  style={{
-                    padding: "20px",
-                    ...surfaces.success,
-                    borderRadius: radii.lg,
-                  }}
-                >
+                <Box padding="500" background="bg-surface-success" borderRadius="300">
                   <BlockStack gap="200">
                     <Text as="h3" variant="bodyLg" fontWeight="semibold">
                       WhatsApp
@@ -141,18 +124,11 @@ export default function HelpPage() {
                       </a>
                     </div>
                   </BlockStack>
-                </div>
+                </Box>
               </div>
 
               {/* Support hours */}
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#FEF3C7",
-                  borderRadius: "12px",
-                  border: "1px solid #FCD34D",
-                }}
-              >
+              <Box padding="400" background="bg-surface-warning" borderRadius="300">
                 <InlineStack
                   gap="300"
                   align="space-between"
@@ -166,7 +142,7 @@ export default function HelpPage() {
                     {responseTime} — no ticket required
                   </Text>
                 </InlineStack>
-              </div>
+              </Box>
             </BlockStack>
           </div>
         </Card>

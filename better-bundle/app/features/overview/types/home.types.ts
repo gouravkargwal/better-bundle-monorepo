@@ -1,5 +1,6 @@
-// features/overview/types/overview.types.ts
-import type { ImpactDashboardData } from "../../impact/types/impact.types";
+// features/overview/types/home.types.ts
+import type { ProofResult } from "../../impact/types/proof.types";
+import type { CycleMetrics } from "../services/cycle.service";
 
 export type SurfaceKey =
   | "mercury"
@@ -13,7 +14,6 @@ export type SurfaceLiveStatus = "live" | "no_traffic" | "disabled";
 export interface SurfaceStatus {
   key: SurfaceKey;
   label: string;
-  emoji: string;
   enabled: boolean;
   impressions: number;
   accepts: number;
@@ -39,8 +39,20 @@ export interface EdgeStatus {
   observedEdges: number;
 }
 
-export interface OverviewData {
-  impact: ImpactDashboardData;
+export interface HomeData {
+  /** Money for the open billing cycle, from commission_records/billing_cycles. */
+  cycle: CycleMetrics;
+  /**
+   * The incrementality result, as a state rather than a number.
+   *
+   * Was the whole `ImpactDashboardData`, from which this page rendered
+   * `summary.incrementalRevenue` under the label "Revenue Impact — measured
+   * against a control group". That figure was attributed revenue, and the
+   * "measured" claim beside it was not true. Home now shows one honest line
+   * and links to Proof for the detail.
+   */
+  proof: ProofResult;
+  holdoutPercent: number;
   edges: EdgeStatus;
   surfaces: SurfaceStatus[];
   topProducts: TopProduct[];

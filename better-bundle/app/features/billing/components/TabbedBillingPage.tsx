@@ -4,7 +4,6 @@ import { useCallback, useMemo } from "react";
 import { Outlet, useNavigate, useLocation } from "@remix-run/react";
 import type { BillingState } from "../types/billing.types";
 import { BillingPlan } from "./BillingPlan";
-import { HeroHeader } from "../../../components/UI/HeroHeader";
 
 interface TabbedBillingPageProps {
   shopId: string;
@@ -88,15 +87,12 @@ export function TabbedBillingPage({
   };
 
   return (
-    <Page>
+    <Page
+      title="Billing"
+      subtitle="Your plan, usage charges, and billing history."
+    >
       <TitleBar title="Billing" />
       <BlockStack gap="300">
-        <HeroHeader
-          title="Manage your plan and see what you've earned"
-          subtitle="Review your billing plan, track usage charges, and check your billing cycle history — all in one place."
-          variant="gradient"
-          align="left"
-        />
 
         <Tabs
           tabs={tabs}

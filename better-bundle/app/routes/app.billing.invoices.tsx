@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { authenticate } from "../shopify.server";
 import { BillingInvoices } from "../features/billing/components/BillingInvoices";
 import prisma from "../db.server";
@@ -378,3 +379,5 @@ export default function BillingInvoicesPage() {
     />
   );
 }
+
+export const ErrorBoundary = routeErrorBoundary;

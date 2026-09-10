@@ -1,12 +1,11 @@
 """
 BetterBundle Outreach Engine
-Handles: CSV import → Brevo sending → Gmail reply polling → classification → follow-ups
+Handles: CSV import → Elastic Email sending → Gmail reply polling → classification → follow-ups
 """
 
 import os, re, json, time, sqlite3, imaplib, email, requests
-from datetime import datetime, timedelta
-from email.utils import parseaddr
-from email.mime.text import MIMEText
+from datetime import datetime, timedelta, timezone
+from email.utils import parseaddr, formataddr
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.dev"))
@@ -15,7 +14,9 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.dev")
 DAILY_CAP = int(os.getenv("DAILY_SEND_CAP", "15"))
 FOLLOWUP2_DAYS = 3
 FOLLOWUP3_DAYS = 7
-BREVO_KEY = os.getenv("BREVO_API_KEY")
+# Elastic Email REST API key (sending + event tracking).
+# .env.dev ships this as ELASTICMAILPASS; ELASTIC_EMAIL_API_KEY is canonical.
+EE_API_KEY = os.getenv("ELASTIC_EMAIL_API_KEY") or os.getenv("ELASTICMAILPASS")
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASS = os.getenv("GMAIL_APP_PASS")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -24,7 +25,7 @@ SENDER_EMAIL = os.getenv("SENDER_EMAIL", "gourav@betterbundle.site")
 SENDER_NAME = os.getenv("SENDER_NAME", "Gourav | BetterBundle")
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "outreach.db")
 
-BREVO_URL = "https://api.brevo.com/v3/smtp/email"
+EE_API_URL = "https://api.elasticemail.com/v4"
 IMAP_SERVER = "imap.gmail.com"
 
 
@@ -162,38 +163,96 @@ def _migrate(con):
             pass
 
 
-# ---------- BREVO EVENT SYNC ----------
-def brevo_fetch_events(max_events: int = 5000) -> list:
-    """Fetch transactional email events from Brevo, paging until exhausted.
-
-    A single 100-event page covers roughly two days of sending, so without
-    paging older opens and bounces silently vanish from the stats.
-    """
+# ---------- ELASTIC EMAIL EVENT SYNC ----------
+# Elastic Email doesn't filter /events by a client-supplied id, so we pull a
+# rolling date window and match each event to the sent row via the MessageID
+# EE assigns at send time. Bounces can land up to 48h out (EE retries for two
+# days), hence the 3-day window.
+def elastic_fetch_events(days: int = 3, max_events: int = 30000) -> list:
+    """Fetch Elastic Email events for the last `days`, paging by offset (1000/page)."""
+    if not EE_API_KEY:
+        return []
+    from_dt = datetime.now(timezone.utc) - timedelta(days=days)
+    headers = {
+        "X-ElasticEmail-ApiKey": EE_API_KEY,
+        "Accept": "application/json",
+        "User-Agent": "skuvio-outreach/1.0",
+    }
     events, offset = [], 0
     while len(events) < max_events:
+        params = {
+            "from": from_dt.strftime("%Y-%m-%dT%H:%M:%S"),
+            "orderBy": "DateAscending",
+            "limit": 1000,
+            "offset": offset,
+        }
         try:
-            r = requests.get(
-                "https://api.brevo.com/v3/smtp/statistics/events",
-                headers={"api-key": BREVO_KEY, "accept": "application/json"},
-                params={"limit": 100, "offset": offset},
-                timeout=15,
-            )
+            r = requests.get(f"{EE_API_URL}/events", headers=headers,
+                             params=params, timeout=30)
             if r.status_code != 200:
-                print(f"⚠ Brevo events HTTP {r.status_code}: {r.text[:120]}")
+                print(f"⚠ Elastic Email events HTTP {r.status_code}: {r.text[:160]}")
                 break
-            page = r.json().get("events", [])
+            data = r.json()
         except Exception as e:
-            print(f"⚠ Brevo events error at offset {offset}: {e}")
+            print(f"⚠ Elastic Email events error at offset {offset}: {e}")
             break
+        page = data if isinstance(data, list) else data.get("events", data.get("results", []))
         if not page:
             break
         events.extend(page)
         offset += len(page)
+        if len(page) < 1000:
+            break
     return events
 
 
+def _ee_flags(events: list) -> dict:
+    """Collapse a message's Elastic Email events into local status flags.
+
+    v4 EventType is one of: Submission, FailedAttempt, Error, Sent, Open,
+    Click, Unsubscribe, Complaint, Bounce, TransactionalUnsubscribe, Suppress.
+    There is no Delivered event (Sent *is* the delivery confirmation) and no
+    hard/soft bounce split -- that comes from MessageCategory on the event.
+    """
+    types = {_ee_type(e) for e in events}
+    bounce_evs = [e for e in events if _ee_type(e) in ("bounce", "error", "complaint")]
+    btype = None
+    if bounce_evs:
+        cats = {(e.get("MessageCategory") or "").lower() for e in bounce_evs}
+        # Permanent: no such mailbox, blacklisted, spam-flagged, SPF/DNS broken.
+        hard_cats = {"nomailbox", "blacklisted", "spam", "spfproblem",
+                     "dnsproblem", "notdeliveredcancelled", "manualcancel"}
+        btype = "hard" if (cats & hard_cats or "complaint" in types) else "soft"
+    return {"delivered": 1 if "sent" in types else 0,
+            "opened": 1 if types & {"open", "click"} else 0,
+            "proxy_open": 0,
+            "bounced": 1 if bounce_evs else 0,
+            "bounce_type": btype,
+            "unsubscribed": 1 if types & {"unsubscribe", "transactionalunsubscribe"} else 0}
+
+
+def _ee_type(ev: dict) -> str:
+    return (ev.get("EventType") or "").lower()
+
+
+def _ee_last_event(ev: dict, btype: str = None) -> str:
+    """Normalize an event to the literal the suppress SQL expects."""
+    t = _ee_type(ev)
+    if t == "complaint" or (t in ("bounce", "error") and btype == "hard"):
+        return "hardBounces"
+    if t in ("bounce", "error"):
+        return "softBounces"
+    if t in ("unsubscribe", "transactionalunsubscribe"):
+        return "unsubscribed"
+    return ev.get("EventType") or ""
+
+
+def _ee_date(ev: dict) -> str:
+    return ev.get("EventDate") or ""
+
+
 def sync_email_status() -> dict:
-    """Pull Brevo events for every sent email and store status locally."""
+    """Pull Elastic Email events for every sent email and store status locally."""
     con = get_db()
     rows = con.execute("""
         SELECT id, message_id FROM emails
@@ -203,45 +262,31 @@ def sync_email_status() -> dict:
     if not rows:
         return {"updated": 0}
 
-    # Build a map of messageId (without angle brackets) -> email id
+    # Build a map of MessageID (without angle brackets) -> email id
     msg_map = {r["message_id"].strip("<>"): r["id"] for r in rows}
 
-    # Fetch all recent events
-    events = brevo_fetch_events()
+    events = elastic_fetch_events()
 
-    # Group events by messageId
     from collections import defaultdict
     events_by_msg = defaultdict(list)
     for e in events:
-        mid = e.get("messageId", "").strip("<>")
+        mid = (e.get("MsgID") or "").strip("<>")
         if mid in msg_map:
             events_by_msg[mid].append(e)
 
     updated = 0
     for mid, msg_events in events_by_msg.items():
-        event_types = [e.get("event", "").lower() for e in msg_events]
-        delivered = 1 if "delivered" in event_types else 0
-        opened    = 1 if "opened" in event_types else 0
-        # Apple Mail Privacy Protection and corporate scanners pre-fetch the
-        # tracking pixel with nobody reading the mail. Brevo flags what it can
-        # detect as loadedByProxy; count it apart from a human open.
-        proxy     = 1 if "loadedbyproxy" in event_types else 0
-        unsub     = 1 if "unsubscribed" in event_types else 0
-        hard      = "hardbounces" in event_types
-        soft      = "softbounces" in event_types
-        bounced   = 1 if hard or soft else 0
-        # Hard is permanent (address does not exist); soft is transient.
-        btype     = "hard" if hard else ("soft" if soft else None)
-
-        # Last event by date
-        last = max(msg_events, key=lambda x: x.get("date", ""))
+        flags = _ee_flags(msg_events)
+        last = max(msg_events, key=lambda x: _ee_date(x))
+        last_at = _ee_date(last)
         con.execute("""
             UPDATE emails
             SET delivered=?, opened=?, proxy_open=?, bounced=?, bounce_type=?,
                 unsubscribed=?, last_event=?, last_event_at=?
             WHERE id=?
-        """, (delivered, opened, proxy, bounced, btype, unsub,
-              last.get("event"), last.get("date"), msg_map[mid]))
+        """, (flags["delivered"], flags["opened"], flags["proxy_open"],
+              flags["bounced"], flags["bounce_type"], flags["unsubscribed"],
+              _ee_last_event(last, flags["bounce_type"]), last_at, msg_map[mid]))
         updated += 1
 
     con.commit()
@@ -256,7 +301,7 @@ def _stale_cutoff() -> str:
 
 
 def list_stale_sends() -> list:
-    """Sends Brevo acknowledged but never processed — no event after a day."""
+    """Sends accepted by Elastic Email but never produced an event — no event after a day."""
     return get_db().execute("""
         SELECT e.id, e.seq, e.subject, e.body, e.sent_at, e.message_id,
                p.email, p.contact_name, p.company
@@ -282,7 +327,7 @@ def resend_stale() -> dict:
         ).fetchone() is None:
             failed.append((r["email"], "bounced or unsubscribed since"))
             continue
-        res = send_email_brevo(r["email"], r["contact_name"], r["subject"], r["body"])
+        res = send_email_elastic(r["email"], r["contact_name"], r["subject"], r["body"])
         if not res["success"]:
             failed.append((r["email"], res["error"]))
             continue
@@ -294,7 +339,7 @@ def resend_stale() -> dict:
 
 
 # ---------- AGGREGATE STATS ----------
-def get_brevo_stats(date_filter: str = None) -> dict:
+def get_delivery_stats(date_filter: str = None) -> dict:
     con = get_db()
     if date_filter:
         sent      = con.execute("SELECT COUNT(*) FROM emails WHERE date(sent_at) = ?", (date_filter,)).fetchone()[0]
@@ -324,9 +369,9 @@ def get_brevo_stats(date_filter: str = None) -> dict:
     hard_bounced = count("bounce_type='hard'")
     soft_bounced = count("bounce_type='soft'")
     unsubscribed = count("unsubscribed=1")
-    # Brevo can return 201 with a messageId and then never queue the mail: no
-    # requests event, nothing in its own log. Events normally land in minutes,
-    # so anything still silent after a day was dropped, not delayed.
+    # Elastic Email returns a MessageID immediately; if no event arrives within
+    # 24h the mail was dropped/infinite-queued, not delayed. Events normally
+    # land in minutes, so anything still silent after a day was dropped.
     cutoff = _stale_cutoff()
     pending = count(f"last_event IS NULL AND sent_at >= '{cutoff}'")
     stale   = count(f"last_event IS NULL AND sent_at <  '{cutoff}'")
@@ -455,32 +500,47 @@ def import_prospects(csv_path: str = CSV_PATH) -> dict:
     }
 
 
-# ---------- BREVO SEND ----------
-def send_email_brevo(to_email: str, to_name: str, subject: str, body: str) -> dict:
-    """Send via Brevo API. Returns {success, message_id} or {success: False, error}."""
+# ---------- ELASTIC EMAIL SEND ----------
+def send_email_elastic(to_email: str, to_name: str, subject: str, body: str) -> dict:
+    """Send via Elastic Email REST API. Returns {success, message_id} or {success: False, error}.
+
+    Auth is the API key (header X-ElasticEmail-ApiKey). The response's MessageID
+    is the value we later match against /events for open/delivery/bounce tracking.
+    NOTE: SENDER_EMAIL must be a verified sender on the Elastic Email account.
+    The transactional API takes recipient emails as a string list, so a per-
+    recipient display name can't be set here; the From-name comes from the
+    verified sender profile in the Elastic Email account.
+    """
+    html = body.replace("\n", "<br>")
     payload = {
-        "sender": {"name": SENDER_NAME, "email": SENDER_EMAIL},
-        "to": [{"email": to_email, "name": to_name or to_email.split("@")[0]}],
-        "subject": subject,
-        "htmlContent": body.replace("\n", "<br>"),
-        "textContent": body,
+        "Recipients": {"To": [formataddr((to_name, to_email)) if to_name else to_email]},
+        "Content": {
+            "Body": [
+                {"ContentType": "HTML", "Content": html, "Charset": "utf-8"},
+                {"ContentType": "PlainText", "Content": body, "Charset": "utf-8"},
+            ],
+            "From": formataddr((SENDER_NAME, SENDER_EMAIL)),
+            "ReplyTo": SENDER_EMAIL,
+            "Subject": subject,
+        },
     }
 
     try:
         r = requests.post(
-            BREVO_URL,
+            f"{EE_API_URL}/emails/transactional",
             headers={
-                "api-key": BREVO_KEY,
+                "X-ElasticEmail-ApiKey": EE_API_KEY,
                 "Content-Type": "application/json",
-                "accept": "application/json",
+                "Accept": "application/json",
             },
             json=payload,
             timeout=30,
         )
-
         if r.status_code in (200, 201):
             data = r.json()
-            return {"success": True, "message_id": data.get("messageId", "")}
+            return {"success": True,
+                    "message_id": data.get("MessageID")
+                    or data.get("TransactionID") or ""}
         else:
             return {"success": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
     except Exception as e:
@@ -689,7 +749,7 @@ def send_pending_emails(dry_run: bool = True) -> dict:
                 }
             )
         else:
-            result = send_email_brevo(
+            result = send_email_elastic(
                 p["email"], p["contact_name"] or p["company"], subject, body
             )
 
@@ -767,7 +827,7 @@ def send_approved(prospect_id: int) -> dict:
     except MissingCopy as e:
         return {"success": False, "error": str(e)}
 
-    result = send_email_brevo(
+    result = send_email_elastic(
         p["email"], p["contact_name"] or p["company"], subject, body
     )
 
@@ -1176,7 +1236,7 @@ def send_followups(dry_run: bool = True, prospect_id: int = None) -> dict:
                 )
                 continue
 
-            result = send_email_brevo(p["email"], p["contact_name"], subject, body)
+            result = send_email_elastic(p["email"], p["contact_name"], subject, body)
             if not result["success"]:
                 results.append(
                     {"action": "error", "seq": seq, "company": p["company"],
@@ -1645,7 +1705,7 @@ def clear_followup_draft(prospect_id: int) -> None:
 
 
 def send_followup_draft(prospect_id: int) -> dict:
-    """Send the pending follow-up draft for a prospect via Brevo."""
+    """Send the pending follow-up draft for a prospect via Elastic Email."""
     con = get_db()
     p = con.execute("SELECT * FROM prospects WHERE id = ?", (prospect_id,)).fetchone()
     if not p:
@@ -1667,7 +1727,7 @@ def send_followup_draft(prospect_id: int) -> dict:
         clear_followup_draft(prospect_id)
         return {"success": False, "error": "Prospect has bounced or unsubscribed — draft discarded"}
 
-    result = send_email_brevo(p["email"], p["contact_name"], subject, body)
+    result = send_email_elastic(p["email"], p["contact_name"], subject, body)
     if not result["success"]:
         return {"success": False, "error": result["error"]}
 
@@ -1687,3 +1747,74 @@ def send_followup_draft(prospect_id: int) -> dict:
     )
     con.commit()
     return {"success": True, "company": p["company"], "seq": seq}
+
+
+# ---------- SMOKE TEST ----------
+def smoke_test(to_email: str, wait_secs: int = 90):
+    """Exercise the whole send path once against a real address.
+
+    Generator of (ok, label, detail) so the UI can stream progress. Sends one
+    real email — point it at your own inbox.
+    """
+    yield bool(EE_API_KEY), "Elastic Email API key", "set" if EE_API_KEY else "missing"
+    yield bool(GEMINI_API_KEY), "Gemini API key", "set" if GEMINI_API_KEY else "missing"
+    yield (bool(GMAIL_USER and GMAIL_APP_PASS), "Gmail IMAP creds",
+           GMAIL_USER or "missing")
+
+    # Sender domain must be authenticated or everything lands in spam.
+    try:
+        r = requests.get(f"{EE_API_URL}/domains", timeout=20,
+                         headers={"X-ElasticEmail-ApiKey": EE_API_KEY})
+        dom = SENDER_EMAIL.split("@")[-1].lower()
+        hit = next((d for d in r.json() if dom in (d.get("Domain") or "").lower()), None)
+        if hit:
+            miss = [k for k in ("Spf", "Dkim", "MX", "DMARC") if not hit.get(k)]
+            yield not miss, f"Sender domain {dom}", "SPF/DKIM/MX/DMARC ok" if not miss \
+                else f"unverified: {', '.join(miss)}"
+        else:
+            yield False, f"Sender domain {dom}", "not on the Elastic Email account"
+    except Exception as e:
+        yield False, "Sender domain", str(e)
+
+    try:
+        yield True, "Gemini call", llm("Reply with the single word: ok")[:40]
+    except Exception as e:
+        yield False, "Gemini call", str(e)
+
+    stamp = datetime.now().strftime("%H:%M:%S")
+    res = send_email_elastic(to_email, "", f"BetterBundle smoke test {stamp}",
+                             f"Smoke test at {stamp}. Reply to this to test reply polling.")
+    if not res["success"]:
+        yield False, "Send via Elastic Email", res["error"]
+        return
+    mid = res["message_id"]
+    yield True, "Send via Elastic Email", f"MessageID {mid}"
+
+    # The real check: does /events come back keyed by a MsgID we can match?
+    deadline = time.time() + wait_secs
+    seen = []
+    while time.time() < deadline:
+        seen = [e for e in elastic_fetch_events(days=1)
+                if (e.get("MsgID") or "").strip("<>") == mid.strip("<>")]
+        if seen:
+            break
+        time.sleep(10)
+    if not seen:
+        yield False, "Event sync", f"no event for {mid} within {wait_secs}s"
+        return
+    flags = _ee_flags(seen)
+    yield True, "Event sync", (f"{len(seen)} event(s): "
+                               f"{', '.join(sorted({_ee_type(e) for e in seen}))} → {flags}")
+
+    try:
+        M = imaplib.IMAP4_SSL(IMAP_SERVER)
+        M.login(GMAIL_USER, GMAIL_APP_PASS)
+        M.select("INBOX")
+        typ, data = M.search(None, 'SUBJECT', f'"smoke test {stamp}"')
+        M.logout()
+        hits = len(data[0].split()) if data and data[0] else 0
+        yield hits > 0, "Inbox delivery (IMAP)", \
+            f"{hits} matching message(s) in {GMAIL_USER}" if hits else \
+            "not in inbox yet — check spam, or re-run in a minute"
+    except Exception as e:
+        yield False, "Inbox delivery (IMAP)", str(e)

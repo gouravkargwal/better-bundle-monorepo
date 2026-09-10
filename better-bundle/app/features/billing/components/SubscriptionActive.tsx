@@ -1,4 +1,6 @@
-import { Card, BlockStack, InlineStack, Text, Badge } from "@shopify/polaris";
+import {
+  Box, Card, BlockStack, InlineStack, Text, Badge
+} from "@shopify/polaris";
 import type { SubscriptionData } from "../types/billing.types";
 
 interface SubscriptionActiveProps {
@@ -59,183 +61,146 @@ export function SubscriptionActive({
 
         {/* Plan Overview Card */}
         <Card>
-          <div style={{ padding: "24px" }}>
-            <BlockStack gap="400">
-              {/* Header with status */}
-              <InlineStack align="space-between" blockAlign="center">
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#DBEAFE",
-                    borderRadius: "12px",
-                    border: "1px solid #BAE6FD",
-                    flex: 1,
-                  }}
-                >
-                  <Text as="h3" variant="headingMd" fontWeight="bold">
-                    📊 Current Plan
-                  </Text>
-                </div>
-              </InlineStack>
+          <BlockStack gap="400">
+            {/* Header with status */}
+            <InlineStack align="space-between" blockAlign="center">
+              <Box padding="400" background="bg-surface-info" borderRadius="300">
+                <Text as="h3" variant="headingMd" fontWeight="bold">
+                  📊 Current Plan
+                </Text>
+              </Box>
+            </InlineStack>
 
-              {/* Plan Details Side by Side */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-                  gap: "16px",
-                }}
-              >
-                {/* Plan Card */}
-                <div
-                  style={{
-                    padding: "20px",
-                    backgroundColor: "#F0F9FF",
-                    borderRadius: "12px",
-                    border: "1px solid #BAE6FD",
-                  }}
-                >
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        Plan
-                      </Text>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        🏷️ {subscriptionData.planName}
-                      </Text>
-                    </InlineStack>
-                    <Text as="h3" variant="heading2xl" fontWeight="bold">
-                      {formatCurrency(subscriptionData.usageThisCycle)}
+            {/* Plan Details Side by Side */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+                gap: "16px",
+              }}
+            >
+              {/* Plan Card */}
+              <Box padding="500" background="bg-surface-info" borderRadius="300">
+                <BlockStack gap="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      Plan
                     </Text>
                     <Text as="span" variant="bodySm" tone="subdued">
-                      this cycle · {ratePercent}% of{" "}
-                      {formatCurrency(subscriptionData.attributedThisCycle)}{" "}
-                      attributed · capped at{" "}
-                      {formatCurrency(subscriptionData.cappedAmount)}
+                      🏷️ {subscriptionData.planName}
                     </Text>
-                  </BlockStack>
-                </div>
+                  </InlineStack>
+                  <Text as="h3" variant="heading2xl" fontWeight="bold">
+                    {formatCurrency(subscriptionData.usageThisCycle)}
+                  </Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    this cycle · {ratePercent}% of{" "}
+                    {formatCurrency(subscriptionData.attributedThisCycle)}{" "}
+                    attributed · capped at{" "}
+                    {formatCurrency(subscriptionData.cappedAmount)}
+                  </Text>
+                </BlockStack>
+              </Box>
 
-                {/* Billing Cycle Card */}
+              {/* Billing Cycle Card */}
+              <Box padding="500" background="bg-surface-success" borderRadius="300">
+                <BlockStack gap="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      Next Billing
+                    </Text>
+                    <Text as="span" variant="bodySm" tone="subdued">
+                      📅 Billing Cycle
+                    </Text>
+                  </InlineStack>
+                  {daysUntilNextBilling !== null ? (
+                    <>
+                      <Text as="h3" variant="heading2xl" fontWeight="bold">
+                        {daysUntilNextBilling > 0
+                          ? `${daysUntilNextBilling} days`
+                          : "Today"}
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        {nextBillingDate
+                          ? nextBillingDate.toLocaleDateString("en-US", {
+                              month: "long",
+                              day: "numeric",
+                              year: "numeric",
+                            })
+                          : "N/A"}
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text as="h3" variant="heading2xl" fontWeight="bold">
+                        —
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Billing cycle info unavailable
+                      </Text>
+                    </>
+                  )}
+                </BlockStack>
+              </Box>
+            </div>
+
+            {/* Plan Benefits */}
+            <Box padding="400" background="bg-surface-success" borderRadius="300">
+              <BlockStack gap="200">
+                <Text
+                  as="span"
+                  variant="bodySm"
+                  fontWeight="semibold"
+                  tone="success"
+                >
+                  ✓ What's Included
+                </Text>
                 <div
                   style={{
-                    padding: "20px",
-                    backgroundColor: "#ECFDF5",
-                    borderRadius: "12px",
-                    border: "1px solid #BBF7D0",
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fit, minmax(200px, 1fr))",
+                    gap: "8px",
                   }}
                 >
-                  <BlockStack gap="200">
-                    <InlineStack align="space-between" blockAlign="center">
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        Next Billing
-                      </Text>
-                      <Text as="span" variant="bodySm" tone="subdued">
-                        📅 Billing Cycle
-                      </Text>
-                    </InlineStack>
-                    {daysUntilNextBilling !== null ? (
-                      <>
-                        <Text as="h3" variant="heading2xl" fontWeight="bold">
-                          {daysUntilNextBilling > 0
-                            ? `${daysUntilNextBilling} days`
-                            : "Today"}
-                        </Text>
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          {nextBillingDate
-                            ? nextBillingDate.toLocaleDateString("en-US", {
-                                month: "long",
-                                day: "numeric",
-                                year: "numeric",
-                              })
-                            : "N/A"}
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Text as="h3" variant="heading2xl" fontWeight="bold">
-                          —
-                        </Text>
-                        <Text as="span" variant="bodySm" tone="subdued">
-                          Billing cycle info unavailable
-                        </Text>
-                      </>
-                    )}
-                  </BlockStack>
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      AI-powered recommendations
+                    </Text>
+                  </InlineStack>
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Attribution & analytics
+                    </Text>
+                  </InlineStack>
+                  <InlineStack gap="200">
+                    <Text as="span" variant="bodySm" tone="success">
+                      ✓
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Priority support
+                    </Text>
+                  </InlineStack>
                 </div>
-              </div>
+              </BlockStack>
+            </Box>
 
-              {/* Plan Benefits */}
-              <div
-                style={{
-                  padding: "16px",
-                  backgroundColor: "#F0FDF4",
-                  borderRadius: "12px",
-                  border: "1px solid #BBF7D0",
-                }}
-              >
-                <BlockStack gap="200">
-                  <Text
-                    as="span"
-                    variant="bodySm"
-                    fontWeight="semibold"
-                    tone="success"
-                  >
-                    ✓ What's Included
-                  </Text>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(200px, 1fr))",
-                      gap: "8px",
-                    }}
-                  >
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        AI-powered recommendations
-                      </Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Attribution & analytics
-                      </Text>
-                    </InlineStack>
-                    <InlineStack gap="200">
-                      <Text as="span" variant="bodySm" tone="success">
-                        ✓
-                      </Text>
-                      <Text as="p" variant="bodySm" tone="subdued">
-                        Priority support
-                      </Text>
-                    </InlineStack>
-                  </div>
-                </BlockStack>
-              </div>
+            {/* Info Banner */}
+            <Box padding="400" background="bg-surface-warning" borderRadius="300">
+              <Text as="p" variant="bodySm" tone="subdued">
+                💡 Your flat-rate plan gives you full access to all features.
+                No usage tracking, no surprise charges — just one predictable
+                monthly fee.
+              </Text>
+            </Box>
+          </BlockStack>
 
-              {/* Info Banner */}
-              <div
-                style={{
-                  padding: "12px",
-                  backgroundColor: "#FEF3C7",
-                  borderRadius: "8px",
-                  border: "1px solid #FCD34D",
-                }}
-              >
-                <Text as="p" variant="bodySm" tone="subdued">
-                  💡 Your flat-rate plan gives you full access to all features.
-                  No usage tracking, no surprise charges — just one predictable
-                  monthly fee.
-                </Text>
-              </div>
-            </BlockStack>
-          </div>
         </Card>
 
         {/* Help Cards */}
@@ -250,20 +215,13 @@ export function SubscriptionActive({
           <Card>
             <div style={{ padding: "20px" }}>
               <BlockStack gap="300">
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#DBEAFE",
-                    borderRadius: "12px",
-                    border: "1px solid #BAE6FD",
-                  }}
-                >
-                  <div style={{ color: "#0C4A6E" }}>
+                <Box padding="400" background="bg-surface-info" borderRadius="300">
+                  <Text as="span">
                     <Text as="h3" variant="headingMd" fontWeight="bold">
                       📖 Managing Your Subscription
                     </Text>
-                  </div>
-                </div>
+                  </Text>
+                </Box>
                 <BlockStack gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Plan Changes:</strong> Cancel at any time. You are
@@ -289,20 +247,13 @@ export function SubscriptionActive({
           <Card>
             <div style={{ padding: "20px" }}>
               <BlockStack gap="300">
-                <div
-                  style={{
-                    padding: "16px",
-                    backgroundColor: "#FEF3C7",
-                    borderRadius: "12px",
-                    border: "1px solid #FCD34D",
-                  }}
-                >
-                  <div style={{ color: "#92400E" }}>
+                <Box padding="400" background="bg-surface-warning" borderRadius="300">
+                  <Text as="span" tone="caution">
                     <Text as="h3" variant="headingMd" fontWeight="bold">
                       💡 Need Help?
                     </Text>
-                  </div>
-                </div>
+                  </Text>
+                </Box>
                 <BlockStack gap="200">
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Questions about your plan?</strong> Contact our

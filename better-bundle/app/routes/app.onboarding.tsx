@@ -2,6 +2,7 @@
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { authenticate } from "../shopify.server";
 import { getShopOnboardingCompleted } from "../services/shop.service";
 import { OnboardingService } from "../features/onboarding/services/onboarding.service";
@@ -93,3 +94,5 @@ export default function OnboardingRoute() {
 
   return <OnboardingPage data={data} error={error} />;
 }
+
+export const ErrorBoundary = routeErrorBoundary;

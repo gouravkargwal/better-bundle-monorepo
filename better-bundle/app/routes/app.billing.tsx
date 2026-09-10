@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { BillingService } from "../features/billing/services/billing.service";
@@ -37,23 +38,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
       subscriptionStatus, // Pass the status to the component
     });
   } catch (error) {
+    // Responses drive the re-auth handshake and deliberate 404s — never
+    // swallow them into a generic failure.
+    if (error instanceof Response) throw error;
     logger.error({ error, shop }, "Billing loader error");
-    return json({
-      error: "Failed to load billing data",
-    });
+    throw new Error("Failed to load billing data");
   }
 }
 
 export default function BillingPage() {
   const loaderData = useLoaderData<typeof loader>();
-
-  if ("error" in loaderData) {
-    return (
-      <div style={{ padding: "24px", textAlign: "center" }}>
-        <p>Error: {loaderData.error}</p>
-      </div>
-    );
-  }
 
   const { shopId, shopCurrency, billingState, subscriptionStatus } = loaderData;
 
@@ -66,3 +60,5 @@ export default function BillingPage() {
     />
   );
 }
+
+export const ErrorBoundary = routeErrorBoundary;

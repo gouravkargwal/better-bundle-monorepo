@@ -157,6 +157,17 @@ shop-reset-hard:  ## Like shop-reset but also drops the LLM cache (re-pays Gemin
 	$(COMPOSE) exec $(DB_ENV) python-worker \
 	  python -m app.scripts.delete_shop_data --shop $(SHOP) --keep-shop
 
+# ==================== outreach (streamlit) ====================
+OUTREACH_DIR := outreach
+OUTREACH_VENV := .venv
+
+outreach-install:  ## Install outreach streamlit app dependencies
+	python3 -m venv $(OUTREACH_DIR)/$(OUTREACH_VENV)
+	$(OUTREACH_DIR)/$(OUTREACH_VENV)/bin/pip install -r $(OUTREACH_DIR)/requirements.txt
+
+outreach:  ## Run the Skuvio Outreach Streamlit app
+	cd $(OUTREACH_DIR) && $(OUTREACH_VENV)/bin/streamlit run app.py
+
 # ==================== remix app ====================
 
 app-dev:  ## Run the Shopify app with the CLI's own tunnel
@@ -186,4 +197,5 @@ help:  ## List targets
         migrate migrate-stamp migrate-check psql shop-tokens \
         seed-plans store-seed store-delete store-reseed \
         shop-purge shop-purge-dry shop-reset shop-reset-hard \
-        app-dev app-deploy app-db-pull app-test test help
+        app-dev app-deploy app-db-pull app-test test \
+        outreach-install outreach help

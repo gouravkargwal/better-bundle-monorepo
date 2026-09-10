@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import { routeErrorBoundary } from "../components/UI/RouteError";
 import { authenticate } from "../shopify.server";
 import { BillingCycles } from "../features/billing/components/BillingCycles";
 import prisma from "../db.server";
@@ -21,7 +22,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     if (!shop) {
-      return json({ error: "Shop not found" });
+      throw new Response("Shop not found", { status: 404 });
     }
 
     // Get shop subscription (allow TRIAL, TRIAL_COMPLETED, ACTIVE, etc.)
@@ -100,26 +101,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     return json(cyclesData);
   } catch (error) {
+    // Re-throw Responses: `authenticate.admin` uses them for the re-auth
+    // handshake, and the 404 above is a deliberate empty-state signal.
+    if (error instanceof Response) throw error;
     console.error("Billing cycles loader error:", error);
-    return json({ error: "Failed to load cycles data" });
+    throw new Error("Failed to load cycles data");
   }
 }
 
 export default function BillingCyclesPage() {
   const loaderData = useLoaderData<typeof loader>();
 
-  // Handle error case gracefully - show cycles component with empty data
-  if ("error" in loaderData && loaderData.error !== "No subscription found") {
-    return (
-      <div style={{ padding: "24px", textAlign: "center" }}>
-        <p>Error: {loaderData.error}</p>
-      </div>
-    );
-  }
-
-  // If no subscription found, show empty state (component handles this)
+  // No branching on error strings. A failure never reaches this component —
+  // it is thrown and rendered by the ErrorBoundary below. What used to be
+  // `loaderData.error !== "No subscription found"` compared the *text* of an
+  // error to decide whether it was a failure or an empty state, so rewording
+  // that message would have turned an empty state into an error page.
   const cyclesData =
-    "error" in loaderData && loaderData.error === "No subscription found"
+    "error" in loaderData
       ? { cycles: [], pagination: null, shopCurrency: "USD", shopId: "" }
       : loaderData;
 
@@ -134,3 +133,5 @@ export default function BillingCyclesPage() {
     />
   );
 }
+
+export const ErrorBoundary = routeErrorBoundary;

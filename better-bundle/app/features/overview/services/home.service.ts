@@ -1,28 +1,28 @@
-// features/overview/services/overview.service.ts
+// features/overview/services/home.service.ts
 //
-// Aggregates everything the /app/overview dashboard needs:
-//  - headline KPIs (reused from the impact service)
+// Aggregates everything the Home page (/app/overview) needs:
+//  - the incrementality result, as a state, from the statistics engine
 //  - edge-pipeline health from the worker (servable? products? edges?)
 //  - per-surface serving status (settings flags + impression data)
 //  - top recommended products by accepted revenue
 import prisma from "../../../db.server";
-import { getImpactDashboard } from "../../impact/services/impact.service";
+import { getLiftSummary } from "../../impact/services/lift.service";
 import { getShopSettings } from "../../settings/services/settings.service";
+import { getCycleMetrics } from "./cycle.service";
+import { ALL_SURFACES } from "../../../lib/surfaces";
 import type {
   EdgeStatus,
-  OverviewData,
+  HomeData,
   SurfaceStatus,
   TopProduct,
   SurfaceKey,
-} from "../types/overview.types";
+} from "../types/home.types";
 
-const SURFACES: { key: SurfaceKey; label: string; emoji: string }[] = [
-  { key: "mercury", label: "Checkout", emoji: "🛒" },
-  { key: "apollo", label: "Post-purchase", emoji: "⚡" },
-  { key: "thank_you", label: "Thank-you page", emoji: "🎉" },
-  { key: "phoenix", label: "Storefront", emoji: "🏪" },
-  { key: "venus", label: "Customer account", emoji: "👤" },
-];
+// Placements come from the shared registry rather than a local copy. This
+// array was the third competing definition of the five surfaces — with its own
+// labels and emoji — alongside settings.types.ts and the impact service's
+// two-entry map. One registry means a placement cannot be labelled two ways or
+// silently omitted from a list.
 
 export async function getEdgeStatus(shopId: string): Promise<EdgeStatus> {
   const backendUrl = process.env.PYTHON_WORKER_API_URL;
@@ -120,32 +120,36 @@ export async function getTopProducts(
   });
 }
 
-export async function getOverviewData(
+export async function getHomeData(
   shopDomain: string,
-): Promise<OverviewData> {
-  const [settings, impact] = await Promise.all([
-    getShopSettings(shopDomain),
-    getImpactDashboard(shopDomain),
-  ]);
+): Promise<HomeData> {
+  const settings = await getShopSettings(shopDomain);
   if (!settings) {
     throw new Error("Shop not found");
   }
 
   const shopId = settings.shopId;
-  const [edges, surfaceStats, topProducts] = await Promise.all([
+  // The incrementality claim comes from the statistics engine as a state, not
+  // as a number this page can invent. Everything else here is deterministic
+  // and read straight from Postgres, so the page still renders in full if the
+  // worker is unreachable.
+  const [edges, surfaceStats, topProducts, proof, cycle] = await Promise.all([
     getEdgeStatus(shopId),
     getSurfaceStats(shopId),
     getTopProducts(shopId),
+    getLiftSummary(shopId),
+    // Read from the billing tables the charge is computed from, so the figure
+    // on this page and the figure on the invoice cannot diverge.
+    getCycleMetrics(shopId),
   ]);
 
-  const surfaces: SurfaceStatus[] = SURFACES.map((surface) => {
+  const surfaces: SurfaceStatus[] = ALL_SURFACES.map((surface) => {
     const stats = surfaceStats.get(surface.key);
     const enabled = settings.surfaces[surface.key];
     const impressions = Number(stats?.impressions) || 0;
     return {
       key: surface.key,
       label: surface.label,
-      emoji: surface.emoji,
       enabled,
       impressions,
       accepts: Number(stats?.accepts) || 0,
@@ -155,7 +159,9 @@ export async function getOverviewData(
   });
 
   return {
-    impact,
+    cycle,
+    proof,
+    holdoutPercent: settings.holdoutDisabled ? 0 : 10,
     edges,
     surfaces,
     topProducts,

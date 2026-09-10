@@ -1,10 +1,12 @@
 import {
-  Text,
-  BlockStack,
   Badge,
-  InlineStack,
+  BlockStack,
+  Box,
   Button,
   Card,
+  InlineGrid,
+  InlineStack,
+  Text,
 } from "@shopify/polaris";
 
 interface ExtensionSetupGuideProps {
@@ -19,9 +21,6 @@ interface SetupSection {
   blocks?: { icon: string; name: string; description: string }[];
   buttonLabel: string;
   buttonUrl: string;
-  stepsBgColor: string;
-  stepsBorderColor: string;
-  stepBadgeColor: string;
 }
 
 export function ExtensionSetupGuide({
@@ -78,9 +77,6 @@ export function ExtensionSetupGuide({
       ],
       buttonLabel: "Open Theme Editor",
       buttonUrl: themeEditorUrl,
-      stepsBgColor: "#F0FDFB",
-      stepsBorderColor: "#CCFBF1",
-      stepBadgeColor: "#667eea",
     },
     {
       title: "Checkout Recommendations",
@@ -101,9 +97,6 @@ export function ExtensionSetupGuide({
       ],
       buttonLabel: "Open Theme Editor",
       buttonUrl: themeEditorUrl,
-      stepsBgColor: "#EFF6FF",
-      stepsBorderColor: "#BFDBFE",
-      stepBadgeColor: "#3B82F6",
     },
     {
       title: "Customer Account Recommendations",
@@ -124,9 +117,6 @@ export function ExtensionSetupGuide({
       ],
       buttonLabel: "Open Theme Editor",
       buttonUrl: themeEditorUrl,
-      stepsBgColor: "#F5F3FF",
-      stepsBorderColor: "#DDD6FE",
-      stepBadgeColor: "#8B5CF6",
     },
     {
       title: "Post-Purchase Upsells",
@@ -150,9 +140,6 @@ export function ExtensionSetupGuide({
       ],
       buttonLabel: "Open Checkout Settings",
       buttonUrl: checkoutSettingsUrl,
-      stepsBgColor: "#FFFBEB",
-      stepsBorderColor: "#FDE68A",
-      stepBadgeColor: "#F59E0B",
     },
   ];
 
@@ -187,73 +174,31 @@ export function ExtensionSetupGuide({
               </Text>
             </BlockStack>
 
-            <div
-              style={{
-                padding: compact ? "10px" : "14px",
-                backgroundColor: section.stepsBgColor,
-                borderRadius: "8px",
-                border: `1px solid ${section.stepsBorderColor}`,
-              }}
+            <Box
+              padding={compact ? "300" : "400"}
+              background="bg-surface-secondary"
+              borderRadius="200"
             >
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: compact ? "6px" : "10px",
-                }}
-              >
+              <BlockStack gap={compact ? "200" : "300"}>
                 {section.steps.map((item) => (
-                  <div
-                    key={item.step}
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: compact ? "20px" : "24px",
-                        height: compact ? "20px" : "24px",
-                        borderRadius: "50%",
-                        backgroundColor: section.stepBadgeColor,
-                        color: "white",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: compact ? "11px" : "12px",
-                        fontWeight: "700",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {item.step}
-                    </div>
+                  <InlineStack key={item.step} gap="200" blockAlign="center" wrap={false}>
+                    <Badge>{String(item.step)}</Badge>
                     <Text as="p" variant="bodySm">
                       {item.text}
                     </Text>
-                  </div>
+                  </InlineStack>
                 ))}
-              </div>
-            </div>
+              </BlockStack>
+            </Box>
 
             {section.blocks && (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    "repeat(auto-fit, minmax(200px, 1fr))",
-                  gap: "10px",
-                }}
-              >
+              <InlineGrid columns={{ xs: 1, sm: 2 }} gap="300">
                 {section.blocks.map((block) => (
-                  <div
+                  <Box
                     key={block.name}
-                    style={{
-                      padding: "10px",
-                      border: "1px solid #E5E7EB",
-                      borderRadius: "8px",
-                      backgroundColor: "#FAFAFA",
-                    }}
+                    padding="300"
+                    background="bg-surface-secondary"
+                    borderRadius="200"
                   >
                     <InlineStack gap="200" blockAlign="center">
                       <span style={{ fontSize: "16px" }}>{block.icon}</span>
@@ -270,9 +215,9 @@ export function ExtensionSetupGuide({
                         </Text>
                       </BlockStack>
                     </InlineStack>
-                  </div>
+                  </Box>
                 ))}
-              </div>
+              </InlineGrid>
             )}
 
             <div>
