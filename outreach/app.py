@@ -286,9 +286,13 @@ with tab3:
                 with col2:
                     if st.button(f"🔄 Regenerate", key=f"regen_{draft['id']}"):
                         print(f"[REGEN] clicked id={draft['id']} company={draft['company']} gen_before={gen}")
-                        with st.spinner(f"Re-rolling draft for {draft['company']}..."):
-                            res = engine.regenerate_draft(draft["id"])
-                        print(f"[REGEN] result success={res.get('success')} subject={res.get('subject','')[:40]}")
+                        try:
+                            with st.spinner(f"Re-rolling draft for {draft['company']}..."):
+                                res = engine.regenerate_draft(draft["id"])
+                        except Exception as e:
+                            print(f"[REGEN] EXCEPTION: {type(e).__name__}: {e}")
+                            res = {"success": False, "error": f"{type(e).__name__}: {e}"}
+                        print(f"[REGEN] result success={res.get('success')} subject={repr(res.get('subject',''))[:60]} error={repr(res.get('error',''))[:200]}")
                         _clear_cache()
                         if res["success"]:
                             st.session_state[f"gen_{draft['id']}"] = gen + 1

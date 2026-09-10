@@ -1035,6 +1035,8 @@ FOLLOWUP_RULES = """Hard rules:
   write the sentence without one.
 - NO FLATTERY. Never write "is impressive", "love what you're doing", "caught my
   eye", "great work", or any compliment. State the observation flat and move on.
+- NEVER promise a report, audit, teardown or "what it finds" before install —
+  we cannot produce any of it without their orders. The trial itself is the offer.
 - No links.
 - Plain text. No markdown, no bullet points, no subject line.
 - No greeting line. Start with the first sentence; the greeting is added later.
@@ -1047,14 +1049,14 @@ Founder, BetterBundle"""
 
 
 def _followup_prompt(ctx: str, seq: int, niche: str = "store") -> str:
-    # Stores own the lost revenue directly; an agency is talking about a client's.
-    catalog = "one client store" if niche == "agency" else "their store"
     if seq == 2:
         return f"""Write follow-up email #2 for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
-shows those pairings on product pages, in the cart and at checkout. Offer: a
-free bundle report on {catalog}, built from their public catalog, no install
-needed.
+shows those pairings on product pages, in the cart and at checkout.
+
+The offer: install is the free trial. No monthly fee, no card — the app bills
+only on revenue it can attribute to its own recommendations, so if it finds
+nothing, it costs nothing.
 
 CONTEXT
 {ctx}
@@ -1069,7 +1071,10 @@ Structure, 70 words maximum:
    what goes together. Real co-purchase data is already sitting in their order
    history and nothing is reading it. For a store, the missed revenue is theirs
    directly — never say "your clients" to a store.
-3. The free bundle report on {catalog}, and that it needs no install.
+3. The hook, as a direct question: would they like to try the extension free?
+   Name the risk-free terms in plain words — no monthly fee, no card, billed
+   only on revenue it attributes, so if it finds nothing, it costs nothing.
+   Never state a commission rate, percentage, cap or dollar figure.
 4. An easy out: tell them to reply "no thanks" and you will stop.
 
 {FOLLOWUP_RULES}
@@ -1087,8 +1092,8 @@ They have not replied. Close the loop gracefully and stop asking for anything.
 Structure, 50 words maximum, in this exact order:
 1. State plainly that you will stop reaching out.
 2. One line on what BetterBundle does, so it is memorable if the problem shows up
-   later, noting there is no monthly fee — it bills only on revenue it can
-   attribute to its own recommendations.
+   later, noting it is free to try — no monthly fee, no card, billed only on
+   revenue it can attribute to its own recommendations.
 3. LAST SENTENCE: a genuine, non-pushy sign-off wishing them well. The email must
    NOT end on the offer or on anything resembling an ask. No new question.
 
@@ -1390,7 +1395,7 @@ def check_replies() -> dict:
                 # Classify with LLM
                 prompt = f"""Classify this email reply into EXACTLY one category:
 
-INTERESTED — wants the bundle report, asks for more info, says yes
+INTERESTED — wants to try the app free, asks for more info, says yes
 OBJECTION — has concerns (price, timing, not sure)
 DECLINED — clear no, unsubscribe, not interested
 UNREADABLE — can't tell, needs human review
@@ -1427,8 +1432,8 @@ Return ONLY the category name."""
 Shopify app that recommends products based on what a store's own orders show
 selling together.
 Objection: {body[:300]}
-Include: the bundle report is free and needs no install, and the app carries no
-monthly fee - it bills only on revenue it can attribute.
+Include: the extension is free to try — no monthly fee, no card — and it bills
+only on revenue it can attribute, so if it finds nothing, it costs nothing.
 Never state a percentage, rate, cap or dollar figure: the rate is not fixed."""
                         )
                     except:
@@ -1610,24 +1615,24 @@ def regenerate_draft(prospect_id: int) -> dict:
 
     ctx = (p["followup_context"] or "").strip() or build_followup_context(p)
     niche = (p["niche"] or "store").strip().lower()
-
-    # Subject: one specific fact from their research, lowercase, 4-7 words.
-    facts = [f.strip() for f in re.findall(r"\d[\d,.]*\s*[A-Za-z]+", ctx or "")]
-    hook = (p["first_subject"] or "").strip()
-    if not hook:
-        # Fall back to the first real number in the research if none was stored.
-        hook = (facts[0] if facts else f"{p['company']} and product feeds").lower()
+    previous = (p["body"] or "").strip()
 
     retry = None
     for attempt in range(2):
-        prompt = _first_touch_prompt(ctx, niche)
+        prompt = _first_touch_prompt(ctx, niche, previous=previous)
         if retry:
             prompt = prompt + f"\n\n{retry}"
-        body = llm(prompt)
+        text = llm(prompt)
+        subject, body = _parse_draft(text)
+        if not subject:
+            # Model didn't follow the Subject:/body format — build a fact-based
+            # subject instead of reusing the old one, so the re-roll still shows.
+            subject = _fallback_subject(p, ctx)
         bad_nums = invented_numbers(body, ctx)
-        bad_words = banned_phrases(body)
-        if not bad_nums and not bad_words:
-            subject = hook[:60]
+        bad_subj = invented_numbers(subject, ctx)
+        bad_words = banned_phrases(body) + banned_phrases(subject)
+        if not bad_nums and not bad_subj and not bad_words:
+            subject = subject[:60]
             con.execute(
                 "UPDATE prospects SET first_subject = ?, body = ? WHERE id = ?",
                 (subject, format_email(body, p["contact_name"]), prospect_id),
@@ -1642,11 +1647,18 @@ def regenerate_draft(prospect_id: int) -> dict:
                 "subject": subject,
                 "body": format_email(body, p["contact_name"]),
             }
-        if bad_nums:
+        if bad_subj:
+            retry = (
+                f"Your subject asserted {', '.join(bad_subj)}, which appears nowhere "
+                "in the context. Use only numbers found in the context, written "
+                "exactly as they appear (e.g. '32k', not '32,000')."
+            )
+        elif bad_nums:
             retry = (
                 f"Your previous draft asserted {', '.join(bad_nums)}, which appears "
                 "nowhere in the context. Rewrite using no numbers beyond those in "
-                "the context."
+                "the context, written exactly as they appear (e.g. '32k', not "
+                "'32,000')."
             )
         else:
             retry = (
@@ -1657,39 +1669,92 @@ def regenerate_draft(prospect_id: int) -> dict:
     return {"success": False, "error": "Draft failed fact review after 2 attempts"}
 
 
-def _first_touch_prompt(ctx: str, niche: str = "store") -> str:
+def _parse_draft(text: str) -> tuple:
+    """Split an LLM draft response into (subject, body).
+
+    Accepts \"Subject: <line>\" followed by a blank line and the body. Returns
+    (None, text) when the model didn't follow the format, so the caller can
+    fall back to a fact-based subject instead of reusing the old one.
+    """
+    lines = (text or "").strip().splitlines()
+    if not lines:
+        return None, ""
+    first = lines[0].strip()
+    if first.lower().startswith("subject"):
+        subject = first.split(":", 1)[1].strip() if ":" in first else first
+        body = "\n".join(lines[1:]).strip()
+        return (subject or None), body
+    return None, text.strip()
+
+
+def _fallback_subject(p, ctx: str) -> str:
+    """A fresh subject from the research, preferring a fact the old subject
+    didn't use, so a re-roll visibly changes instead of repeating itself."""
+    facts = [f.strip() for f in re.findall(r"\d[\d,.]*\s*[A-Za-z]+", ctx or "")]
+    current = (p["first_subject"] or "").lower()
+    fresh = [f for f in facts if f.lower() not in current]
+    hook = (fresh[0] if fresh else facts[0] if facts else f"{p['company']} and product feeds")
+    return hook.lower()[:60]
+
+
+def _first_touch_prompt(ctx: str, niche: str = "store", previous: str = None) -> str:
     """Prompt for re-rolling a first-touch email from research context.
 
     Same copy rules as the discovery skill: short, one specific true fact as the
-    hook, the mechanism gap, the offer with no monthly fee, an easy out. No
-    flattery, no links, no rate/price figures, no claims about their checkout or
-    product pages — those are unverifiable.
+    hook, the mechanism gap, a direct free-trial ask as the CTA, and an easy out.
+    The offer is that install itself is the free trial — no monthly fee, no card,
+    billed only on revenue the app attributes, so if it finds nothing it costs
+    nothing. Never promise a report or audit before install; that undercuts the
+    "order history is the only truth" argument in the same email. No flattery,
+    no links, no rate/price figures, no claims about their checkout or product
+    pages — those are unverifiable. Returns subject + body so a re-roll visibly
+    changes both, and steers away from the previous draft when given one.
     """
-    catalog = "their store" if niche != "agency" else "one client store"
+    vary = ""
+    if previous:
+        vary = (
+            "\n\nPREVIOUS DRAFT — write a DIFFERENT email. Do not repeat its opening\n"
+            "observation, its sentences, or its structure. Pick a different true fact\n"
+            "from the context to open with, and say the same pitch in fresh words.\n\n"
+            + previous
+        )
     return f"""Write the first cold email for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
-shows those pairings at checkout and after purchase. No monthly fee — it bills
-only on revenue it can attribute to its own recommendations. Free bundle report
-on {catalog}, built from their public catalog, no install needed.
+shows those pairings on product pages, in the cart and at checkout.
+
+The offer: install is the free trial. No monthly fee, no card — the app bills
+only on revenue it can attribute to its own recommendations, so if it finds
+nothing, it costs nothing.
 
 CONTEXT
 {ctx}
 
+Structure, 50-80 words (shorter is better):
+1. Open with ONE specific, true observation from the context — a product count,
+   a brand count, a review total, or the app they run. No flattery.
+2. The gap, in one sentence: recommendations keyed off collections or tags are
+   a guess; their order history already contains the real pairings.
+3. The hook, as a direct question: would they like to try the extension free?
+   Name the risk-free terms in plain words — no monthly fee, no card, billed
+   only on revenue it attributes, so if it finds nothing it costs nothing.
+   Never state a commission rate, percentage, cap or dollar figure.
+4. An easy out: tell them to reply "no thanks" and you will stop.
+
 Copy rules:
-- 50-80 words. Shorter is better.
-- Open with ONE specific, true observation from the context — a product count,
-  a brand count, a review total, or the app they run. No flattery.
-- Explain the gap in one sentence: recommendations keyed off collections or
-  tags are a guess; their order history already contains the real pairings.
-- State the mechanism and the free report. Never state a commission rate,
-  percentage, cap or dollar figure — that has never been fixed.
+- NEVER promise a report, audit, teardown or "what it finds" before install —
+  we cannot produce any of it without their orders. The trial itself is the offer.
 - NEVER claim anything about their checkout, product pages, cart or homepage —
   you cannot see those without placing an order.
 - No links. Plain text, no markdown.
 - Do NOT write a greeting or sign-off — those are added at send time.
-- End with an easy out: tell them to reply "no thanks" and you will stop.
+{vary}
 
-Return ONLY the body text."""
+Return ONLY the subject line on its own (one specific true fact from the
+context, lowercase, 4-7 words, no greeting or sign-off), then a blank line,
+then the body text. Format:
+Subject: <subject>
+
+<body>"""
 
 
 def reject_prospect(prospect_id: int) -> dict:

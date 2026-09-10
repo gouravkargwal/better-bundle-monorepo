@@ -77,6 +77,7 @@ class HoldoutService:
         customer_id: Optional[str],
         session_id: Optional[str],
         holdout_percent: int,
+        surface: Optional[str] = None,
     ) -> bool:
         """
         Deterministically decide if this shopper is in the control group.
@@ -108,7 +109,7 @@ class HoldoutService:
             )
             return False
 
-        key = f"{shop_id}:{identity}"
+        key = f"{shop_id}:{surface}:{identity}" if surface else f"{shop_id}:{identity}"
         bucket = int(hashlib.md5(key.encode()).hexdigest(), 16) % 100
         return bucket < holdout_percent
 

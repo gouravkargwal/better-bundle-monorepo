@@ -198,6 +198,7 @@ async def fetch_recommendations_logic(
         customer_id=request.user_id,
         session_id=request.session_id,
         holdout_percent=holdout_pct,
+        surface=surface,
     ):
         # A bot or a theme preview that lands in the control bucket must not be
         # logged either: control sessions are the counterfactual the billed lift

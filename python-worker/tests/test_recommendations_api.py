@@ -103,10 +103,10 @@ async def source_product(shop):
     return row.product_id
 
 
-def _identity_in_bucket(shop_id: str, want_control: bool) -> str:
+def _identity_in_bucket(shop_id: str, want_control: bool, surface: Optional[str] = "phoenix") -> str:
     """An identity that deterministically lands in control, or does not.
 
-    Bucketing is `md5(shop_id:identity) % 100 < holdout_percent`, so the answer
+    Bucketing is `md5(shop_id:surface:identity) % 100 < holdout_percent`, so the answer
     depends on the shop. Derived at runtime and salted per call so each test
     also gets a distinct cache key — a cached response would skip the
     impression write and make these assertions pass for the wrong reason.
@@ -114,8 +114,9 @@ def _identity_in_bucket(shop_id: str, want_control: bool) -> str:
     salt = uuid.uuid4().hex[:8]
     for n in range(2000):
         candidate = f"{salt}-{n}"
+        key = f"{shop_id}:{surface}:{candidate}" if surface else f"{shop_id}:{candidate}"
         bucket = (
-            int(hashlib.md5(f"{shop_id}:{candidate}".encode()).hexdigest(), 16) % 100
+            int(hashlib.md5(key.encode()).hexdigest(), 16) % 100
         )
         if (bucket < INITIAL_HOLDOUT_PERCENT) is want_control:
             return candidate
