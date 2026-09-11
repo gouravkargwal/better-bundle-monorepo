@@ -16,6 +16,7 @@ from app.core.config.settings import settings
 from app.core.logging import get_logger
 from app.core.logging.otel_logger import init_otel_logger
 from app.core.logging.otel_metrics import init_otel_metrics
+from app.core.logging.otel_tracing import init_otel_tracing
 from app.core.metrics import request_count, request_duration
 from app.shared.helpers import now_utc
 
@@ -42,12 +43,19 @@ logger = get_logger(__name__)
 # OTel provider instances – kept alive for graceful shutdown
 _otel_provider = None
 _metrics_provider = None
+_tracer_provider = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
+
+    # Initialize OpenTelemetry tracing (must precede logs so log records
+    # carry trace_id/span_id)
+    global _tracer_provider
+    _tracer_provider = init_otel_tracing(settings)
+    logger.info("✅ OpenTelemetry tracing initialized")
 
     # Initialize OpenTelemetry logging
     global _otel_provider
@@ -136,6 +144,10 @@ async def lifespan(app: FastAPI):
     if _metrics_provider is not None and hasattr(_metrics_provider, "shutdown"):
         _metrics_provider.shutdown()
         logger.info("✅ OpenTelemetry metrics provider shut down")
+
+    if _tracer_provider is not None and hasattr(_tracer_provider, "shutdown"):
+        _tracer_provider.shutdown()
+        logger.info("✅ OpenTelemetry tracing provider shut down")
 
 
 # Create FastAPI app
