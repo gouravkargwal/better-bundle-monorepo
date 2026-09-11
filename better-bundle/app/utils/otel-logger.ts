@@ -1,5 +1,6 @@
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { Resource } from "@opentelemetry/resources";
 import {
   ATTR_SERVICE_NAME,
@@ -32,6 +33,10 @@ export function initObservability(): NodeSDK {
         headers: apiKey ? { Authorization: `Basic ${apiKey}` } : {},
       }),
     ),
+    traceExporter: new OTLPTraceExporter({
+      url: `${endpoint}/api/${org}/v1/traces`,
+      headers: apiKey ? { Authorization: `Basic ${apiKey}` } : {},
+    }),
     instrumentations: [
       new PinoInstrumentation(),
       new HttpInstrumentation(),
