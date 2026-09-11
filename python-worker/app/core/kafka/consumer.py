@@ -18,6 +18,24 @@ from aiokafka.errors import (
 from app.core.metrics import kafka_messages_consumed
 from app.shared.decorators.tracing import async_trace_func
 
+from opentelemetry import context as otel_context, propagate, trace
+
+_tracer = trace.get_tracer(__name__)
+
+
+def extract_trace_context(headers: Dict[str, Any]) -> otel_context.Context:
+    """Rebuild the producer's span context from Kafka headers.
+
+    Accepts aiokafka's ``dict`` of header name -> bytes. Missing or malformed
+    headers yield an empty context, which starts a fresh trace rather than
+    raising — a bad header must never drop a message.
+    """
+    carrier = {
+        k: v.decode("utf-8") if isinstance(v, bytes) else str(v)
+        for k, v in (headers or {}).items()
+    }
+    return propagate.extract(carrier)
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,7 +136,19 @@ class KafkaConsumer:
                             "group_id": self._group_id,
                         },
                     )
-                    yield kafka_message
+
+                    parent_ctx = extract_trace_context(kafka_message["headers"])
+                    with _tracer.start_as_current_span(
+                        f"kafka.consume {message.topic}",
+                        context=parent_ctx,
+                        kind=trace.SpanKind.CONSUMER,
+                    ) as span:
+                        span.set_attribute("messaging.system", "kafka")
+                        span.set_attribute("messaging.destination.name", message.topic)
+                        span.set_attribute("messaging.kafka.partition", message.partition)
+                        span.set_attribute("messaging.kafka.offset", message.offset)
+                        span.set_attribute("messaging.consumer.group.name", self._group_id)
+                        yield kafka_message
 
                 except json.JSONDecodeError as e:
                     self._error_count += 1

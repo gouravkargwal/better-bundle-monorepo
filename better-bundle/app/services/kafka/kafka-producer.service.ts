@@ -2,6 +2,7 @@ import type { Producer, RecordMetadata } from "kafkajs";
 import { KafkaClientService } from "./kafka-client.service";
 import { kafkaConfig } from "../../utils/kafka-config";
 import logger from "../../utils/logger";
+import { propagation, context } from "@opentelemetry/api";
 
 export interface ShopifyEventData {
   event_type: string;
@@ -92,6 +93,10 @@ export class KafkaProducerService {
         }
       }
 
+      // W3C trace context so the worker's spans join this request's trace.
+      const traceHeaders: Record<string, string> = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const result: RecordMetadata[] = await this.producer.send({
         topic: "shopify-events",
         messages: [
@@ -99,6 +104,7 @@ export class KafkaProducerService {
             key,
             value: JSON.stringify(messageWithMetadata),
             headers: {
+              ...traceHeaders,
               "event-type": eventData.event_type,
               "shop-id":
                 eventData.shop_id || eventData.shop_domain || "unknown",
@@ -141,6 +147,10 @@ export class KafkaProducerService {
         }
       }
 
+      // W3C trace context so the worker's spans join this request's trace.
+      const traceHeaders: Record<string, string> = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const result: RecordMetadata[] = await this.producer.send({
         topic: "data-collection-jobs",
         messages: [
@@ -148,6 +158,7 @@ export class KafkaProducerService {
             key,
             value: JSON.stringify(messageWithMetadata),
             headers: {
+              ...traceHeaders,
               "job-type": jobData.job_type,
               "shop-id": jobData.shop_id,
               timestamp: new Date().toISOString(),
@@ -194,6 +205,10 @@ export class KafkaProducerService {
         }
       }
 
+      // W3C trace context so the worker's spans join this request's trace.
+      const traceHeaders: Record<string, string> = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const result: RecordMetadata[] = await this.producer.send({
         topic: "shopify-usage-events",
         messages: [
@@ -201,6 +216,7 @@ export class KafkaProducerService {
             key,
             value: JSON.stringify(messageWithMetadata),
             headers: {
+              ...traceHeaders,
               "event-type": usageData.event_type || "unknown",
               "shop-id":
                 usageData.shop_id || usageData.shop_domain || "unknown",
@@ -248,6 +264,10 @@ export class KafkaProducerService {
         }
       }
 
+      // W3C trace context so the worker's spans join this request's trace.
+      const traceHeaders: Record<string, string> = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const result: RecordMetadata[] = await this.producer.send({
         topic: "access-control",
         messages: [
@@ -255,6 +275,7 @@ export class KafkaProducerService {
             key,
             value: JSON.stringify(messageWithMetadata),
             headers: {
+              ...traceHeaders,
               "event-type": accessData.event_type,
               "shop-id": accessData.shop_id,
               timestamp: new Date().toISOString(),
@@ -289,6 +310,10 @@ export class KafkaProducerService {
         }
       }
 
+      // W3C trace context so the worker's spans join this request's trace.
+      const traceHeaders: Record<string, string> = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const messages = events.map((event) => ({
         topic: event.topic,
         messages: [
@@ -299,6 +324,7 @@ export class KafkaProducerService {
               timestamp: new Date().toISOString(),
               worker_id: kafkaConfig.workerId,
             }),
+            headers: traceHeaders,
           },
         ],
       }));

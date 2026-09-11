@@ -10,7 +10,20 @@ from aiokafka import AIOKafkaProducer
 from aiokafka.errors import KafkaError, KafkaTimeoutError
 from .strategies import PartitioningStrategy, ShopBasedPartitioning
 
+from opentelemetry import propagate
+
 logger = logging.getLogger(__name__)
+
+
+def inject_trace_headers() -> List[tuple]:
+    """Serialize the active span context into Kafka headers (W3C traceparent).
+
+    Returns aiokafka's header format: a list of (str, bytes) pairs. Empty
+    when there is no active span, which is a valid state, not an error.
+    """
+    carrier: Dict[str, str] = {}
+    propagate.inject(carrier)
+    return [(k, v.encode("utf-8")) for k, v in carrier.items()]
 
 
 class KafkaProducer:
@@ -61,6 +74,8 @@ class KafkaProducer:
                 "use_explicit_partition", False
             )
 
+            headers = inject_trace_headers()
+
             record_metadata = None
             if use_explicit_partition:
                 # Determine partition only if explicitly enabled
@@ -76,6 +91,7 @@ class KafkaProducer:
                             value=message_with_metadata,
                             key=key,
                             partition=partition,
+                            headers=headers,
                         )
                         record_metadata = await future
                     except Exception as partition_error:
@@ -88,7 +104,7 @@ class KafkaProducer:
                                 f"⚠️ Partition error for {topic}, retrying without partition: {partition_error}"
                             )
                             future = self._producer.send(
-                                topic, value=message_with_metadata, key=key
+                                topic, value=message_with_metadata, key=key, headers=headers
                             )
                             record_metadata = await future
                         else:
@@ -96,13 +112,13 @@ class KafkaProducer:
                 else:
                     # No partition determined, let Kafka choose
                     future = self._producer.send(
-                        topic, value=message_with_metadata, key=key
+                        topic, value=message_with_metadata, key=key, headers=headers
                     )
                     record_metadata = await future
             else:
                 # Industry practice: rely on key-based partitioning; do not specify partition
                 future = self._producer.send(
-                    topic, value=message_with_metadata, key=key
+                    topic, value=message_with_metadata, key=key, headers=headers
                 )
                 record_metadata = await future
 
