@@ -40,6 +40,7 @@ from app.core.config.kafka_settings import kafka_settings
 from app.core.database.session import get_transaction_context
 from app.core.messaging.event_publisher import EventPublisher
 from app.shared.helpers import now_utc
+from app.core.single_run import claim
 
 logger = logging.getLogger(__name__)
 
@@ -219,9 +220,12 @@ async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:
     while True:
         try:
             await asyncio.sleep(interval)
-            result = await reconcile_once()
-            if result["found"]:
-                logger.info(f"Attribution reconciliation: {result}")
+            # Only one worker per cycle, or four of them sweep the same rows.
+            async with claim("attribution_reconciler") as mine:
+                if mine:
+                    result = await reconcile_once()
+                    if result["found"]:
+                        logger.info(f"Attribution reconciliation: {result}")
         except asyncio.CancelledError:
             logger.info("Attribution reconciler stopped")
             raise

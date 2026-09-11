@@ -49,6 +49,7 @@ from app.core.database.session import get_transaction_context
 from app.core.logging import get_logger
 from app.core.messaging.event_publisher import EventPublisher
 from app.shared.helpers import now_utc
+from app.core.single_run import claim
 
 logger = get_logger(__name__)
 
@@ -251,7 +252,12 @@ async def run_forever(interval: int = BACKSTOP_INTERVAL_SECONDS) -> None:
     logger.info(f"Ingestion backstop started (every {interval}s)")
     while True:
         try:
-            await sweep_once()
+            # Only one worker per cycle. Four uvicorn workers each ran this
+            # loop, so every sweep asked Shopify for every shop's orders four
+            # times and republished each missing order four times.
+            async with claim("ingestion_backstop") as mine:
+                if mine:
+                    await sweep_once()
         except asyncio.CancelledError:
             raise
         except Exception as e:

@@ -8,6 +8,22 @@ services:
     container_name: betterbundle-postgres-dev
     env_file:
       - .env.dev
+    # Same knobs as prod, a third of the values — this Docker VM has ~2.8GB
+    # total for every container, where prod has 12GB. Stock Postgres plans with
+    # shared_buffers=128MB and an effective_cache_size of 4GB regardless of what
+    # it actually has, so without this the dev planner makes different choices
+    # from the prod one and a query plan verified here proves nothing about
+    # there. Matching the shape is the point; matching the numbers would not fit.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
     ports:
       - "5432:5432"
     volumes:
@@ -47,7 +63,20 @@ services:
       - KAFKA_LOG_DIRS=/var/lib/kafka/data
       - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      # 1, not the stock 50. `__consumer_offsets` accounted for 50 of the 56
+      # partitions on this cluster — 89% of all partitions, for six partitions
+      # of actual business topics. Each one carries log segments, indexes, timer
+      # tasks and periodic log-cleaner compaction, which is the background CPU
+      # floor on an otherwise empty broker.
+      #
+      # Only applied when the cluster is first created, so an existing
+      # kafka_data volume keeps its 50 until the volume is wiped.
+      - KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS=1
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      # Dev does not need the 1G default. Resident was 944MB against a 1G heap —
+      # a third of the whole Docker allocation, more than every other container
+      # combined. Prod keeps 1g; see docker-compose.prod.yml.
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
@@ -58,16 +87,26 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=kafka,env=dev"
+    # A TCP probe, NOT `kafka-broker-api-versions`.
+    #
+    # That script boots a whole second JVM (256M heap, the Kafka CLI default)
+    # to ask the broker one question, then throws the JIT-compiled result away.
+    # Measured here: 5.2-32.3s per run, mean 12.7s, against a 30s interval —
+    # a ~42% duty cycle of a throwaway JVM burning 1.5-2.5 cores on C1/C2
+    # compilation. That, not Kafka, was the 244% CPU. Two of five runs also
+    # exceeded the 10s timeout, so the container flapped between healthy and
+    # unhealthy and anything waiting on `service_healthy` flapped with it.
+    #
+    # `/dev/tcp` is a bash builtin, so this costs no process at all.
+    #
+    # Honest limitation: this proves the listener is bound, not that the broker
+    # is serving metadata. Kafka binds 9092 late in startup — after log
+    # recovery — so it is a good proxy, but it is a weaker check than the one it
+    # replaces. `start_period` covers the gap.
     healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-broker-api-versions",
-          "--bootstrap-server",
-          "localhost:9092",
-        ]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 5
       start_period: 40s
 

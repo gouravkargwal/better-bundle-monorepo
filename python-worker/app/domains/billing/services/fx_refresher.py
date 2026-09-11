@@ -26,6 +26,7 @@ from app.core.database.models.exchange_rate import ExchangeRate
 from app.core.database.session import get_transaction_context
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
+from app.core.single_run import claim
 
 logger = get_logger(__name__)
 
@@ -116,7 +117,11 @@ async def run_forever() -> None:
     """
     while True:
         try:
-            await refresh_once()
+            # Only one worker per cycle: four workers meant four calls to a
+            # free FX API on every refresh.
+            async with claim("fx_refresher") as mine:
+                if mine:
+                    await refresh_once()
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - a dead refresher must not kill the app

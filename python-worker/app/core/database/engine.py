@@ -14,7 +14,6 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
-from sqlalchemy.pool import NullPool
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy import event
@@ -65,8 +64,50 @@ def create_engine() -> AsyncEngine:
         "url": database_url,
         "echo": settings.database.SQLALCHEMY_ECHO,  # Log SQL queries when enabled
         "echo_pool": settings.database.SQLALCHEMY_ECHO_POOL,  # Log pool events when enabled
-        "poolclass": NullPool,  # Use NullPool for async engines
-        # Note: NullPool doesn't support pool_size, max_overflow, pool_timeout
+        # No `poolclass`: the default for an async engine is
+        # AsyncAdaptedQueuePool, which is exactly what we want.
+        #
+        # This was `NullPool`, commented "Use NullPool for async engines" — a
+        # widely repeated misconception. NullPool means NO pool: every single
+        # query opened a fresh TCP connection to Postgres, authenticated, ran
+        # one statement, and closed it.
+        #
+        # Measured on this machine:
+        #     SELECT 1 on an already-open connection     0.08 ms
+        #     engine.connect() + SELECT 1               14.59 ms
+        #
+        # 180x, and a recommendation request makes four of those round trips —
+        # 57 ms of an ~80 ms response was connection setup. It is also why
+        # Postgres sat at 11% CPU while Python sat at 95%: the cost was not
+        # query execution, it was handshakes.
+        #
+        # NullPool IS correct in two situations, and neither applies here:
+        #
+        #   * The engine is built before os.fork(), so children would inherit
+        #     and share the parent's sockets. `get_engine()` builds it lazily
+        #     behind a double-checked lock, so each uvicorn worker creates its
+        #     own after forking.
+        #
+        #   * The process runs more than one event loop (repeated
+        #     `asyncio.run()`), since a pooled connection is bound to the loop
+        #     that opened it. Uvicorn owns a single loop; the only
+        #     `asyncio.run()` calls in this codebase are standalone scripts,
+        #     which are separate processes with their own engine.
+        #
+        # If either of those ever becomes true, put NullPool back rather than
+        # debugging the symptoms.
+        #
+        # 10 + 10 is 20 connections per process against Postgres's
+        # max_connections of 100, with Prisma holding its own separate pool.
+        "pool_size": 10,
+        "max_overflow": 10,
+        "pool_timeout": settings.DATABASE_POOL_TIMEOUT,
+        # Recycle well inside any infrastructure idle timeout, so a connection
+        # is never handed out after something upstream has quietly closed it.
+        "pool_recycle": 1800,
+        # Costs one 0.08 ms round trip on checkout and buys immunity to a
+        # Postgres restart handing out dead connections from the pool.
+        "pool_pre_ping": True,
         "connect_args": (
             {
                 "command_timeout": settings.DATABASE_QUERY_TIMEOUT,

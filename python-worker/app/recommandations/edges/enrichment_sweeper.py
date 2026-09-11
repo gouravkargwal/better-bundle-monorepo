@@ -31,6 +31,7 @@ from typing import Any, Dict, List
 from .enrichment_store import shops_needing_enrichment
 from .install import EdgeInstallPipeline
 from .llm_budget import BudgetExceeded, CircuitOpen, LLMBudget
+from app.core.single_run import claim
 
 logger = logging.getLogger(__name__)
 
@@ -99,9 +100,14 @@ async def run_forever(interval: int = SWEEP_INTERVAL_SECONDS) -> None:
     while True:
         try:
             await asyncio.sleep(interval)
-            result = await sweep_once()
-            if result["shops"]:
-                logger.info(f"Enrichment sweep: {result}")
+            # Only one worker per cycle. Without this, four uvicorn workers
+            # each retried the same unenriched products, paying for the same
+            # LLM enrichment call four times over.
+            async with claim("enrichment_sweeper") as mine:
+                if mine:
+                    result = await sweep_once()
+                    if result["shops"]:
+                        logger.info(f"Enrichment sweep: {result}")
         except asyncio.CancelledError:
             logger.info("Enrichment sweeper stopped")
             raise

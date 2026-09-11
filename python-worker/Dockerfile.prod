@@ -46,5 +46,26 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application in production mode
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# Run the application in production mode.
+#
+# --workers 1, deliberately, and it is a correctness fix rather than a tuning one.
+#
+# `uvicorn --workers N` forks N complete copies of the app, each running the
+# whole lifespan in app/main.py — which starts the enrichment sweeper, the
+# attribution reconciler, the FX refresher and the ingestion backstop with no
+# guard against being run more than once. At --workers 4 that is four ingestion
+# backstops asking Shopify for every shop's orders every 30 minutes, four
+# reconcilers sweeping the same rows, and four refreshers hitting the FX API.
+# Four workers each find the same missing order and each republish it.
+#
+# It has never been seen because dev runs `--reload`, which is a single worker.
+#
+# The throughput cost is small: serving is CPU-bound in Python at ~15 req/s per
+# core (measured), so a second worker inside the 1.25-core cap buys roughly 20%.
+# The real win is the cache placement, which is worth 5-10x and makes this
+# question moot.
+#
+# To go back to multiple workers, the background tasks need to elect a single
+# runner first — a Postgres advisory lock in the lifespan is the natural fit,
+# since only one worker can hold it and it releases itself if that worker dies.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
