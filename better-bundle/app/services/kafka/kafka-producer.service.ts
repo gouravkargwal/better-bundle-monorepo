@@ -2,7 +2,9 @@ import type { Producer, RecordMetadata } from "kafkajs";
 import { KafkaClientService } from "./kafka-client.service";
 import { kafkaConfig } from "../../utils/kafka-config";
 import logger from "../../utils/logger";
-import { propagation, context } from "@opentelemetry/api";
+import { propagation, context, trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("remix-app-kafka-producer");
 
 export interface ShopifyEventData {
   event_type: string;
@@ -93,31 +95,41 @@ export class KafkaProducerService {
         }
       }
 
-      // W3C trace context so the worker's spans join this request's trace.
-      const traceHeaders: Record<string, string> = {};
-      propagation.inject(context.active(), traceHeaders);
+      return tracer.startActiveSpan("publishShopifyEvent", async (span) => {
+        try {
+          // W3C trace context so the worker's spans join this request's trace.
+          const traceHeaders: Record<string, string> = {};
+          propagation.inject(context.active(), traceHeaders);
 
-      const result: RecordMetadata[] = await this.producer.send({
-        topic: "shopify-events",
-        messages: [
-          {
-            key,
-            value: JSON.stringify(messageWithMetadata),
-            headers: {
-              ...traceHeaders,
-              "event-type": eventData.event_type,
-              "shop-id":
-                eventData.shop_id || eventData.shop_domain || "unknown",
-              timestamp: new Date().toISOString(),
-            },
-          },
-        ],
+          const result = await this.producer!.send({
+            topic: "shopify-events",
+            messages: [
+              {
+                key,
+                value: JSON.stringify(messageWithMetadata),
+                headers: {
+                  ...traceHeaders,
+                  "event-type": eventData.event_type,
+                  "shop-id":
+                    eventData.shop_id || eventData.shop_domain || "unknown",
+                  timestamp: new Date().toISOString(),
+                },
+              },
+            ],
+          });
+
+          this.messageCount++;
+          const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
+          
+          span.setAttribute("message_id", messageId);
+          return messageId;
+        } catch (error) {
+          span.recordException(error as Error);
+          throw error;
+        } finally {
+          span.end();
+        }
       });
-
-      this.messageCount++;
-      const messageId = `${result[0].topicName}:${result[0].partition}:${result[0].offset}`;
-
-      return messageId;
     } catch (error) {
       this.errorCount++;
       logger.error({ error }, "Failed to publish Shopify event");
