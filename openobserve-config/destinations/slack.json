@@ -1,0 +1,10 @@
+{
+  "name": "slack",
+  "url": "SLACK_WEBHOOK_URL_PLACEHOLDER",
+  "method": "post",
+  "skip_tls_verify": false,
+  "template": "slack-webhook",
+  "headers": {
+    "Content-Type": "application/json"
+  }
+}

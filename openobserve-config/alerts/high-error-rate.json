@@ -1,15 +1,29 @@
 {
   "name": "High HTTP Error Rate",
-  "stream": "python-worker-metrics",
-  "query": "SELECT rate(count(*), 5m) as error_rate FROM \"python-worker-metrics\" WHERE status >= 500 AND timestamp > now() - 5m",
-  "condition": "error_rate > 0.05",
-  "eval_period": "5m",
-  "frequency": "5m",
-  "notifications": [
-    {
-      "type": "slack",
-      "webhook_url": "${SLACK_WEBHOOK_URL}"
+  "stream_type": "logs",
+  "stream_name": "default",
+  "is_real_time": false,
+  "enabled": true,
+  "description": "5xx responses exceeded 10 in the last 5 minutes",
+  "query_condition": {
+    "type": "sql",
+    "sql": "SELECT COUNT(*) AS error_count FROM \"default\" WHERE status >= 500",
+    "aggregation": {
+      "group_by": [],
+      "function": "count",
+      "having": {
+        "column": "error_count",
+        "operator": ">=",
+        "value": 10
+      }
     }
-  ],
-  "message": "HTTP error rate is {{error_rate}} req/s (threshold: 0.05 req/s)"
+  },
+  "trigger_condition": {
+    "period": 5,
+    "operator": ">=",
+    "threshold": 1,
+    "frequency": 5,
+    "silence": 30
+  },
+  "destinations": ["slack"]
 }

@@ -1,0 +1,6 @@
+{
+  "name": "slack-webhook",
+  "body": "{\"text\": \":rotating_light: *{alert_name}* fired on stream `{stream_name}` at {timestamp}\"}",
+  "type": "http",
+  "isDefault": false
+}

@@ -1,15 +1,29 @@
 {
-  "name": "Low Cache Hit Ratio",
-  "stream": "python-worker-metrics",
-  "query": "SELECT sum(cache_hits) / (sum(cache_hits) + sum(cache_misses)) as hit_ratio FROM \"python-worker-metrics\" WHERE timestamp > now() - 10m",
-  "condition": "hit_ratio < 0.5",
-  "eval_period": "10m",
-  "frequency": "10m",
-  "notifications": [
-    {
-      "type": "slack",
-      "webhook_url": "${SLACK_WEBHOOK_URL}"
+  "name": "Cache Hit Ratio Low",
+  "stream_type": "metrics",
+  "stream_name": "cache_hits_total",
+  "is_real_time": false,
+  "enabled": true,
+  "description": "Cache hits fell below 100 in 15 minutes, suggesting the cache is cold or bypassed",
+  "query_condition": {
+    "type": "sql",
+    "sql": "SELECT SUM(value) AS hits FROM \"cache_hits_total\"",
+    "aggregation": {
+      "group_by": [],
+      "function": "sum",
+      "having": {
+        "column": "hits",
+        "operator": "<",
+        "value": 100
+      }
     }
-  ],
-  "message": "Cache hit ratio is {{hit_ratio}} (threshold: 0.5)"
+  },
+  "trigger_condition": {
+    "period": 15,
+    "operator": ">=",
+    "threshold": 1,
+    "frequency": 15,
+    "silence": 60
+  },
+  "destinations": ["slack"]
 }

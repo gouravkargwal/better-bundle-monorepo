@@ -1,15 +1,29 @@
 {
-  "name": "Python Worker Down",
-  "stream": "python-worker-logs",
-  "query": "SELECT count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 2m",
-  "condition": "log_count < 1",
-  "eval_period": "2m",
-  "frequency": "1m",
-  "notifications": [
-    {
-      "type": "slack",
-      "webhook_url": "${SLACK_WEBHOOK_URL}"
+  "name": "Service Down",
+  "stream_type": "logs",
+  "stream_name": "default",
+  "is_real_time": false,
+  "enabled": true,
+  "description": "python-worker produced no log lines for 10 minutes",
+  "query_condition": {
+    "type": "sql",
+    "sql": "SELECT COUNT(*) AS line_count FROM \"default\" WHERE service_name = 'python-worker'",
+    "aggregation": {
+      "group_by": [],
+      "function": "count",
+      "having": {
+        "column": "line_count",
+        "operator": "<",
+        "value": 1
+      }
     }
-  ],
-  "message": "Python worker has not emitted any logs for 2 minutes — possible down"
+  },
+  "trigger_condition": {
+    "period": 10,
+    "operator": ">=",
+    "threshold": 1,
+    "frequency": 5,
+    "silence": 30
+  },
+  "destinations": ["slack"]
 }

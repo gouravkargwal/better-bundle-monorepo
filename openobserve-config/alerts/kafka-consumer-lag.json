@@ -1,15 +1,29 @@
 {
-  "name": "Kafka Consumer Lag Too High",
-  "stream": "python-worker-metrics",
-  "query": "SELECT max(kafka_consumer_lag) as max_lag FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
-  "condition": "max_lag > 10000",
-  "eval_period": "5m",
-  "frequency": "5m",
-  "notifications": [
-    {
-      "type": "slack",
-      "webhook_url": "${SLACK_WEBHOOK_URL}"
+  "name": "Kafka Consumption Stalled",
+  "stream_type": "metrics",
+  "stream_name": "kafka_messages_consumed",
+  "is_real_time": false,
+  "enabled": true,
+  "description": "No Kafka messages consumed in 15 minutes",
+  "query_condition": {
+    "type": "sql",
+    "sql": "SELECT SUM(value) AS consumed FROM \"kafka_messages_consumed\"",
+    "aggregation": {
+      "group_by": [],
+      "function": "sum",
+      "having": {
+        "column": "consumed",
+        "operator": "<",
+        "value": 1
+      }
     }
-  ],
-  "message": "Kafka consumer lag is {{max_lag}} (threshold: 10000)"
+  },
+  "trigger_condition": {
+    "period": 15,
+    "operator": ">=",
+    "threshold": 1,
+    "frequency": 15,
+    "silence": 60
+  },
+  "destinations": ["slack"]
 }
