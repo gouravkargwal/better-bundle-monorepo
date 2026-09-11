@@ -144,6 +144,4 @@ outreach/.env.dev
 outreach/outreach.db
 outreach/outreach.db-shm
 outreach/outreach.db-wal
-outreach/prospects.csv
-outreach/processed_log.csv
 outreach/__pycache__/

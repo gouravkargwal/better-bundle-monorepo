@@ -1,0 +1,62 @@
+company,domain,email,batch,status,reason,processed_at
+Natural Farm Pet,naturalfarmpet.com,,batch1,skipped,no_personal_email,2026-09-10 14:07:43
+Holistapet,holistapet.com,,batch1,skipped,catchall,2026-09-10 14:12:12
+Blind Dog Coffee Roasters,blinddogcoffee.com,,batch2,skipped,catchall,2026-09-10 15:37:44
+Sundae School,sundaeschool.myshopify.com,,batch2,skipped,no_volume_signal,2026-09-10 15:39:36
+Women Sea,womensea.com,,batch2,skipped,unreachable,2026-09-10 15:41:50
+Miss Lola,misslola.com,,batch2,skipped,catchall,2026-09-10 15:44:09
+The Kozy Koop,thekozykoop.myshopify.com,,batch2,skipped,no_volume_signal,2026-09-10 15:45:41
+Vet IQ,vetiq.com,,batch3,skipped,catalog_too_small,2026-09-10 15:47:53
+Verve Coffee Roasters,vervecoffee.com,,batch3,skipped,catchall,2026-09-10 15:51:25
+CrossFit 100,crossfit100.myshopify.com,,batch3,skipped,no_volume_signal,2026-09-10 15:52:26
+Goodfair,goodfair.com,,batch4,skipped,not_shopify,2026-09-10 15:56:32
+Tentree,tentree.com,,batch4,skipped,too_large,2026-09-10 15:58:14
+Emerson by Avery,emersonbyavery.com,,batch4,skipped,no_volume_signal,2026-09-10 16:00:01
+Simple Wishes,simplewishes.com,joy@simplewishes.com,batch4,new,,2026-09-10 16:03:09
+Miansai,miansai.com,michael@miansai.com,batch5,new,,2026-09-10 16:21:16
+Studio Faden,studiofaden.com,,batch5,skipped,not_shopify,2026-09-10 16:21:49
+American Tall,americantall.com,,batch6,skipped,bad_icp,2026-09-10 17:16:44
+Greg Norman Collection,gregnormancollection.com,,batch6,skipped,too_large,2026-09-10 17:26:45
+East Gate Small,eastgatesmall.com,,batch7,skipped,not_shopify,2026-09-10 17:36:08
+Simicart,simicart.com,,batch7,skipped,not_shopify,2026-09-10 17:37:33
+Kitsch,kitsch.com,,batch8,skipped,not_shopify,2026-09-10 17:47:35
+Sturgis Studio,sturgisstudio.com,,batch8,skipped,not_shopify,2026-09-10 17:48:35
+Parachute Home,parachutehome.com,,batch8,skipped,too_large,2026-09-10 17:53:26
+Wildfang,wildfang.com,,batch8,skipped,no_personal_email,2026-09-10 18:02:52
+May Lindstrom Skin,maylindstrom.com,,batch9,skipped,no_volume_signal,2026-09-10 20:22:32
+MySkinShop,myskinshop.com,,batch9,skipped,no_personal_email,2026-09-10 20:22:32
+RhoadsRoast Coffees,rhoadsroast-coffees.com,,batch9,skipped,no_personal_email,2026-09-10 20:22:32
+Ferris Coffee & Nut Co.,ferriscoffee.com,,batch9,skipped,no_personal_email,2026-09-10 20:22:32
+Caffe Vita,caffevita.com,,batch9,skipped,no_personal_email,2026-09-10 20:22:32
+Barefoot Coffee Roasters,barefootcoffee.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Greater Goods Roasting,greatergoodsroasting.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Coava Coffee Roasters,coavacoffee.com,,batch9,skipped,not_shopify,2026-09-10 20:22:58
+Skin Clique,skinclique.com,,batch9,skipped,not_shopify,2026-09-10 20:22:58
+1800PetSupplies,1800petsupplies.com,,batch9,skipped,unreachable,2026-09-10 20:22:58
+Plugs Appliance,plugsappliance.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+ShopCGX,shopcgx.com,,batch9,skipped,unreachable,2026-09-10 20:22:58
+Squadron,squadron.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Primally Pure,primallypure.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+SkincareEssentials,skincareessentials.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Osmia Natural Skincare,osmiaskincare.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Hey Bud Skincare,heybudskincare.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+Equator Coffees,equatorcoffees.com,,batch9,skipped,catchall,2026-09-10 20:22:58
+HighBrew Coffee,highbrewcoffee.com,,batch9,skipped,catalog_too_small,2026-09-10 20:22:58
+Kospet,kospet.com,martin@kospet.com,batch1,new,,2026-09-10 23:56:24
+My Zucchini,myzucchini.com,,batch1,skipped,not_shopify,2026-09-10 23:56:24
+Rubinas Collection,rubinascollection.com,rubinascollection.us@gmail.com,batch1,skipped,bad_icp,2026-09-10 23:56:24
+INK+ALLOY LLC,inkalloy.com,,batch1,skipped,unreachable,2026-09-10 23:56:24
+Extremely Refined,extremelyrefined.com,extremelyrefined@gmail.com,batch1,skipped,bad_icp,2026-09-10 23:56:24
+Taylor Upstate,taylorupstatestore.com,,batch1,skipped,no_volume_signal,2026-09-10 23:56:24
+Kopani Coffee,kopanicoffee.com,,batch1,skipped,catalog_too_small,2026-09-10 23:56:24
+Fulcrum Coffee,fulcrumcoffee.com,,batch1,skipped,no_volume_signal,2026-09-10 23:56:24
+Jason Hyde,jasonhyde.com,info@jasonhyde.com,batch2,new,,2026-09-11 00:07:43
+Ziba Collection,zibacollection.com,,batch2,skipped,catalog_too_small,2026-09-11 00:07:43
+Prathaa,prathaa.in,,batch2,skipped,no_personal_email,2026-09-11 00:07:43
+Open Your Closet,openyourcloset.net,s.paulin@openyourcloset.net,batch2,new,,2026-09-11 00:12:08
+Goal Zero,goalzero.com,,batch2,skipped,no_personal_email,2026-09-11 00:15:38
+WEEM,weemco.com,eli@weemco.com,batch2,new,,2026-09-11 00:19:28
+Elegoo,us.elegoo.com,,batch2,skipped,unreachable,2026-09-11 00:19:28
+Kanopi by Armstrong,kanopibyarmstrong.com,,batch2,skipped,too_large,2026-09-11 00:22:35
+Zea,zea.com.au,,batch2,skipped,catchall,2026-09-11 00:25:43
+Full Leaf Tea Company,fullleafteacompany.com,,batch2,skipped,no_personal_email,2026-09-11 00:31:40
