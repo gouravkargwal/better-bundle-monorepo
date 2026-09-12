@@ -38,9 +38,12 @@ costs one cheap ID-only query per shop and cannot get stuck.
 """
 
 import asyncio
+import time
 from datetime import timedelta
 from typing import Any, Dict, List, Set
 
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 from sqlalchemy import select, text
 
 from app.core.config.kafka_settings import kafka_settings
@@ -48,10 +51,16 @@ from app.core.database.models.shop import Shop
 from app.core.database.session import get_transaction_context
 from app.core.logging import get_logger
 from app.core.messaging.event_publisher import EventPublisher
+from app.core.metrics import (
+    backstop_missed_orders,
+    reconciler_duration,
+    reconciler_runs_total,
+)
 from app.shared.helpers import now_utc
 from app.core.single_run import claim
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # How often to sweep. Long enough that it costs nothing, short enough that a
 # webhook outage is caught within the hour rather than by a merchant.
@@ -205,46 +214,97 @@ async def sweep_shop(shop: Dict[str, str], dry_run: bool = False) -> Dict[str, A
 
 async def sweep_once(dry_run: bool = False) -> Dict[str, Any]:
     """One pass across every active shop."""
-    shops = await _active_shops()
-    results = []
-    failed = []
-    for shop in shops:
+    start_time = time.perf_counter()
+    with tracer.start_as_current_span("reconciler.ingestion_backstop.sweep") as span:
+        span.set_attribute("dry_run", dry_run)
         try:
-            results.append(await sweep_shop(shop, dry_run=dry_run))
+            shops = await _active_shops()
+            results = []
+            failed = []
+            for shop in shops:
+                try:
+                    results.append(await sweep_shop(shop, dry_run=dry_run))
+                except Exception as e:
+                    # One shop's expired token or rate limit must not stop the others,
+                    # but it must not be mistaken for a clean result either.
+                    logger.error(
+                        f"Ingestion backstop failed for {shop['shop_domain']}: {e}",
+                        extra={"reconciler": "ingestion_backstop", "shop_domain": shop["shop_domain"]},
+                    )
+                    failed.append(shop["shop_domain"])
+
+            total_missing = sum(r.get("missing", 0) for r in results)
+            total_published = sum(r.get("published", 0) for r in results)
+
+            span.set_attribute("shops_checked", len(results))
+            span.set_attribute("orders_ingested", total_published)
+            span.set_attribute("missing", total_missing)
+
+            if total_published > 0:
+                backstop_missed_orders.add(total_published)
+
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "ingestion_backstop", "status": "success"})
+            reconciler_duration.record(duration, {"reconciler": "ingestion_backstop"})
+
+            # A shop that errored was never actually checked, so it cannot be reported
+            # as healthy. This sweep is the only webhook-failure alarm there is; an
+            # "everything fine" line covering shops it failed to examine would recreate
+            # the exact blind spot the backstop exists to close — and it would look
+            # reassuring while doing it.
+            if failed:
+                logger.error(
+                    f"🚨 Ingestion backstop could not check {len(failed)} of {len(shops)} "
+                    f"shop(s): {', '.join(failed)}. Webhook delivery is UNVERIFIED for "
+                    f"them — this is not a clean result.",
+                    extra={
+                        "reconciler": "ingestion_backstop",
+                        "failed_shops": failed,
+                        "shops_total": len(shops),
+                        "shops_checked": len(results),
+                        "duration_sec": duration,
+                    },
+                )
+            elif total_missing == 0:
+                logger.info(
+                    f"✅ Ingestion backstop: {len(shops)} shop(s) checked, nothing missing",
+                    extra={
+                        "reconciler": "ingestion_backstop",
+                        "shops_total": len(shops),
+                        "shops_checked": len(results),
+                        "missing": 0,
+                        "duration_sec": duration,
+                    },
+                )
+            else:
+                logger.warning(
+                    f"⚠️ Ingestion backstop recovered {total_published} missing order(s) across {len(shops)} shop(s)",
+                    extra={
+                        "reconciler": "ingestion_backstop",
+                        "shops_total": len(shops),
+                        "shops_checked": len(results),
+                        "missing": total_missing,
+                        "published": total_published,
+                        "duration_sec": duration,
+                    },
+                )
+
+            return {
+                "shops": len(shops),
+                "checked": len(results),
+                "failed": failed,
+                "missing": total_missing,
+                "published": total_published,
+                "results": results,
+                "dry_run": dry_run,
+            }
         except Exception as e:
-            # One shop's expired token or rate limit must not stop the others,
-            # but it must not be mistaken for a clean result either.
-            logger.error(f"Ingestion backstop failed for {shop['shop_domain']}: {e}")
-            failed.append(shop["shop_domain"])
-
-    total_missing = sum(r.get("missing", 0) for r in results)
-    total_published = sum(r.get("published", 0) for r in results)
-
-    # A shop that errored was never actually checked, so it cannot be reported
-    # as healthy. This sweep is the only webhook-failure alarm there is; an
-    # "everything fine" line covering shops it failed to examine would recreate
-    # the exact blind spot the backstop exists to close — and it would look
-    # reassuring while doing it.
-    if failed:
-        logger.error(
-            f"🚨 Ingestion backstop could not check {len(failed)} of {len(shops)} "
-            f"shop(s): {', '.join(failed)}. Webhook delivery is UNVERIFIED for "
-            f"them — this is not a clean result."
-        )
-    elif total_missing == 0:
-        logger.info(
-            f"✅ Ingestion backstop: {len(shops)} shop(s) checked, nothing missing"
-        )
-
-    return {
-        "shops": len(shops),
-        "checked": len(results),
-        "failed": failed,
-        "missing": total_missing,
-        "published": total_published,
-        "results": results,
-        "dry_run": dry_run,
-    }
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "ingestion_backstop", "status": "error"})
+            reconciler_duration.record(duration, {"reconciler": "ingestion_backstop"})
+            raise
 
 
 async def run_forever(interval: int = BACKSTOP_INTERVAL_SECONDS) -> None:

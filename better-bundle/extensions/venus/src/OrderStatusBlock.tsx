@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   BlockStack,
   reactExtension,
@@ -6,6 +7,7 @@ import {
   useShop,
   useNavigation,
   useExtensionEditor,
+  useCartLines,
   TextBlock,
   SkeletonText,
 } from "@shopify/ui-extensions-react/customer-account";
@@ -59,6 +61,21 @@ function OrderStatusWithRecommendations() {
   const { id: customerId } = useAuthenticatedAccountCustomer();
   const { myshopifyDomain } = useShop();
   const { navigate } = useNavigation();
+  const lines = useCartLines();
+
+  const purchasedProductIds = useMemo(() => {
+    return (
+      lines
+        ?.map((line) => {
+          const productId = line.merchandise?.product?.id;
+          if (!productId) return null;
+          return productId.startsWith("gid://shopify/Product/")
+            ? productId.split("/").pop()
+            : productId;
+        })
+        .filter(Boolean) as string[]
+    ) || [];
+  }, [lines]);
 
   // Are we rendering in the Checkout & Accounts editor rather than a real
   // order status page?
@@ -82,11 +99,14 @@ function OrderStatusWithRecommendations() {
     columnConfig,
   } = useRecommendations({
     // Nothing is fetched in the editor: no request, no impression row.
-    skip: inEditor,
+    // Also skip while cart lines are loading (lines is undefined or empty) to prevent
+    // an initial empty request that falls back to baseline and double-logs impressions.
+    skip: inEditor || !lines || lines.length === 0,
     context: "order_status",
     limit: 2,
     customerId,
     shopDomain: myshopifyDomain,
+    productIds: purchasedProductIds,
     columnConfig: {
       extraSmall: 1, // 1 column on very small screens
       small: 2, // 2 columns on small screens

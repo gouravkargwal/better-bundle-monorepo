@@ -22,6 +22,7 @@ export interface RecommendationRequest {
   shop_domain?: string;
   context: ExtensionContext;
   product_id?: string;
+  product_ids?: string[];
   user_id?: string;
   session_id?: string;
   category?: string;

@@ -113,3 +113,38 @@ cache_misses = get_meter().create_counter(
     description="Cache lookups that fell through to the source",
     unit="{operation}",
 )
+
+# ---------------------------------------------------------------------------
+# Reconcilers & background jobs — application-specific, namespaced
+# ---------------------------------------------------------------------------
+reconciler_runs_total = get_meter().create_counter(
+    f"{NS}.reconciler.runs.total",
+    description="Background reconciler run executions",
+    unit="{run}",
+)
+reconciler_duration = get_meter().create_histogram(
+    f"{NS}.reconciler.duration",
+    description="Time taken to execute a reconciler run pass",
+    unit="s",
+)
+attribution_missed_orders = get_meter().create_counter(
+    f"{NS}.reconciler.attribution.missed_orders",
+    description="Missed stamped orders discovered during attribution reconciliation",
+    unit="{order}",
+)
+rollover_reactivated_shops = get_meter().create_counter(
+    f"{NS}.reconciler.rollover.reactivated_shops",
+    description="Suspended shops reactivated upon Shopify usage cycle renewal",
+    unit="{shop}",
+)
+rollover_drained_commissions = get_meter().create_counter(
+    f"{NS}.reconciler.rollover.drained_commissions",
+    description="Pending commissions drained upon shop reactivation",
+    unit="{commission}",
+)
+backstop_missed_orders = get_meter().create_counter(
+    f"{NS}.reconciler.backstop.missed_orders",
+    description="Missing orders detected and ingested by the ingestion backstop",
+    unit="{order}",
+)
+

@@ -203,19 +203,13 @@ async def fetch_recommendations_logic(
     )
 
     # 4. The shopper's context products: cart contents at checkout, purchased
-    # items post-purchase. Without them there is nothing to key an edge lookup on.
+    # items post-purchase. Without them we fall back to store baseline candidates.
     context_ids = list(request.product_ids or []) or list(
         request.metadata.get("cart_items") or []
     )
     if request.product_id:
         context_ids.append(request.product_id)
     context_ids = [str(p) for p in dict.fromkeys(context_ids) if p]
-
-    if not context_ids:
-        logger.info(
-            f"No context products for {request.context} on {request.shop_domain}"
-        )
-        return _empty(request, "no_context_products")
 
     context_value = float(
         request.metadata.get("cart_value") or request.metadata.get("order_value") or 0.0
@@ -308,20 +302,20 @@ async def fetch_recommendations_logic(
         }
 
     # 7. The lookup itself
-    # We must fetch context-specific candidates for everyone to ensure the
-    # experiment arms remain perfectly comparable. If we only fetched baseline for 
-    # control, treatment would drop out on `no_edges` far more often than control
-    # drops out on `baseline_empty`, heavily skewing the populations.
-    context_candidates = await services.edges.recommend(
-        shop_id=shop.id,
-        context_product_ids=context_ids,
-        surface=surface,
-        context_value=context_value,
-        limit=limit,
-        exclude_product_ids=exclude_items,
-    )
-    if not context_candidates:
-        return _empty(request, "no_edges", holdout_pct, is_control=is_control)
+    # We fetch context-specific candidates when context products exist. If no context
+    # products were provided (e.g. order_status before lines load, or homepage/generic),
+    # or if no direct edges exist, fall back to baseline so the shopper still receives offers.
+    if context_ids:
+        context_candidates = await services.edges.recommend(
+            shop_id=shop.id,
+            context_product_ids=context_ids,
+            surface=surface,
+            context_value=context_value,
+            limit=limit,
+            exclude_product_ids=exclude_items,
+        )
+    else:
+        context_candidates = []
 
     if is_control:
         candidates = await services.edges.recommend_baseline(
@@ -334,6 +328,18 @@ async def fetch_recommendations_logic(
         if not candidates:
             return _empty(request, "baseline_empty", holdout_pct, is_control=is_control)
         source = "baseline_control"
+    elif not context_candidates:
+        candidates = await services.edges.recommend_baseline(
+            shop_id=shop.id,
+            surface=surface,
+            context_value=context_value,
+            limit=limit,
+            exclude_product_ids=exclude_items,
+        )
+        if not candidates:
+            reason = "no_context_products" if not context_ids else "no_edges"
+            return _empty(request, reason, holdout_pct, is_control=is_control)
+        source = "baseline_fallback"
     else:
         candidates = context_candidates
         source = (

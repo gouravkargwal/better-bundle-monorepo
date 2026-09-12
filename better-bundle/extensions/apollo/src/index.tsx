@@ -19,6 +19,8 @@ extend(
         : undefined; // ✅ Ensure string
       const orderId = String(initialPurchase.referenceId); // ✅ Ensure string
 
+      console.log("Apollo ShouldRender Triggered! OrderId:", orderId);
+
       // Fast-path: If Shopify re-ran ShouldRender (e.g. because the customer changed their shipping region),
       // we check persistent storage. If we already fetched recommendations for this exact order ID,
       // skip the network call and return immediately to prevent losing the impression to a race condition.
@@ -28,9 +30,11 @@ extend(
         cachedData?.recommendations?.length > 0 &&
         Date.now() - (cachedData.timestamp || 0) < 1000 * 60 * 15 // Cache valid for 15 minutes
       ) {
-        console.log("Apollo: Using persistent storage cache for ShouldRender");
+        console.log("Apollo: 🚀 Using persistent storage cache for ShouldRender. Skipping network call!");
         return { render: true };
       }
+
+      console.log("Apollo: No valid cache found, fetching fresh recommendations...");
 
       const purchasedProducts = initialPurchase.lineItems.map((item: any) => ({
         id: item.product.id.toString(),

@@ -31,10 +31,28 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
+
+# Load environment before importing database settings/session
+from dotenv import load_dotenv  # noqa: E402
+
+python_worker_path = Path(python_worker_dir)
+root_dir = python_worker_path.parent
+
+for env_file in [
+    python_worker_path / ".env.local",
+    python_worker_path / ".env",
+    root_dir / ".env.dev",
+    root_dir / ".env.local",
+    root_dir / ".env",
+]:
+    if env_file.exists():
+        load_dotenv(env_file, override=False)
+        break
 
 from sqlalchemy import text  # noqa: E402
 
@@ -115,7 +133,11 @@ def tables_to_delete(keep_enrichment: bool) -> List[Tuple[str, str]]:
 
 
 async def count_rows(
-    shop_id: str, keep_enrichment: bool = False
+    shop_id: str,
+    shop_domain: str,
+    keep_shop: bool = False,
+    keep_enrichment: bool = False,
+    forget_install: bool = False,
 ) -> List[Tuple[str, int]]:
     """What would be deleted, without deleting it."""
     counts = []
@@ -128,6 +150,19 @@ async def count_rows(
                 )
             ).scalar_one()
             counts.append((table, int(n)))
+
+        if forget_install:
+            n = (
+                await session.execute(
+                    text("SELECT COUNT(*) FROM sessions WHERE shop = :d"),
+                    {"d": shop_domain},
+                )
+            ).scalar_one()
+            counts.append(("sessions", int(n)))
+
+        if not keep_shop:
+            counts.append(("shops", 1))
+
     return counts
 
 
@@ -141,6 +176,15 @@ async def delete_shop_data(
     if not shop_id:
         logger.error(f"No shop found for domain {shop_domain}")
         return False
+
+    # product_enrichments has a foreign key to shops.id (ON DELETE NO ACTION),
+    # so keeping enrichment requires keeping the shop row to avoid a constraint violation.
+    if keep_enrichment and not keep_shop:
+        logger.info(
+            "  --keep-enrichment requires keeping the shop record (FK constraint). "
+            "Enabling --keep-shop automatically."
+        )
+        keep_shop = True
 
     logger.info(f"Deleting BetterBundle data for {shop_domain} (id={shop_id})")
 
@@ -193,6 +237,17 @@ async def delete_shop_data(
             total += result.rowcount or 0
             logger.info("  shops: 1")
 
+    # Invalidate Redis suspension cache if Redis is accessible
+    try:
+        from app.core.redis_client import get_redis_client
+
+        redis = await get_redis_client()
+        if redis:
+            await redis.delete(f"suspension:{shop_id}")
+            logger.info("  redis: cleared suspension cache")
+    except Exception as e:
+        logger.debug(f"Redis cache clearing skipped: {e}")
+
     logger.info(f"✅ Deleted {total} rows for {shop_domain}")
     return True
 
@@ -230,7 +285,14 @@ async def main() -> int:
         return 1
 
     if args.dry_run:
-        rows = await count_rows(shop_id, keep_enrichment=args.keep_enrichment)
+        effective_keep_shop = args.keep_shop or args.keep_enrichment
+        rows = await count_rows(
+            shop_id,
+            shop_domain=args.shop,
+            keep_shop=effective_keep_shop,
+            keep_enrichment=args.keep_enrichment,
+            forget_install=args.forget_install,
+        )
         logger.info(f"Dry run for {args.shop} (id={shop_id}):")
         for table, n in rows:
             if n:

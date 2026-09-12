@@ -31,18 +31,27 @@ still hold.
 """
 
 import logging
+import time
 from datetime import timedelta
 from typing import Any, Dict, List
 
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 from sqlalchemy import text
 
 from app.core.config.kafka_settings import kafka_settings
 from app.core.database.session import get_transaction_context
 from app.core.messaging.event_publisher import EventPublisher
+from app.core.metrics import (
+    attribution_missed_orders,
+    reconciler_duration,
+    reconciler_runs_total,
+)
 from app.shared.helpers import now_utc
 from app.core.single_run import claim
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # How far back to look. Long enough to cover a weekend outage plus Shopify's
 # own 48-hour retry window, short enough that the query stays cheap and that a
@@ -159,51 +168,85 @@ async def reconcile_once(
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """One pass: find missed orders and republish their attribution jobs."""
-    missed = await find_unattributed_orders(lookback_days, limit)
-    if not missed:
-        return {"found": 0, "published": 0, "dry_run": dry_run}
+    start_time = time.perf_counter()
+    with tracer.start_as_current_span("reconciler.attribution.sweep") as span:
+        span.set_attribute("dry_run", dry_run)
+        try:
+            missed = await find_unattributed_orders(lookback_days, limit)
+            span.set_attribute("found", len(missed))
+            if not missed:
+                span.set_attribute("published", 0)
+                duration = time.perf_counter() - start_time
+                reconciler_runs_total.add(1, {"reconciler": "attribution", "status": "success"})
+                reconciler_duration.record(duration, {"reconciler": "attribution"})
+                return {"found": 0, "published": 0, "dry_run": dry_run}
 
-    logger.warning(
-        f"⚠️ Attribution reconciliation found {len(missed)} stamped orders with "
-        f"no attribution — a webhook was almost certainly missed"
-    )
+            logger.warning(
+                f"⚠️ Attribution reconciliation found {len(missed)} stamped orders with "
+                f"no attribution — a webhook was almost certainly missed",
+                extra={"reconciler": "attribution", "found": len(missed), "dry_run": dry_run},
+            )
 
-    if dry_run:
-        return {"found": len(missed), "published": 0, "dry_run": True}
+            if dry_run:
+                span.set_attribute("published", 0)
+                duration = time.perf_counter() - start_time
+                reconciler_runs_total.add(1, {"reconciler": "attribution", "status": "success"})
+                reconciler_duration.record(duration, {"reconciler": "attribution"})
+                return {"found": len(missed), "published": 0, "dry_run": True}
 
-    publisher = EventPublisher(kafka_settings.model_dump())
-    await publisher.initialize()
-    published = 0
-    try:
-        for row in missed:
+            attribution_missed_orders.add(len(missed))
+
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+            published = 0
             try:
-                await publisher.publish_purchase_attribution_event(
-                    {
-                        "event_type": "purchase_ready_for_attribution",
-                        "shop_id": row["shop_id"],
-                        "order_id": row["order_id"],
-                        "timestamp": now_utc().isoformat(),
-                        # Marked so the origin of a late attribution is
-                        # traceable when a merchant asks why a charge appeared
-                        # days after the order.
-                        "trigger": "reconciliation",
-                    }
-                )
-                published += 1
-            except Exception as e:
-                logger.error(
-                    f"Failed to republish attribution for order "
-                    f"{row['order_id']}: {e}"
-                )
-    finally:
-        await publisher.close()
+                for row in missed:
+                    try:
+                        await publisher.publish_purchase_attribution_event(
+                            {
+                                "event_type": "purchase_ready_for_attribution",
+                                "shop_id": row["shop_id"],
+                                "order_id": row["order_id"],
+                                "timestamp": now_utc().isoformat(),
+                                # Marked so the origin of a late attribution is
+                                # traceable when a merchant asks why a charge appeared
+                                # days after the order.
+                                "trigger": "reconciliation",
+                            }
+                        )
+                        published += 1
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to republish attribution for order "
+                            f"{row['order_id']}: {e}"
+                        )
+            finally:
+                await publisher.close()
 
-    await _count_attempt(missed)
+            await _count_attempt(missed)
 
-    logger.info(
-        f"✅ Attribution reconciliation republished {published}/{len(missed)} orders"
-    )
-    return {"found": len(missed), "published": published, "dry_run": False}
+            span.set_attribute("published", published)
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "attribution", "status": "success"})
+            reconciler_duration.record(duration, {"reconciler": "attribution"})
+
+            logger.info(
+                f"✅ Attribution reconciliation republished {published}/{len(missed)} orders",
+                extra={
+                    "reconciler": "attribution",
+                    "found": len(missed),
+                    "published": published,
+                    "duration_sec": duration,
+                },
+            )
+            return {"found": len(missed), "published": published, "dry_run": False}
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "attribution", "status": "error"})
+            reconciler_duration.record(duration, {"reconciler": "attribution"})
+            raise
 
 
 # How often to sweep. Attribution is not latency-critical — a missed order

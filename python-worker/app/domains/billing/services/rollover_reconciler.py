@@ -34,9 +34,12 @@ How the sweep works
 import asyncio
 import json
 import logging
+import time
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
+from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 from sqlalchemy import select, and_
 
 from app.core.config.kafka_settings import kafka_settings
@@ -48,8 +51,13 @@ from app.core.database.models import (
 )
 from app.core.database.session import get_transaction_context
 from app.core.messaging.event_publisher import EventPublisher
+from app.core.metrics import (
+    reconciler_duration,
+    reconciler_runs_total,
+    rollover_drained_commissions,
+    rollover_reactivated_shops,
+)
 from app.core.single_run import claim
-from app.domains.billing.repositories.billing_repository_v2 import BillingRepositoryV2
 from app.domains.billing.services.commission_service_v2 import CommissionServiceV2
 from app.domains.billing.services.shopify_usage_billing_service_v2 import (
     ShopifyUsageBillingServiceV2,
@@ -57,6 +65,7 @@ from app.domains.billing.services.shopify_usage_billing_service_v2 import (
 from app.shared.helpers import now_utc
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 # Bounded batch so large backlogs don't overwhelm external API limits
 MAX_SUSPENDED_SHOPS_PER_SWEEP = 50
@@ -114,226 +123,256 @@ async def reconcile_rollovers_once(
     dry_run: bool = False,
 ) -> Dict[str, Any]:
     """Execute one reconciliation pass across suspended shops."""
-    # 1. Fetch candidate suspended shops in a short, bounded read transaction
-    async with get_transaction_context() as session:
-        query = (
-            select(ShopSubscription, Shop)
-            .join(Shop, Shop.id == ShopSubscription.shop_id)
-            .where(
-                and_(
-                    ShopSubscription.status == SubscriptionStatus.SUSPENDED,
-                    ShopSubscription.is_active.is_(True),
-                    ShopSubscription.shopify_subscription_id.is_not(None),
-                )
-            )
-            .limit(limit)
-        )
-        result = await session.execute(query)
-        candidates = [
-            (
-                sub.id,
-                sub.shopify_subscription_id,
-                dict(sub.shop_subscription_metadata or {}),
-                shop.id,
-                shop.shop_domain,
-                shop.access_token,
-            )
-            for sub, shop in result.all()
-        ]
-
-    if not candidates:
-        return {
-            "checked": 0,
-            "reactivated": 0,
-            "drained_commissions": 0,
-            "dry_run": dry_run,
-        }
-
-    logger.info(f"🔍 Rollover reconciler checking {len(candidates)} suspended shops")
-
-    reactivated_count = 0
-    total_drained = 0
-
-    # 2. Query Shopify GraphQL for each shop completely outside DB transaction context
-    # This prevents holding DB connection pool resources during remote HTTP requests
-    usage_service = ShopifyUsageBillingServiceV2(session=None, billing_repository=None)
-
-    for (
-        sub_id,
-        shopify_subscription_id,
-        metadata,
-        shop_id,
-        shop_domain,
-        access_token,
-    ) in candidates:
-        if not access_token or not shop_domain:
-            logger.warning(
-                f"⚠️ Shop {shop_id} missing access token or domain; skipping rollover check"
-            )
-            continue
-
+    start_time = time.perf_counter()
+    with tracer.start_as_current_span("reconciler.rollover.sweep") as span:
+        span.set_attribute("dry_run", dry_run)
         try:
-            status_data = await usage_service.get_subscription_status(
-                shop_domain=shop_domain,
-                access_token=access_token,
-                subscription_id=shopify_subscription_id,
-            )
-
-            if not status_data:
-                logger.warning(
-                    f"⚠️ Could not fetch subscription status for shop {shop_id} ({shopify_subscription_id})"
+            # 1. Fetch candidate suspended shops in a short, bounded read transaction
+            async with get_transaction_context() as session:
+                query = (
+                    select(ShopSubscription, Shop)
+                    .join(Shop, Shop.id == ShopSubscription.shop_id)
+                    .where(
+                        and_(
+                            ShopSubscription.status == SubscriptionStatus.SUSPENDED,
+                            ShopSubscription.is_active.is_(True),
+                            ShopSubscription.shopify_subscription_id.is_not(None),
+                        )
+                    )
+                    .limit(limit)
                 )
-                continue
+                result = await session.execute(query)
+                candidates = [
+                    (
+                        sub.id,
+                        sub.shopify_subscription_id,
+                        dict(sub.shop_subscription_metadata or {}),
+                        shop.id,
+                        shop.shop_domain,
+                        shop.access_token,
+                    )
+                    for sub, shop in result.all()
+                ]
 
-            line_items = status_data.get("lineItems", [])
-            pricing = (
-                line_items[0].get("plan", {}).get("pricingDetails", {})
-                if line_items
-                else {}
+            if not candidates:
+                span.set_attribute("checked", 0)
+                span.set_attribute("reactivated", 0)
+                span.set_attribute("drained", 0)
+                duration = time.perf_counter() - start_time
+                reconciler_runs_total.add(1, {"reconciler": "rollover", "status": "success"})
+                reconciler_duration.record(duration, {"reconciler": "rollover"})
+                return {
+                    "checked": 0,
+                    "reactivated": 0,
+                    "drained_commissions": 0,
+                    "dry_run": dry_run,
+                }
+
+            logger.info(
+                f"🔍 Rollover reconciler checking {len(candidates)} suspended shops",
+                extra={"reconciler": "rollover", "checked": len(candidates)},
             )
 
-            if pricing.get("__typename") != "AppUsagePricing":
-                logger.warning(
-                    f"⚠️ Subscription {shopify_subscription_id} for shop {shop_id} is not AppUsagePricing"
-                )
-                continue
+            reactivated_count = 0
+            total_drained = 0
 
-            capped_amount = Decimal(
-                str(pricing.get("cappedAmount", {}).get("amount", "0"))
-            )
-            balance_used = Decimal(
-                str(pricing.get("balanceUsed", {}).get("amount", "0"))
-            )
+            # 2. Query Shopify GraphQL for each shop completely outside DB transaction context
+            # This prevents holding DB connection pool resources during remote HTTP requests
+            usage_service = ShopifyUsageBillingServiceV2(session=None, billing_repository=None)
 
-            suspended_balance_raw = metadata.get("suspended_balance_used")
-
-            is_rolled_over = False
-            if suspended_balance_raw is not None:
-                suspended_balance = Decimal(str(suspended_balance_raw))
-                # Strict rollover test: balance must have dropped
-                if balance_used < suspended_balance:
-                    is_rolled_over = True
-                    logger.info(
-                        f"🎉 Rollover confirmed for shop {shop_id}: "
-                        f"balance dropped from ${suspended_balance} to ${balance_used} (cap: ${capped_amount})"
+            for (
+                sub_id,
+                shopify_subscription_id,
+                metadata,
+                shop_id,
+                shop_domain,
+                access_token,
+            ) in candidates:
+                if not access_token or not shop_domain:
+                    logger.warning(
+                        f"⚠️ Shop {shop_id} missing access token or domain; skipping rollover check"
                     )
-            else:
-                # Legacy suspension (no baseline recorded):
-                # A true 30-day reset resets balance_used to 0.00.
-                if balance_used == Decimal("0.00"):
-                    is_rolled_over = True
-                    logger.info(
-                        f"🎉 Legacy rollover detected for shop {shop_id}: "
-                        f"balance reset to $0.00 (cap: ${capped_amount})"
-                    )
-                else:
-                    # Shop was capped mid-cycle before we started recording suspended_balance_used.
-                    # Record baseline balance so next sweep can apply the strict drop test
-                    async with get_transaction_context() as update_session:
-                        sub = await update_session.get(ShopSubscription, sub_id)
-                        if sub:
-                            sub_metadata = dict(sub.shop_subscription_metadata or {})
-                            sub_metadata["suspended_balance_used"] = float(balance_used)
-                            sub_metadata["suspended_at"] = now_utc().isoformat()
-                            sub.shop_subscription_metadata = sub_metadata
-                            await update_session.commit()
-                    logger.info(
-                        f"Recorded baseline balance ${balance_used} for legacy suspended shop {shop_id} "
-                        f"to prevent premature reactivation"
-                    )
-
-            if not is_rolled_over:
-                continue
-
-            if dry_run:
-                reactivated_count += 1
-                continue
-
-            # 3. Reactivate in a short DB transaction
-            async with get_transaction_context() as reactivate_session:
-                sub = await reactivate_session.get(ShopSubscription, sub_id)
-                shop_record = await reactivate_session.get(Shop, shop_id)
-                if not sub or not shop_record:
                     continue
 
-                sub_metadata = dict(sub.shop_subscription_metadata or {})
-                sub_metadata.pop("suspended_balance_used", None)
-                sub_metadata["reactivated_at"] = now_utc().isoformat()
-                sub.status = SubscriptionStatus.ACTIVE
-                sub.shop_subscription_metadata = sub_metadata
-                sub.updated_at = now_utc()
+                try:
+                    status_data = await usage_service.get_subscription_status(
+                        shop_domain=shop_domain,
+                        access_token=access_token,
+                        subscription_id=shopify_subscription_id,
+                    )
 
-                shop_record.is_active = True
-                shop_record.suspended_at = None
-                shop_record.suspension_reason = None
-                shop_record.updated_at = now_utc()
+                    if not status_data:
+                        logger.warning(
+                            f"⚠️ Could not fetch subscription status for shop {shop_id} ({shopify_subscription_id})"
+                        )
+                        continue
 
-                audit_log = SuspensionAuditLog(
-                    shop_id=shop_id,
-                    action="REACTIVATED",
-                    reason=(
-                        f"Shopify 30-day billing cycle rollover detected "
-                        f"(balance: ${balance_used}, cap: ${capped_amount})"
-                    ),
-                    triggered_by="system",
-                    metadata_json=json.dumps(
-                        {
-                            "capped_amount": float(capped_amount),
-                            "balance_used": float(balance_used),
-                            "previous_suspended_balance": (
-                                float(suspended_balance_raw)
-                                if suspended_balance_raw is not None
-                                else None
+                    line_items = status_data.get("lineItems", [])
+                    pricing = (
+                        line_items[0].get("plan", {}).get("pricingDetails", {})
+                        if line_items
+                        else {}
+                    )
+
+                    if pricing.get("__typename") != "AppUsagePricing":
+                        logger.warning(
+                            f"⚠️ Subscription {shopify_subscription_id} for shop {shop_id} is not AppUsagePricing"
+                        )
+                        continue
+
+                    capped_amount = Decimal(
+                        str(pricing.get("cappedAmount", {}).get("amount", "0"))
+                    )
+                    balance_used = Decimal(
+                        str(pricing.get("balanceUsed", {}).get("amount", "0"))
+                    )
+
+                    suspended_balance_raw = metadata.get("suspended_balance_used")
+
+                    is_rolled_over = False
+                    if suspended_balance_raw is not None:
+                        suspended_balance = Decimal(str(suspended_balance_raw))
+                        # Strict rollover test: balance must have dropped
+                        if balance_used < suspended_balance:
+                            is_rolled_over = True
+                            logger.info(
+                                f"🎉 Rollover confirmed for shop {shop_id}: "
+                                f"balance dropped from ${suspended_balance} to ${balance_used} (cap: ${capped_amount})"
+                            )
+                    else:
+                        # Legacy suspension (no baseline recorded):
+                        # A true 30-day reset resets balance_used to 0.00.
+                        if balance_used == Decimal("0.00"):
+                            is_rolled_over = True
+                            logger.info(
+                                f"🎉 Legacy rollover detected for shop {shop_id}: "
+                                f"balance reset to $0.00 (cap: ${capped_amount})"
+                            )
+                        else:
+                            # Shop was capped mid-cycle before we started recording suspended_balance_used.
+                            # Record baseline balance so next sweep can apply the strict drop test
+                            async with get_transaction_context() as update_session:
+                                sub = await update_session.get(ShopSubscription, sub_id)
+                                if sub:
+                                    sub_metadata = dict(sub.shop_subscription_metadata or {})
+                                    sub_metadata["suspended_balance_used"] = float(balance_used)
+                                    sub_metadata["suspended_at"] = now_utc().isoformat()
+                                    sub.shop_subscription_metadata = sub_metadata
+                                    await update_session.commit()
+                            logger.info(
+                                f"Recorded baseline balance ${balance_used} for legacy suspended shop {shop_id} "
+                                f"to prevent premature reactivation"
+                            )
+
+                    if not is_rolled_over:
+                        continue
+
+                    if dry_run:
+                        reactivated_count += 1
+                        continue
+
+                    # 3. Reactivate in a short DB transaction
+                    async with get_transaction_context() as reactivate_session:
+                        sub = await reactivate_session.get(ShopSubscription, sub_id)
+                        shop_record = await reactivate_session.get(Shop, shop_id)
+                        if not sub or not shop_record:
+                            continue
+
+                        sub_metadata = dict(sub.shop_subscription_metadata or {})
+                        sub_metadata.pop("suspended_balance_used", None)
+                        sub_metadata["reactivated_at"] = now_utc().isoformat()
+                        sub.status = SubscriptionStatus.ACTIVE
+                        sub.shop_subscription_metadata = sub_metadata
+                        sub.updated_at = now_utc()
+
+                        shop_record.is_active = True
+                        shop_record.suspended_at = None
+                        shop_record.suspension_reason = None
+                        shop_record.updated_at = now_utc()
+
+                        audit_log = SuspensionAuditLog(
+                            shop_id=shop_id,
+                            action="REACTIVATED",
+                            reason=(
+                                f"Shopify 30-day billing cycle rollover detected "
+                                f"(balance: ${balance_used}, cap: ${capped_amount})"
                             ),
-                        }
-                    ),
-                )
-                reactivate_session.add(audit_log)
-                await reactivate_session.commit()
+                            triggered_by="system",
+                            metadata_json=json.dumps(
+                                {
+                                    "capped_amount": float(capped_amount),
+                                    "balance_used": float(balance_used),
+                                    "previous_suspended_balance": (
+                                        float(suspended_balance_raw)
+                                        if suspended_balance_raw is not None
+                                        else None
+                                    ),
+                                }
+                            ),
+                        )
+                        reactivate_session.add(audit_log)
+                        await reactivate_session.commit()
 
-            # Invalidate suspension Redis cache
-            try:
-                from app.core.redis_client import get_redis_client
+                    # Invalidate suspension Redis cache
+                    try:
+                        from app.core.redis_client import get_redis_client
 
-                redis = await get_redis_client()
-                await redis.delete(f"suspension:{shop_id}")
-            except Exception as cache_err:
-                logger.debug(
-                    f"Could not invalidate Redis suspension cache for {shop_id}: {cache_err}"
-                )
+                        redis = await get_redis_client()
+                        await redis.delete(f"suspension:{shop_id}")
+                    except Exception as cache_err:
+                        logger.debug(
+                            f"Could not invalidate Redis suspension cache for {shop_id}: {cache_err}"
+                        )
 
-            reactivated_count += 1
+                    reactivated_count += 1
 
-            # Drain pending commissions
-            drained = await drain_pending_commissions(shop_id)
-            total_drained += drained
+                    # Drain pending commissions
+                    drained = await drain_pending_commissions(shop_id)
+                    total_drained += drained
 
-        except Exception as e:
-            logger.error(
-                f"❌ Error checking rollover for shop {shop_id}: {e}", exc_info=True
+                except Exception as e:
+                    logger.error(
+                        f"❌ Error checking rollover for shop {shop_id}: {e}", exc_info=True
+                    )
+
+            if not dry_run:
+                if reactivated_count > 0:
+                    rollover_reactivated_shops.add(reactivated_count)
+                if total_drained > 0:
+                    rollover_drained_commissions.add(total_drained)
+
+            span.set_attribute("checked", len(candidates))
+            span.set_attribute("reactivated", reactivated_count)
+            span.set_attribute("drained", total_drained)
+
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "rollover", "status": "success"})
+            reconciler_duration.record(duration, {"reconciler": "rollover"})
+
+            logger.info(
+                f"✅ Rollover reconciliation completed: {reactivated_count} reactivated, "
+                f"{total_drained} commissions drained",
+                extra={
+                    "reconciler": "rollover",
+                    "checked": len(candidates),
+                    "reactivated": reactivated_count,
+                    "drained_commissions": total_drained,
+                    "duration_sec": duration,
+                },
             )
-
-    logger.info(
-        f"✅ Rollover reconciliation completed: {reactivated_count} reactivated, "
-        f"{total_drained} commissions drained"
-    )
-    return {
-        "checked": len(candidates),
-        "reactivated": reactivated_count,
-        "drained_commissions": total_drained,
-        "dry_run": dry_run,
-    }
-
-    logger.info(
-        f"✅ Rollover reconciliation completed: {reactivated_count} reactivated, "
-        f"{total_drained} commissions drained"
-    )
-    return {
-        "checked": len(rows),
-        "reactivated": reactivated_count,
-        "drained_commissions": total_drained,
-        "dry_run": dry_run,
-    }
+            return {
+                "checked": len(candidates),
+                "reactivated": reactivated_count,
+                "drained_commissions": total_drained,
+                "dry_run": dry_run,
+            }
+        except Exception as e:
+            span.record_exception(e)
+            span.set_status(StatusCode.ERROR, str(e))
+            duration = time.perf_counter() - start_time
+            reconciler_runs_total.add(1, {"reconciler": "rollover", "status": "error"})
+            reconciler_duration.record(duration, {"reconciler": "rollover"})
+            raise
 
 
 async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:

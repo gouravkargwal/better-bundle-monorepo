@@ -13,7 +13,10 @@ export function buildMercuryMetadata(
     checkout_step: checkoutStep,
     cart_value: cartValue,
     cart_items: cartItems,
-    block: "checkout.order-summary.render", // Primary placement for one-page checkout
+    block:
+      checkoutStep === "thank_you"
+        ? "thank-you.customer-information.render"
+        : "checkout.order-summary.render",
   };
 }
 
@@ -26,10 +29,10 @@ export const getRecommendations = async (storage, request) => {
       throw new Error("Storage is required");
     }
 
-    // Ensure Mercury uses single checkout context
+    // Use requested context (e.g. thank_you_page) or fallback to checkout_page
     const mercuryRequest = {
       ...request,
-      context: "checkout_page", // Force single context for Mercury
+      context: request.context || "checkout_page",
       metadata: {
         ...request.metadata,
         ...buildMercuryMetadata(

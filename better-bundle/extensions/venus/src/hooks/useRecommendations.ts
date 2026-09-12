@@ -75,6 +75,7 @@ interface UseRecommendationsProps {
   limit: number;
   customerId: string;
   shopDomain?: string;
+  productIds?: string[];
   columnConfig: {
     extraSmall: number;
     small: number;
@@ -89,6 +90,7 @@ export function useRecommendations({
   limit,
   customerId,
   shopDomain,
+  productIds,
   columnConfig,
 }: UseRecommendationsProps) {
   const { storage } = useApi();
@@ -144,6 +146,10 @@ export function useRecommendations({
           limit,
           user_id: customerId,
           shop_domain: shopDomain,
+          product_ids: productIds,
+          metadata: {
+            cart_items: productIds,
+          },
         });
 
         if (response.success && response.recommendations) {
@@ -187,7 +193,7 @@ export function useRecommendations({
     };
 
     fetchRecommendations();
-  }, [customerId, context, limit, shopDomain, storage]);
+  }, [customerId, context, limit, shopDomain, storage, JSON.stringify(productIds)]);
 
   return {
     loading,
