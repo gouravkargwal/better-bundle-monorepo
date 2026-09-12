@@ -43,6 +43,25 @@ let currentToken: {
 } = {};
 
 /**
+ * Fetch with timeout to prevent hanging when backend crashes
+ */
+const fetchWithTimeout = async (resource: RequestInfo | string, options: any = {}) => {
+  const { timeout = 5000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(resource, {
+      ...fetchOptions,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
+/**
  * Initialize storage reference for token persistence
  */
 export const initializeJWTStorage = (storage: any) => {
@@ -151,10 +170,11 @@ const fetchNewTokenPair = async (
   }
 
   // Use new unified endpoint
-  const response = await fetch(`${BACKEND_URL}/api/auth/generate-token`, {
+  const response = await fetchWithTimeout(`${BACKEND_URL}/api/auth/generate-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
+    timeout: 5000,
   });
 
   if (!response.ok) {
@@ -268,10 +288,11 @@ const refreshAccessToken = async (
       }
 
       // Try to refresh using refresh token
-      const response = await fetch(`${BACKEND_URL}/api/auth/refresh-token`, {
+      const response = await fetchWithTimeout(`${BACKEND_URL}/api/auth/refresh-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: storedRefreshToken }),
+        timeout: 5000,
       });
 
       if (response.ok) {
@@ -379,26 +400,30 @@ export const makeAuthenticatedRequest = async (
       }
 
       // Make request
-      let response = await fetch(url, {
+      let response = await fetchWithTimeout(url, {
         ...fetchOptions,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           ...fetchOptions.headers,
         },
+        timeout: 8000,
       });
 
-      // Handle 401: Refresh token and retry once
-      if (response.status === 401 && attempt === 0) {
+      // Handle 401 or 403: Refresh token and retry once
+      // We must handle 403 because storefront endpoints return 403 (with empty payload)
+      // instead of 401 when the service is suspended, to avoid browser console errors.
+      if ((response.status === 401 || response.status === 403) && attempt === 0) {
         const newToken = await refreshAccessToken(shopDomain, customerId);
         if (newToken) {
-          response = await fetch(url, {
+          response = await fetchWithTimeout(url, {
             ...fetchOptions,
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${newToken}`,
               ...fetchOptions.headers,
             },
+            timeout: 8000,
           });
         } else {
           return response;

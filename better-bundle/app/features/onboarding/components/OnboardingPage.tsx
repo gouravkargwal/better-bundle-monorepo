@@ -68,7 +68,7 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
   const plan = data.subscriptionPlan ?? {
     symbol: "$",
     commission_rate: 0.03,
-    cap_amount: 299,
+    cap_amount: 29,
     trial_revenue_threshold: 1000,
     plan_name: "Pay As You Go",
   };

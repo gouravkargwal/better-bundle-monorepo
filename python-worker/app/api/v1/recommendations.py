@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
 from opentelemetry import trace
 
 from app.core.database.session import get_transaction_context
@@ -583,26 +583,21 @@ def _record_theme_adapt(payload: Optional[dict]) -> None:
         logger.debug("theme_adapt telemetry skipped", exc_info=True)
 
 
+from app.core.dependencies import get_storefront_authorization, StorefrontAuthContext
+
 # Every other route in this API is unslashed; this was the only exception.
 @router.post("", response_model=RecommendationResponse)
 async def get_recommendations(
     request: RecommendationRequest,
-    authorization: str = Header(None),
+    auth: StorefrontAuthContext = Depends(get_storefront_authorization),
     user_agent: str = Header(None),
 ):
     """Context-aware recommendations, served from precomputed edges."""
     start = time.time()
     _record_theme_adapt(request.theme_adapt)
     try:
-        if not authorization or not authorization.startswith("Bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail={
-                    "error": "Missing or invalid authorization header",
-                    "message": "Please provide a valid JWT token in Authorization header",
-                    "required_format": "Bearer <jwt_token>",
-                },
-            )
+        if not auth.is_authorized:
+            return RecommendationResponse(success=True, **_empty(request, auth.fail_reason))
 
         result_data = await fetch_recommendations_logic(
             request, services, user_agent=user_agent

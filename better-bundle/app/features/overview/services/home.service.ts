@@ -147,14 +147,31 @@ export async function getHomeData(
     const stats = surfaceStats.get(surface.key);
     const enabled = settings.surfaces[surface.key];
     const impressions = Number(stats?.impressions) || 0;
+    const isDetected = settings.detectedSurfaces?.[surface.key];
+
+    let status: SurfaceLiveStatus;
+    if (!enabled) {
+      status = "disabled";
+    } else if (impressions > 0) {
+      status = "live";
+    } else if (isDetected === false) {
+      status = "not_installed";
+    } else {
+      // Either confirmed installed via App Bridge (isDetected === true)
+      // or pending first traffic/detection. Awaiting traffic avoids falsely accusing
+      // the merchant of not installing a block they already placed.
+      status = "awaiting_traffic";
+    }
+
     return {
       key: surface.key,
       label: surface.label,
       enabled,
+      installed: isDetected ?? undefined,
       impressions,
       accepts: Number(stats?.accepts) || 0,
       revenue: Number(stats?.revenue) || 0,
-      status: !enabled ? "disabled" : impressions > 0 ? "live" : "no_traffic",
+      status,
     };
   });
 

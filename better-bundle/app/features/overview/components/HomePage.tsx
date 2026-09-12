@@ -1,4 +1,5 @@
 // features/overview/components/HomePage.tsx
+import { useState, useEffect } from "react";
 import {
   Badge,
   Banner,
@@ -27,6 +28,10 @@ import {
 import { SURFACES, type SurfaceKey } from "../../../lib/surfaces";
 import { formatCurrency } from "../../../utils/currency";
 import type { HomeData, SurfaceStatus } from "../types/home.types";
+import {
+  detectInstalledSurfaces,
+  type DetectedSurfaces,
+} from "../utils/detectExtensions";
 
 /**
  * Home: what recommendations earned, what it costs, and where they're running.
@@ -49,14 +54,21 @@ interface HomePageProps {
 
 type StatusTone = "success" | "attention" | "info" | undefined;
 
-function surfaceBadge(surface: SurfaceStatus): {
+function surfaceBadge(
+  surface: SurfaceStatus,
+  isDetected?: boolean,
+): {
   tone: StatusTone;
   label: string;
 } {
   if (surface.status === "disabled")
     return { tone: undefined, label: "Turned off" };
-  if (surface.status === "live") return { tone: "success", label: "Live" };
-  return { tone: "attention", label: "Not installed" };
+  if (surface.status === "live" || surface.impressions > 0)
+    return { tone: "success", label: "Live" };
+  if (surface.status === "not_installed" || isDetected === false)
+    return { tone: "attention", label: "Not installed" };
+  // Default for awaiting traffic or confirmed installed with 0 impressions
+  return { tone: "info", label: "Awaiting traffic" };
 }
 
 export function HomePage({ data }: HomePageProps) {
@@ -70,7 +82,34 @@ export function HomePage({ data }: HomePageProps) {
     shopCurrency,
   } = data;
 
-  const liveCount = surfaces.filter((s) => s.status === "live").length;
+  const [clientDetected, setClientDetected] = useState<DetectedSurfaces | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    detectInstalledSurfaces().then(({ detected, supported }) => {
+      if (!isMounted || !supported) return;
+      setClientDetected(detected);
+
+      // Persist real-time App Bridge detection to server in background
+      fetch("/api/extensions/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ detectedSurfaces: detected }),
+      }).catch(() => {
+        // Non-blocking sync
+      });
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const liveCount = surfaces.filter(
+    (s) => s.status === "live" || s.impressions > 0,
+  ).length;
 
   // Exact counts out of offer_impressions, across all five surfaces.
   const totalImpressions = surfaces.reduce((n, s) => n + s.impressions, 0);
@@ -78,7 +117,22 @@ export function HomePage({ data }: HomePageProps) {
 
   const surfaceRows = surfaces.map((surface, index) => {
     const meta = SURFACES[surface.key as SurfaceKey];
-    const badge = surfaceBadge(surface);
+    const isDetected = clientDetected
+      ? clientDetected[surface.key as SurfaceKey]
+      : surface.installed;
+
+    const effectiveStatus = !surface.enabled
+      ? "disabled"
+      : surface.impressions > 0
+        ? "live"
+        : isDetected === false
+          ? "not_installed"
+          : "awaiting_traffic";
+
+    const badge = surfaceBadge(
+      { ...surface, status: effectiveStatus },
+      isDetected,
+    );
     const rate =
       surface.impressions > 0
         ? `${((surface.accepts / surface.impressions) * 100).toFixed(1)}%`
@@ -97,9 +151,14 @@ export function HomePage({ data }: HomePageProps) {
         <IndexTable.Cell>
           <InlineStack gap="200" blockAlign="center">
             <Badge tone={badge.tone}>{badge.label}</Badge>
-            {surface.status === "no_traffic" && meta && (
+            {effectiveStatus === "not_installed" && meta && (
               <Button url={meta.setupHref} variant="plain">
                 Set up
+              </Button>
+            )}
+            {effectiveStatus === "awaiting_traffic" && meta && (
+              <Button url={meta.setupHref} variant="plain">
+                Test
               </Button>
             )}
           </InlineStack>
@@ -342,8 +401,9 @@ export function HomePage({ data }: HomePageProps) {
                       Where recommendations are running
                     </Text>
                     <Text as="p" tone="subdued">
-                      "Not installed" means the block hasn't been added to your
-                      theme or checkout yet.
+                      Live indicates active recommendations. "Awaiting traffic"
+                      means the block is installed and waiting for shoppers to
+                      reach the page.
                     </Text>
                   </BlockStack>
                   <Badge tone="info">{`${liveCount} of ${surfaces.length} live`}</Badge>

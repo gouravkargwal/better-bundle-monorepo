@@ -1052,11 +1052,17 @@ def _followup_prompt(ctx: str, seq: int, niche: str = "store") -> str:
     if seq == 2:
         return f"""Write follow-up email #2 for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
-shows those pairings on product pages, in the cart and at checkout.
+shows those pairings on the product page and the customer's order-status page.
+
+Never say "in the cart" or "at checkout". No cart surface exists, and the
+checkout block is Shopify Plus only — these prospects are not Plus, so both are
+claims the merchant could never see come true.
 
 The offer: install is the free trial. No monthly fee, no card — the app bills
 only on revenue it can attribute to its own recommendations, so if it finds
-nothing, it costs nothing.
+nothing, it costs nothing. It also holds 10% of shoppers back as a control and
+shows them nothing, so the merchant can see what the other 90% did differently.
+The 10% is the holdout share — never present it, or any number, as a result.
 
 CONTEXT
 {ctx}
@@ -1103,10 +1109,17 @@ Return ONLY the body text."""
 
 
 # Numbers that come from our own offer, not from the prospect's research.
-# The only number our own offer contributes. There is deliberately no price
-# here: commission_rate is a runtime value and has never been fixed, so any
-# rate or cap quoted in an email would be fabricated.
-OFFER_NUMBERS = {"5"}
+#
+# There is deliberately no price here: commission_rate is a runtime value and has
+# never been fixed, so any rate or cap quoted in an email would be fabricated.
+#
+# 10 and 90 are the holdout split, and they are facts about our own product, not
+# about the prospect — INITIAL_HOLDOUT_PERCENT in holdout_service.py is 10, applied
+# to every surface by default. Without them here, invented_numbers() rejects every
+# draft that explains the control arm, which is the one thing that answers "how do
+# you decide what revenue is because of you?". They describe the split only; a lift
+# result is still a fabricated number and the prompt forbids it.
+OFFER_NUMBERS = {"5", "10", "90"}
 
 # CRM-speak the model reaches for when told to close a loop. Prompt-banned above;
 # checked here too, because a banned phrase is as deterministic as a bad number.
@@ -1124,6 +1137,21 @@ BANNED_PHRASES = (
     "your product page", "your collection page", "your checkout",
     "your cart", "your homepage", "your thank-you page", "your thank you page",
     "your existing recommendations",
+    # Claims about OUR OWN surfaces that no code backs. The possessive forms above
+    # catch assertions about the merchant's pages; these catch us describing places
+    # BetterBundle does not render, which the old follow-up #2 prompt actively
+    # instructed ("on product pages, in the cart and at checkout").
+    #
+    # Cart: no cart surface exists. CONTEXT_SURFACE in recommendations.py accepts
+    # product_page as the only storefront context.
+    #
+    # Checkout: mercury is a checkout-step target and those are Shopify Plus only.
+    # The ICP this campaign prospects (40-20,000 products, founder named on the
+    # site) is not Plus, so "at checkout" promises a block the merchant can never
+    # switch on. If Plus prospects are ever targeted deliberately, gate this
+    # entry on the prospect rather than deleting it.
+    "in the cart", "in their cart", "on the cart", "cart page",
+    "at checkout", "at the checkout", "in checkout", "during checkout",
 )
 
 
@@ -1144,10 +1172,23 @@ def _demo_followup_review():
     assert banned_phrases("your collection pages can't learn from those patterns") == [
         "your collection page"
     ]
-    # Describing where OUR app shows pairings must still pass.
-    assert banned_phrases("It shows those pairings at checkout and after purchase.") == []
+    # Surfaces we do not have. The old follow-up #2 prompt instructed this exact
+    # sentence, so it shipped on day 3 to every non-replier.
+    assert banned_phrases("It shows those pairings on product pages, in the cart and at checkout.") == [
+        "in the cart",
+        "at checkout",
+    ]
+    # Describing where OUR app really does show pairings must still pass.
+    assert banned_phrases(
+        "It shows those pairings on the product page and the order-status page."
+    ) == []
     assert invented_numbers("We fixed 4,000 SKUs.", "Catalog: 900 items") == ["4,000"]
     assert invented_numbers("The report covers 5 pairings.", "Catalog: 900") == []
+    # The holdout split is our own offer, not a prospect fact, and must survive.
+    assert invented_numbers(
+        "It hides recommendations from 10% of shoppers so you can see what the other 90% did.",
+        "Catalog: 900 items",
+    ) == []
     out = format_email("I will stop reaching out. BetterBundle only bills on "
                        "revenue it can attribute. Best of luck with the year.",
                        "Tony Sambell")

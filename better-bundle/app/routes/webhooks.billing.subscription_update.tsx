@@ -164,100 +164,12 @@ async function handleActiveSubscription(
       data: {
         shopify_subscription_id: subscriptionId,
         shopify_status: "ACTIVE",
+        subscription_type: "PAID",
         status: "ACTIVE",
         is_active: true,
         updated_at: new Date(),
       },
     });
-
-    // ── Billing-cycle lookup using findFirst + orderBy (DB-level) ─────
-    const latestCycle = await prisma.billing_cycles.findFirst({
-      where: {
-        shop_subscription_id: shopSubscription.id,
-        status: "ACTIVE",
-      },
-      orderBy: { cycle_number: "desc" },
-    });
-
-    if (!latestCycle) {
-      // No active cycle exists → determine the next cycle_number
-      const lastCycle = await prisma.billing_cycles.findFirst({
-        where: { shop_subscription_id: shopSubscription.id },
-        orderBy: { cycle_number: "desc" },
-        select: { cycle_number: true },
-      });
-
-      const nextCycleNumber = lastCycle ? lastCycle.cycle_number + 1 : 1;
-
-      // Shopify's approved value wins over our plan default: it is what the
-      // platform will actually enforce on appUsageRecordCreate.
-      const cap =
-        cappedAmount ||
-        Number(
-          shopSubscription.cap_amount_override ??
-            shopSubscription.subscription_plans?.cap_amount ??
-            299,
-        );
-
-      logger.info(
-        {
-          shop: shopRecord.shop_domain,
-          cappedAmount: cap,
-          cycleNumber: nextCycleNumber,
-        },
-        "Creating billing cycle for activated usage subscription",
-      );
-
-      incrementCounter("subscription_update.cycle_created", {
-        shop: shopRecord.shop_domain,
-        cycleNumber: nextCycleNumber,
-      });
-
-      // ── Idempotent create with unique-constraint guard ──────────────
-      // The @@unique([shop_subscription_id, status]) constraint prevents
-      // duplicate ACTIVE cycles even in a race condition.
-      try {
-        await prisma.billing_cycles.create({
-          data: {
-            shop_subscription_id: shopSubscription.id,
-            cycle_number: nextCycleNumber,
-            start_date: new Date(),
-            end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-            // Seeding these at 0 meant zero chargeable capacity: every
-            // commission would be rejected as "cap reached" and the shop
-            // suspended on its first attributed order.
-            initial_cap_amount: cap,
-            current_cap_amount: cap,
-            usage_amount: 0,
-            commission_count: 0,
-            status: "ACTIVE",
-            activated_at: new Date(),
-          },
-        });
-      } catch (createError: any) {
-        // P2002 is Prisma's unique constraint violation
-        if (createError?.code === "P2002") {
-          logger.info(
-            {
-              shop: shopRecord.shop_domain,
-              cycleNumber: nextCycleNumber,
-            },
-            "Billing cycle already exists (race condition handled)",
-          );
-        } else {
-          throw createError;
-        }
-      }
-    } else {
-      logger.info(
-        {
-          shop: shopRecord.shop_domain,
-          cycleId: latestCycle.id,
-          cycleNumber: latestCycle.cycle_number,
-        },
-        "Active billing cycle already exists – skipping creation",
-      );
-    }
 
     // Reactivate shop if suspended
     await prisma.shops.update({

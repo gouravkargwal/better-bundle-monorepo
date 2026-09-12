@@ -19,6 +19,7 @@ const SURFACE_KEYS: SurfaceKey[] = [
 export interface PersistedShopSettings {
   surfaces?: Partial<Record<SurfaceKey, boolean>>;
   excluded_product_ids?: string[];
+  detected_surfaces?: Partial<Record<SurfaceKey, boolean>>;
 }
 
 interface ShopSettingsRow {
@@ -66,6 +67,7 @@ export async function getShopSettings(shopDomain: string) {
     shopCurrency: row.currency_code || "USD",
     holdoutDisabled: row.holdout_disabled,
     surfaces,
+    detectedSurfaces: (raw.detected_surfaces as Partial<Record<SurfaceKey, boolean>> | undefined) ?? null,
     excludedProductIds: Array.isArray(raw.excluded_product_ids)
       ? raw.excluded_product_ids.map(String)
       : [],
@@ -87,9 +89,11 @@ export async function saveShopSettings(
   shopDomain: string,
   input: SaveSettingsInput,
 ) {
+  const existing = await getShopSettings(shopDomain);
   const settings: PersistedShopSettings = {
     surfaces: { ...input.surfaces },
     excluded_product_ids: input.excludedProductIds,
+    detected_surfaces: existing?.detectedSurfaces ?? undefined,
   };
 
   try {
@@ -104,5 +108,38 @@ export async function saveShopSettings(
   } catch (error) {
     logger.error({ error, shopDomain }, "Failed to save shop settings");
     throw error;
+  }
+}
+
+/**
+ * Persist detected extension installation status from App Bridge checks.
+ * Merges with existing detected status without overwriting merchant settings.
+ */
+export async function updateDetectedSurfaces(
+  shopDomain: string,
+  detectedSurfaces: Partial<Record<SurfaceKey, boolean>>,
+) {
+  try {
+    const existing = await getShopSettings(shopDomain);
+    const merged: Partial<Record<SurfaceKey, boolean>> = {
+      ...(existing?.detectedSurfaces ?? {}),
+      ...detectedSurfaces,
+    };
+
+    const result = await prisma.$executeRaw`
+      UPDATE shops
+      SET settings = jsonb_set(
+        COALESCE(settings, '{}'::jsonb),
+        '{detected_surfaces}',
+        ${JSON.stringify(merged)}::jsonb,
+        true
+      ),
+      updated_at = NOW()
+      WHERE shop_domain = ${shopDomain}
+    `;
+    return result > 0;
+  } catch (error) {
+    logger.error({ error, shopDomain }, "Failed to update detected surfaces");
+    return false;
   }
 }

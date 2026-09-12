@@ -11,6 +11,25 @@ let refreshPromise = null;
 let refreshAccessTokenPromise = null;
 
 /**
+ * Fetch with timeout to prevent hanging when backend crashes
+ */
+const fetchWithTimeout = async (resource, options = {}) => {
+  const { timeout = 5000, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(resource, {
+      ...fetchOptions,
+      signal: controller.signal
+    });
+    return response;
+  } finally {
+    clearTimeout(id);
+  }
+};
+
+/**
  * Check if token is still valid (not expired)
  */
 const isTokenNotExpired = (tokenInfo) => {
@@ -69,10 +88,11 @@ const fetchNewTokenPair = async (storage, shopDomain, customerId = null) => {
   }
 
   // Use new unified endpoint
-  const response = await fetch(`${BACKEND_URL}/api/auth/generate-token`, {
+  const response = await fetchWithTimeout(`${BACKEND_URL}/api/auth/generate-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
+    timeout: 5000,
   });
 
   if (!response.ok) {
@@ -148,10 +168,11 @@ const refreshAccessToken = async (storage, shopDomain, customerId = null) => {
       }
 
       // Try to refresh using refresh token
-      const response = await fetch(`${BACKEND_URL}/api/auth/refresh-token`, {
+      const response = await fetchWithTimeout(`${BACKEND_URL}/api/auth/refresh-token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: storedRefreshToken }),
+        timeout: 5000,
       });
 
       if (response.ok) {
@@ -254,13 +275,14 @@ export const makeAuthenticatedRequest = async (
       }
 
       // Make request
-      let response = await fetch(url, {
+      let response = await fetchWithTimeout(url, {
         ...fetchOptions,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           ...fetchOptions.headers,
         },
+        timeout: 8000, // Slightly longer timeout for data fetches
       });
 
       // ✅ Handle 401: Refresh token and retry once
@@ -275,13 +297,14 @@ export const makeAuthenticatedRequest = async (
 
         if (newToken) {
           // Retry with new token (don't count as retry attempt)
-          response = await fetch(url, {
+          response = await fetchWithTimeout(url, {
             ...fetchOptions,
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${newToken}`,
               ...fetchOptions.headers,
             },
+            timeout: 8000,
           });
         } else {
           logger.error("Mercury pixel: Token refresh failed");

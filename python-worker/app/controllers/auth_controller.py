@@ -118,17 +118,28 @@ class AuthController:
                     headers={"WWW-Authenticate": "Bearer"},
                 )
 
-            # Refresh token is VALID - NO DB QUERY NEEDED
-            # Use values stored in refresh token payload (from original token creation)
+            # Refresh token is VALID
+            # We ALWAYS query the DB during refresh to ensure permissions are up to date
+            # This is how a merchant transitioning from suspended -> active gets unblocked immediately
             logger.info(
-                f"Generating new access token for {refresh_result['shop_domain']}"
+                f"Generating new access token for {refresh_result['shop_domain']} from fresh DB state"
             )
 
+            shop_id = refresh_result.get("shop_id")
+            if not shop_id:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Cannot extract shop info from token",
+                )
+
+            # Fresh DB check
+            shop_info = await self.shop_repository.get_shop_by_id(shop_id)
+
             access_token = self.jwt_service.create_access_token(
-                shop_id=refresh_result["shop_id"],
-                shop_domain=refresh_result["shop_domain"],
-                is_service_active=refresh_result.get("is_service_active", True),
-                shopify_plus=refresh_result.get("shopify_plus", False),
+                shop_id=shop_info["shop_id"],
+                shop_domain=shop_info["shop_domain"],
+                is_service_active=shop_info["is_service_active"],
+                shopify_plus=shop_info.get("shopify_plus", False),
             )
 
             return {

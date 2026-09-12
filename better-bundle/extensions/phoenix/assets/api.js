@@ -165,7 +165,10 @@ class RecommendationAPI {
               ? { properties }
               : {})
           }
-        ]
+        ],
+        // Request updated HTML for common theme cart sections (like Dawn)
+        sections: "cart-drawer,cart-icon-bubble,cart-notification-product,cart-notification-button",
+        sections_url: window.location.pathname
       };
 
 

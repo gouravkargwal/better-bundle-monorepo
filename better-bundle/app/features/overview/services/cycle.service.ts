@@ -19,7 +19,7 @@ import prisma from "../../../db.server";
 
 /** Fallbacks matching subscription_plans defaults in the worker's schema. */
 const DEFAULT_COMMISSION_RATE = 0.03;
-const DEFAULT_CAP_AMOUNT = 299;
+const DEFAULT_CAP_AMOUNT = 29;
 const DEFAULT_TRIAL_THRESHOLD = 1000;
 
 export interface CycleMetrics {
@@ -101,33 +101,52 @@ export async function getCurrentCycleUsage(shopSubscriptionId: string): Promise<
     where: { shop_subscription_id: shopSubscriptionId, status: "ACTIVE" },
     orderBy: { start_date: "desc" },
   });
-  if (!cycle) {
-    return {
-      usageAmount: 0,
-      attributedRevenue: 0,
-      orders: 0,
-      cycleEnd: null,
-      capAmount: null,
-    };
-  }
 
-  const attributed = await prisma.commission_records.aggregate({
-    where: { billing_cycle_id: cycle.id, deleted_at: null },
-    _sum: { attributed_revenue: true },
-    _count: { id: true },
+  const sub = await prisma.shop_subscriptions.findUnique({
+    where: { id: shopSubscriptionId },
+    select: {
+      shop_id: true,
+      cap_amount_override: true,
+      subscription_plans: { select: { cap_amount: true } },
+    },
   });
 
+  const startDate =
+    cycle?.start_date ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const dateFilter: { gte: Date; lt?: Date } = { gte: startDate };
+  if (cycle?.end_date) {
+    dateFilter.lt = cycle.end_date;
+  }
+
+  const attributed = sub?.shop_id
+    ? await prisma.commission_records.aggregate({
+        where: {
+          shop_id: sub.shop_id,
+          billing_phase: "PAID",
+          order_date: dateFilter,
+          deleted_at: null,
+        },
+        _sum: { attributed_revenue: true, commission_charged: true },
+        _count: { id: true },
+      })
+    : {
+        _sum: { attributed_revenue: 0, commission_charged: 0 },
+        _count: { id: 0 },
+      };
+
   return {
-    usageAmount: Number(cycle.usage_amount ?? 0),
+    usageAmount: Number(attributed._sum.commission_charged ?? 0),
     attributedRevenue: Number(attributed._sum.attributed_revenue ?? 0),
     orders: attributed._count.id ?? 0,
-    cycleEnd: cycle.end_date ?? null,
-    // The cap in force for this cycle, snapshotted on the row — so changing
-    // the plan does not retroactively rewrite what a past cycle was capped at.
+    cycleEnd: cycle?.end_date ?? null,
     capAmount:
-      cycle.current_cap_amount !== null
+      cycle?.current_cap_amount !== null && cycle?.current_cap_amount !== undefined
         ? Number(cycle.current_cap_amount)
-        : null,
+        : Number(
+            sub?.cap_amount_override ??
+              sub?.subscription_plans?.cap_amount ??
+              29,
+          ),
   };
 }
 

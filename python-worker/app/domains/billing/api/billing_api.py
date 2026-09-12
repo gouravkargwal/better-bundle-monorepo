@@ -249,3 +249,16 @@ async def _publish_purchase_attribution_events_for_commissions(
         await publisher.close()
 
     return published
+
+
+@router.post("/reconcile-rollovers")
+async def trigger_rollover_reconciliation(limit: int = 50, dry_run: bool = False):
+    """Trigger a rollover reconciliation pass manually."""
+    from ..services.rollover_reconciler import reconcile_rollovers_once
+
+    try:
+        result = await reconcile_rollovers_once(limit=limit, dry_run=dry_run)
+        return {"success": True, "result": result}
+    except Exception as e:
+        logger.error(f"Error in rollover reconciliation endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

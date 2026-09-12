@@ -39,7 +39,8 @@ export function getBillingNotifications(
     suspensionStatus.isSuspended &&
     suspensionStatus.reason &&
     suspensionStatus.reason !== "payment_failure" &&
-    suspensionStatus.reason !== "trial_completed_awaiting_setup"
+    suspensionStatus.reason !== "trial_completed_awaiting_setup" &&
+    suspensionStatus.reason !== "subscription_pending_approval"
   ) {
     notifications.push({
       id: "subscription_suspended",
@@ -66,7 +67,6 @@ export function getBillingNotifications(
   if (
     suspensionStatus.trialCompleted &&
     !suspensionStatus.subscriptionActive &&
-    !suspensionStatus.subscriptionPending &&
     !suspensionStatus.isSuspended
   ) {
     notifications.push({
@@ -79,27 +79,7 @@ export function getBillingNotifications(
     });
   }
 
-  // ── Subscription pending approval ───────────────────────────
-  if (suspensionStatus.subscriptionPending) {
-    notifications.push({
-      id: "subscription_pending",
-      type: "info",
-      title: "Subscription Pending",
-      message:
-        "Your subscription is awaiting approval. You will be notified once it is confirmed.",
-    });
-  }
 
-  // ── Subscription active ─────────────────────────────────────
-  if (suspensionStatus.subscriptionActive) {
-    notifications.push({
-      id: "subscription_active",
-      type: "success",
-      title: "Subscription Active",
-      message:
-        "Your Better Bundle subscription is active and all services are running.",
-    });
-  }
 
   return notifications;
 }

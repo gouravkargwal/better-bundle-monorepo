@@ -29,19 +29,36 @@ Parameter (ask if missing): count = N (default 10).
 ## ⚠️ WHAT WE ACTUALLY SELL (READ BEFORE WRITING ANY COPY)
 
 **BetterBundle is a Shopify app that reads a store's own order history to find which
-products genuinely sell together, then shows those pairings at two places:**
+products genuinely sell together, then shows those pairings on five surfaces.**
 
-1. **Checkout** — a cross-sell block in the checkout UI (`mercury` extension)
-2. **After purchase** — a post-purchase upsell on the thank-you page (`apollo` extension)
+**The surface table is the source of truth for copy. It mirrors `CONTEXT_SURFACE` in
+`python-worker/app/api/v1/recommendations.py` — if that file changes, this changes.**
+
+| Surface | Where it renders | Plan reach |
+|---|---|---|
+| `phoenix` | Product page (theme app block) | **All plans — widest of all.** Merchant places the block in the theme editor. |
+| `venus` | Customer-account order-status page | All plans, no gate |
+| `thank_you` | Thank-You page block | All plans, no gate |
+| `apollo` | Post-purchase interstitial | All plans, **but only with a vaulted card** |
+| `mercury` | Checkout UI block | **SHOPIFY PLUS ONLY** |
 
 **Billing: no monthly fee. It bills only on revenue it can attribute to its own
 recommendations.**
 
 ### SCOPE RULES — violating these puts a false claim in a merchant's inbox
 
-- ❌ **NEVER claim product-page, homepage, cart, or collection-page recommendations.**
-  The backend can serve those contexts but **no storefront surface renders them.**
-  Only checkout and post-purchase ship today.
+- ❌ **NEVER claim cart, homepage, collection-page or search recommendations.**
+  There is no surface for any of them. `product_page` is the only storefront
+  context the API accepts — a cart or homepage claim is unbacked by any code.
+- ⚠️ **NEVER lead a non-Plus prospect with checkout.** `mercury` is a checkout-step
+  target and those are Plus-only. For the founder-run 40–20,000 product ICP this
+  playbook targets, checkout will never appear in their store. See the plan gate
+  in Step 2.
+- ⚠️ **Never promise the post-purchase interstitial unconditionally.** `apollo`
+  requires a vaulted card, which you cannot see from outside.
+- ✅ **Default to `phoenix` + `venus` + `thank_you` in copy.** All three work on
+  every plan with no gate you cannot verify, and they are what the merchant will
+  actually see after install.
 - ❌ **NEVER state a commission percentage, rate, cap, or dollar figure.** The rate is
   a runtime value and has never been fixed. "No monthly fee, billed only on
   attributed revenue" is the whole claim. Any number is fabricated.
@@ -64,6 +81,32 @@ already removes the risk:
 > nothing, it costs nothing. First sync shows your top pairings."
 
 That last sentence is the report; it just lands after install, where it's real.
+
+### The holdout — answer the attribution question before they ask it
+
+"Billed only on revenue it attributes" provokes exactly one question in a merchant's
+head: **"how do you decide what revenue is because of you?"** An email that raises
+that question and does not answer it hands the reader an unexplained liability, and
+that is the most likely silent reason a qualified prospect does not reply.
+
+**It is already answered in the product.** `holdout_service.py` runs
+`INITIAL_HOLDOUT_PERCENT = 10` on every surface by default: 10% of shoppers are
+randomised into a control arm and shown nothing, and `lift_service.py` reports the
+difference between arms with a real significance test. This is a shipped default,
+not a roadmap item — you may state it.
+
+**You MAY write, in the merchant's own terms:**
+
+> "It hides its recommendations from 10% of your shoppers on purpose, so you can see
+> what the other 90% did differently."
+
+No competitor in this category offers a control arm. It is the strongest true
+sentence available to this campaign — stronger than the billing model alone, because
+it is the thing that makes the billing model believable.
+
+**Still banned:** the commission rate, cap, any percentage of revenue, any dollar
+figure, and any claim about the *size* of the lift. The 10% is the holdout share, not
+a result. Never write a lift number — there isn't one yet.
 
 **Why this matters more than it looks:** the body argues that collection-based
 guessing is worthless and only order history is truth. Offering a catalog-based
@@ -235,6 +278,23 @@ curl -s "https://DOMAIN" | grep -oiE "rebuyengine|limespot|codeblackbelt|logbase
 - Nothing found → still fine; do NOT conclude "you have no recommendations" in the
   copy, because a theme can do it natively and you cannot see their checkout.
 
+**Gate E — Plan assumption (no probe; this is a copy rule, not a filter)**
+
+Shopify Plus is not reliably detectable from outside a store, and a wrong guess
+here puts a surface in the email that the merchant can never switch on. So do not
+try to detect it:
+
+- **Assume every prospect is NOT Plus.** The ICP gate (40–20,000 products, founder
+  named on the site) selects for non-Plus almost by construction.
+- Therefore **never name checkout as the surface** unless the store is
+  self-evidently Plus (an investor-relations page or a named merchandising team —
+  both of which are already `too_large` skips anyway).
+- Write `phoenix` / `venus` / `thank_you` surfaces instead: product page, order
+  status, thank-you page. All three work on every plan.
+
+This costs nothing — there is no filter to run and no prospect to skip. It only
+changes which two words go in beat 2.
+
 **PRE-SCREEN THE DOMAIN BEFORE RESEARCHING THE PERSON.** Finding a name costs a
 search; finding out the domain is a catch-all costs one SMTP call. Do the cheap one
 first:
@@ -379,11 +439,13 @@ row = {
     "body": body
 }
 file_path = "outreach/prospects.csv"
-file_exists = os.path.isfile(file_path)
+# Size, not existence: a file that exists but is empty still needs the header,
+# and `touch`-ing it or a crashed earlier run both produce exactly that.
+needs_header = not os.path.exists(file_path) or os.path.getsize(file_path) == 0
 
 with open(file_path, "a", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=row.keys())
-    if not file_exists:
+    if needs_header:
         writer.writeheader()
     writer.writerow(row)
 ```
@@ -484,7 +546,11 @@ word count in the log line for the row.
   sit next to each other in About-page prose. Safest move: **prefer catalog facts
   over heritage facts.** A product count cannot be recombined into a falsehood.
 - **NEVER state a commission rate, cap, percentage or dollar figure.** Not decided.
-- **NEVER claim product-page / homepage / cart recommendations.** Not shipped.
+- **NEVER claim cart / homepage / collection-page / search recommendations.** No
+  surface exists for any of them. Product page (`phoenix`) and order status
+  (`venus`) ARE shipped and are the two you should normally name — see the surface
+  table at the top.
+- **NEVER name checkout as the surface.** Plus-only; our ICP is not Plus.
 - **NEVER claim anything about their checkout or thank-you page.** Unverifiable.
 - subject: lowercase, 4–7 words, **MUST contain ONE specific fact from their store**
   (product count, brand count, a product type, the app they run). Generic subjects
@@ -512,13 +578,22 @@ offer into one "line" and is why bodies drifted to 110 words.
    products, your buyers are forming pairs collections can't see." The fact and
    the problem in one breath; two separate sentences waste the reader's best
    attention on a fact they already know about themselves.
-2. **MECHANISM + RISK REVERSAL** — reads their own orders, shows pairings at
-   checkout and after purchase; no monthly fee, no card, billed only on attributed
-   revenue. Close it with the asymmetry: *"if it finds nothing, it costs nothing."*
+2. **MECHANISM + RISK REVERSAL** — reads their own orders, shows pairings **on the
+   product page and the order-status page** (never "at checkout" — see Gate E);
+   no monthly fee, no card, billed only on attributed revenue. Close it with the
+   asymmetry: *"if it finds nothing, it costs nothing."* Where the sentence has
+   room, the holdout line earns its place here over a second product fact.
 3. **CTA** — one short question. Rotate, never repeat within a batch:
+   - "Reply 'no thanks' and I'll stop." ← **the negative opt-out. Use it most.**
    - "worth a look?"
    - "want me to walk you through it?"
    - "open to trying it on one collection?"
+
+   **The opt-out is first for a reason.** It is the CTA on the only email in the
+   previous campaign that got a reply (see Production Learnings), and it was
+   missing from this list while follow-up #2 used it. It asks the prospect to do
+   nothing, which is the lowest-friction ask available. Rotate the others in for
+   variety; do not let a batch go out without it appearing.
 
 **Never promise a pre-install report or "what it finds."** See The offer above.
 
@@ -597,6 +672,11 @@ someone who looked.
   "teardown", "what it finds" or "no install" in a body is a fail.
 - **ZERO fabricated facts. ZERO rate/price figures. ZERO claims about their checkout
   or product pages.**
+- **Every surface named in the body appears in the surface table.** "Cart",
+  "homepage", "collection page" and "search" are automatic fails — no code serves
+  them. "Checkout" is a fail on a non-Plus prospect, which is all of them.
+- **If the body mentions the holdout, it says 10% and claims no result.** The 10%
+  is the share of shoppers held back, never a lift figure.
 - **Every fact traces to ONE span of the research.** Point at the phrase for each
   claim before approving the row. Two spans welded into one sentence is a fail even
   though both halves are true — see the recombining rule.

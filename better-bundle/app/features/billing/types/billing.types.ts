@@ -19,7 +19,6 @@ export type BillingStatus =
   | "trial_active"
   | "trial_completed"
   | "trial_expired"
-  | "subscription_pending"
   | "subscription_active"
   | "subscription_suspended"
   | "subscription_cancelled";

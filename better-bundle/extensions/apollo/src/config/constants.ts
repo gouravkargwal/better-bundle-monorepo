@@ -14,7 +14,7 @@ export const BACKEND_URL = "https://nonconscientious-annette-saddeningly.ngrok-f
 // be signed, so a stale value fails the whole post-purchase step with
 // ERR_CONNECTION_REFUSED — it was pinned to the production domain while
 // running against a dev tunnel.
-export const SHOPIFY_APP_URL = "https://1a53-223-184-242-150.ngrok-free.app" as const;
+export const SHOPIFY_APP_URL = "https://73e5-223-184-244-44.ngrok-free.app" as const;
 
 // Storage Keys - Apollo uses in-memory cache for tokens (not persistent)
 // These are mainly for reference/compatibility

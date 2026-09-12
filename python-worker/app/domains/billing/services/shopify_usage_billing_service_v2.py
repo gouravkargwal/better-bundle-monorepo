@@ -408,114 +408,42 @@ class ShopifyUsageBillingServiceV2:
         commission_ids: List[str] = None,
         billing_period: Dict[str, str] = None,
     ) -> None:
-        """Store usage record in database using new system"""
+        """Store usage record in database statelessly (best-effort cycle update if legacy cycle exists)."""
         try:
             # Get shop subscription
             shop_subscription = await self.billing_repository.get_shop_subscription(
                 shop_id
             )
             if not shop_subscription:
-                logger.error(f"No shop subscription found for shop {shop_id}")
+                logger.debug(f"No shop subscription found for shop {shop_id}")
                 return
 
-            # Get current billing cycle
+            # Best-effort update of active legacy billing cycle if one exists
             current_cycle = await self.billing_repository.get_current_billing_cycle(
                 shop_subscription.id
             )
             if not current_cycle:
-                logger.error(f"No active billing cycle found for shop {shop_id}")
+                logger.debug(
+                    f"No active billing cycle found for shop {shop_id} (stateless billing)"
+                )
                 return
 
-            # ✅ CRITICAL: Update usage ONLY when Shopify successfully creates the usage record
-            # This ensures:
-            # 1. Usage accurately reflects what's actually charged to Shopify
-            # 2. Failed recordings don't count as usage
-            # 3. PENDING commissions don't increment usage until RECORDED
-
-            # Check if commission was already counted (prevent double-counting on retries)
-            # If commission_ids is provided, check if any were already counted
-            from app.core.database.models.commission import CommissionRecord
-            from sqlalchemy import select, and_
-            from app.core.database.models.enums import CommissionStatus
-
-            already_counted = False
-            if commission_ids:
-                # Check if any of these commissions are already RECORDED
-                query = select(CommissionRecord).where(
-                    and_(
-                        CommissionRecord.id.in_(commission_ids),
-                        CommissionRecord.status == CommissionStatus.RECORDED,
-                        CommissionRecord.billing_cycle_id == current_cycle.id,
-                    )
-                )
-                result = await self.billing_repository.session.execute(query)
-                existing_recorded = result.scalars().first()
-                if existing_recorded:
-                    already_counted = True
-                    logger.warning(
-                        f"⚠️ Commission {existing_recorded.id} already RECORDED - skipping usage update to prevent double-counting"
-                    )
-
-            if not already_counted:
-                # Update billing cycle usage - only for successfully recorded commissions
-                await self.billing_repository.update_billing_cycle_usage(
-                    current_cycle.id,
-                    amount,
-                    {
-                        "usage_record_id": usage_record_data["id"],
-                        "description": description,
-                        "recorded_at": usage_record_data["createdAt"],
-                        "type": "usage_based",
-                        "idempotency_key": idempotency_key,
-                        "commission_ids": commission_ids or [],
-                        "billing_period": billing_period or {},
-                    },
-                )
-                logger.info(
-                    f"✅ Updated billing cycle usage: +${amount} for shop {shop_id} "
-                    f"(cycle: {current_cycle.id}, Shopify record: {usage_record_data['id']})"
-                )
-
-                # ✅ CRITICAL: Check if cap is reached AFTER usage is updated
-                # Refresh cycle to get updated usage_amount
-                await self.billing_repository.session.refresh(current_cycle)
-
-                # Check if cap is now reached
-                if current_cycle.remaining_cap <= Decimal("0"):
-                    logger.warning(
-                        f"🛑 Cap reached after usage update: "
-                        f"usage=${current_cycle.usage_amount}, cap=${current_cycle.current_cap_amount}"
-                    )
-
-                    # Suspend shop and subscription - create CommissionServiceV2 to use suspension method
-                    from app.domains.billing.services.commission_service_v2 import (
-                        CommissionServiceV2,
-                    )
-                    from app.repository.CommissionRepository import CommissionRepository
-                    from app.repository.PurchaseAttributionRepository import (
-                        PurchaseAttributionRepository,
-                    )
-
-                    commission_repo = CommissionRepository(
-                        self.billing_repository.session
-                    )
-                    purchase_attr_repo = PurchaseAttributionRepository(
-                        self.billing_repository.session
-                    )
-                    commission_service = CommissionServiceV2(
-                        self.billing_repository.session
-                    )
-                    commission_service.billing_repository = self.billing_repository
-                    commission_service.commission_repository = commission_repo
-                    commission_service.purchase_attribution_repository = (
-                        purchase_attr_repo
-                    )
-
-                    await commission_service._suspend_shop_for_cap_reached(shop_id)
-            else:
-                logger.info(
-                    f"✅ Stored Shopify usage record {usage_record_data['id']} for shop {shop_id} "
-                    f"(amount: {amount}) - Usage already counted"
-                )
+            await self.billing_repository.update_billing_cycle_usage(
+                current_cycle.id,
+                amount,
+                {
+                    "usage_record_id": usage_record_data["id"],
+                    "description": description,
+                    "recorded_at": usage_record_data["createdAt"],
+                    "type": "usage_based",
+                    "idempotency_key": idempotency_key,
+                    "commission_ids": commission_ids or [],
+                    "billing_period": billing_period or {},
+                },
+            )
+            logger.info(
+                f"✅ Stored usage record: +${amount} for shop {shop_id} "
+                f"(Shopify record: {usage_record_data['id']})"
+            )
         except Exception as e:
-            logger.error(f"Error storing usage record: {e}")
+            logger.error(f"Error in _store_usage_record: {e}")

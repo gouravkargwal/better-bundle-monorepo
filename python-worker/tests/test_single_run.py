@@ -15,14 +15,14 @@ def test_key_is_stable_across_calls():
 
 def test_key_differs_by_job_name():
     names = ["enrichment_sweeper", "attribution_reconciler",
-             "fx_refresher", "ingestion_backstop"]
+             "rollover_reconciler", "fx_refresher", "ingestion_backstop"]
     assert len({lock_key(n) for n in names}) == len(names)
 
 
 def test_key_fits_a_signed_bigint():
     """pg_try_advisory_lock takes bigint; an unsigned value >= 2^63 is rejected."""
     for n in ["enrichment_sweeper", "attribution_reconciler",
-              "fx_refresher", "ingestion_backstop", "", "x" * 500]:
+              "rollover_reconciler", "fx_refresher", "ingestion_backstop", "", "x" * 500]:
         assert -(2**63) <= lock_key(n) < 2**63
 
 

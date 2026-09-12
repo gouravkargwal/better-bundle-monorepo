@@ -33,6 +33,34 @@ export class BillingService {
         };
       }
 
+      // Proactively sync with Shopify if admin is provided. This acts as our instant
+      // "catch" for merchants returning from the Shopify approval screen before the webhook arrives.
+      if (admin) {
+        const shopifyStatus = await this.getShopifySubscriptionStatus(
+          shopId,
+          admin,
+        );
+
+        if (
+          shopifyStatus &&
+          (shopifyStatus.status === "ACTIVE" ||
+            shopifyStatus.status === "PENDING")
+        ) {
+          // getShopifySubscriptionStatus already updated the DB to PAID.
+          return {
+            status: "subscription_active",
+            subscriptionData: await this.getSubscriptionDataFromShopify(
+              subscription,
+              shopifyStatus,
+            ),
+          };
+        }
+        
+        if (shopifyStatus && shopifyStatus.status === "CANCELLED" && subscription.subscription_type === "PAID") {
+            return { status: "subscription_cancelled" };
+        }
+      }
+
       const isTrialPhase = subscription.subscription_type === "TRIAL";
       const isPaidPhase = subscription.subscription_type === "PAID";
 
@@ -53,7 +81,7 @@ export class BillingService {
         const cappedAmount = Number(
           subscription.cap_amount_override ??
             subscription.subscription_plans?.cap_amount ??
-            299,
+            29,
         );
 
         // The worker flips status to TRIAL_COMPLETED once the threshold is
@@ -74,35 +102,9 @@ export class BillingService {
         };
       }
 
-      // 3. PAID PHASE: Check Shopify subscription status
+      // 3. PAID PHASE: Fallback when admin client is not provided (e.g. background jobs)
       if (isPaidPhase) {
-        if (admin) {
-          const shopifyStatus = await this.getShopifySubscriptionStatus(
-            shopId,
-            admin,
-          );
-
-          if (shopifyStatus) {
-            if (
-              shopifyStatus.status === "ACTIVE" ||
-              shopifyStatus.status === "PENDING"
-            ) {
-              return {
-                status: "subscription_active",
-                subscriptionData: await this.getSubscriptionDataFromShopify(
-                  subscription,
-                  shopifyStatus,
-                ),
-              };
-            }
-
-            if (shopifyStatus.status === "CANCELLED") {
-              return {
-                status: "subscription_cancelled",
-              };
-            }
-          }
-        } else if (subscription.shopify_subscription_id) {
+        if (subscription.shopify_subscription_id) {
           // No admin client, use DB info
           const cycle = await this.getCurrentCycleUsage(subscription.id);
           return {
@@ -120,7 +122,7 @@ export class BillingService {
               cappedAmount: Number(
                 subscription.cap_amount_override ??
                   subscription.subscription_plans?.cap_amount ??
-                  299,
+                  29,
               ),
               usageThisCycle: cycle.usageAmount,
               attributedThisCycle: cycle.attributedRevenue,
@@ -195,7 +197,7 @@ export class BillingService {
       revenueEarned: 0,
       trialThreshold: 1000,
       commissionRate: 0.03,
-      cappedAmount: 299,
+      cappedAmount: 29,
       currency: await this.getShopCurrency(shopId),
     };
   }
@@ -209,7 +211,28 @@ export class BillingService {
     shopSubscription: any,
     shopifyStatus: any,
   ): Promise<SubscriptionData> {
-    const cycle = await this.getCurrentCycleUsage(shopSubscription.id);
+    const startDate = shopifyStatus.currentPeriodEnd
+      ? new Date(
+          new Date(shopifyStatus.currentPeriodEnd).getTime() -
+            30 * 24 * 60 * 60 * 1000,
+        )
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const orderDateFilter: { gte: Date; lt?: Date } = { gte: startDate };
+    if (shopifyStatus.currentPeriodEnd) {
+      orderDateFilter.lt = new Date(shopifyStatus.currentPeriodEnd);
+    }
+
+    const attributed = await prisma.commission_records.aggregate({
+      where: {
+        shop_id: shopSubscription.shop_id,
+        billing_phase: "PAID",
+        order_date: orderDateFilter,
+        deleted_at: null,
+      },
+      _sum: { attributed_revenue: true },
+    });
+
     return {
       id: shopifyStatus.subscriptionId || shopSubscription.id,
       status: shopifyStatus.status as
@@ -230,10 +253,10 @@ export class BillingService {
         shopifyStatus.cappedAmount ??
           shopSubscription.cap_amount_override ??
           shopSubscription.subscription_plans?.cap_amount ??
-          299,
+          29,
       ),
-      usageThisCycle: Number(shopifyStatus.balanceUsed ?? cycle.usageAmount),
-      attributedThisCycle: cycle.attributedRevenue,
+      usageThisCycle: Number(shopifyStatus.balanceUsed ?? 0),
+      attributedThisCycle: Number(attributed?._sum?.attributed_revenue ?? 0),
       currency: shopifyStatus.currency || "USD",
       confirmationUrl: shopifyStatus.confirmationUrl,
       billingCycle: shopifyStatus.currentPeriodEnd
@@ -359,6 +382,14 @@ export class BillingService {
           }
         }
 
+        let currentPeriodStart: string | undefined;
+        if (subscription.currentPeriodEnd) {
+          const endDate = new Date(subscription.currentPeriodEnd);
+          currentPeriodStart = new Date(
+            endDate.getTime() - 30 * 24 * 60 * 60 * 1000,
+          ).toISOString();
+        }
+
         return {
           status: subscription.status,
           subscriptionId: subscription.id,
@@ -366,6 +397,7 @@ export class BillingService {
           balanceUsed,
           currency,
           currentPeriodEnd: subscription.currentPeriodEnd,
+          currentPeriodStart,
         };
       }
 

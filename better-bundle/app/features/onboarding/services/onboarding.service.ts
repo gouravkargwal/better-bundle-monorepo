@@ -115,7 +115,7 @@ export class OnboardingService {
       return {
         symbol: getCurrencySymbol(currencyCode),
         commission_rate: Number(defaultPlan.commission_rate) || 0.03,
-        cap_amount: Number(defaultPlan.cap_amount) || 299,
+        cap_amount: Number(defaultPlan.cap_amount) || 29,
         trial_revenue_threshold:
           Number(defaultPlan.trial_revenue_threshold) || 1000,
         plan_name: defaultPlan.name || "Pay As You Go",

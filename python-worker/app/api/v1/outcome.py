@@ -7,11 +7,12 @@ Records the outcome in the offer_impressions table.
 
 from decimal import Decimal
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from app.core.logging import get_logger
 from app.services.holdout_service import HoldoutService
+from app.core.dependencies import get_storefront_authorization, StorefrontAuthContext
 
 logger = get_logger(__name__)
 
@@ -47,11 +48,19 @@ class OutcomeRequest(BaseModel):
 
 
 @router.post("/outcome")
-async def record_outcome(request: OutcomeRequest):
+async def record_outcome(
+    request: OutcomeRequest,
+    auth: StorefrontAuthContext = Depends(get_storefront_authorization),
+):
     """
     Record the outcome of an offer impression.
     Called by Apollo/Mercury extensions when user accepts/declines.
     """
+    if not auth.is_authorized:
+        logger.info(f"Storefront auth failed for outcome tracking: {auth.fail_reason}")
+        # Fail silent. Returning a 200 OK prevents browser console errors for the shopper
+        return {"success": True, "recorded": False, "reason": auth.fail_reason}
+
     from app.core.database.session import get_transaction_context
     from app.core.database.models.offer_impression import OfferImpression
     from sqlalchemy import select

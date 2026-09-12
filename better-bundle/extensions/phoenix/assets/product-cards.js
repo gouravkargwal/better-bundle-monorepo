@@ -461,7 +461,7 @@ class ProductCardManager {
       }
 
       // Add to cart via Shopify API with line item properties
-      await this.api.addToCart(
+      const data = await this.api.addToCart(
         selectedVariantId,
         selectedQuantity,
         itemProperties,
@@ -470,10 +470,62 @@ class ProductCardManager {
       // Restore button state
       addToCartButton.disabled = false;
       addToCartButton.style.cursor = "pointer";
-      addToCartButton.textContent = originalButtonText;
+      addToCartButton.textContent = "Added!";
+      
+      // Revert text after 2 seconds
+      setTimeout(() => {
+        if (addToCartButton.textContent === "Added!") {
+          addToCartButton.textContent = originalButtonText;
+        }
+      }, 2000);
 
-
-      window.location.reload();
+      // The api.js already dispatches 'cart:updated', but some themes require additional events
+      document.dispatchEvent(new CustomEvent('cart:refresh'));
+      document.dispatchEvent(new CustomEvent('ajaxProduct:added'));
+      
+      // Inject updated section HTML for themes like Dawn
+      if (data && data.sections) {
+        // Update Cart Bubble/Icon
+        const bubble = document.getElementById('cart-icon-bubble');
+        if (bubble && data.sections['cart-icon-bubble']) {
+          bubble.innerHTML = data.sections['cart-icon-bubble'];
+        }
+        
+        // Update and open Cart Drawer (Dawn)
+        const cartDrawer = document.querySelector('cart-drawer');
+        if (cartDrawer && data.sections['cart-drawer']) {
+          // Dawn's cart-drawer replaces specific internal elements
+          const drawerInner = document.getElementById('CartDrawer');
+          if (drawerInner) {
+            // Provide a wrapper to extract the inner HTML from the response
+            const temp = document.createElement('div');
+            temp.innerHTML = data.sections['cart-drawer'];
+            const newInner = temp.querySelector('#CartDrawer');
+            if (newInner) {
+              drawerInner.innerHTML = newInner.innerHTML;
+            }
+          }
+          
+          if (cartDrawer.classList.contains('is-empty')) {
+            cartDrawer.classList.remove('is-empty');
+          }
+          
+          // Try to call Dawn's native open method
+          if (typeof cartDrawer.open === 'function') {
+            cartDrawer.open();
+          }
+        }
+        
+        // Update Cart Notification (Dawn alternate)
+        const cartNotification = document.querySelector('cart-notification');
+        if (cartNotification && data.sections['cart-notification-product']) {
+          if (typeof cartNotification.renderContents === 'function') {
+            cartNotification.renderContents(data);
+          } else if (typeof cartNotification.open === 'function') {
+            cartNotification.open();
+          }
+        }
+      }
     } catch (error) {
       this.logger.error("Error adding to cart:", error);
 

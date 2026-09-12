@@ -9,12 +9,18 @@ export type SurfaceKey =
   | "phoenix"
   | "venus";
 
-export type SurfaceLiveStatus = "live" | "no_traffic" | "disabled";
+export type SurfaceLiveStatus =
+  | "live"
+  | "awaiting_traffic"
+  | "not_installed"
+  | "disabled"
+  | "no_traffic";
 
 export interface SurfaceStatus {
   key: SurfaceKey;
   label: string;
   enabled: boolean;
+  installed?: boolean;
   impressions: number;
   accepts: number;
   revenue: number;

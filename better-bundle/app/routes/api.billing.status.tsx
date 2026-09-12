@@ -73,11 +73,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         message = "Trial completed — please set up billing";
         break;
 
-      case "PENDING_APPROVAL":
-        billingStatus = "subscription_pending";
-        message = "Subscription pending approval";
-        break;
-
       case "ACTIVE":
         billingStatus = "subscription_active";
         message = "Subscription active";

@@ -1,4 +1,5 @@
 import { Banner, BlockStack } from "@shopify/polaris";
+import { useLocation } from "@remix-run/react";
 import type { NotificationMessage } from "../../services/notification.service";
 
 interface NotificationBannerProps {
@@ -10,6 +11,8 @@ interface NotificationBannerProps {
  * When a notification includes an action, clicking it navigates the merchant.
  */
 export function NotificationBanner({ notifications }: NotificationBannerProps) {
+  const location = useLocation();
+
   if (!notifications || notifications.length === 0) {
     return null;
   }
@@ -24,23 +27,26 @@ export function NotificationBanner({ notifications }: NotificationBannerProps) {
       }}
     >
       <BlockStack gap="200">
-        {notifications.map((n) => (
-          <Banner
-            key={n.id}
-            tone={n.type === "success" ? "success" : n.type}
-            title={n.title}
-            action={
-              n.action
-                ? {
-                    content: n.action.label,
-                    url: n.action.url,
-                  }
-                : undefined
-            }
-          >
-            <p>{n.message}</p>
-          </Banner>
-        ))}
+        {notifications.map((n) => {
+          const isCurrentPage = n.action && location.pathname === n.action.url;
+          return (
+            <Banner
+              key={n.id}
+              tone={n.type === "success" ? "success" : n.type}
+              title={n.title}
+              action={
+                n.action && !isCurrentPage
+                  ? {
+                      content: n.action.label,
+                      url: n.action.url,
+                    }
+                  : undefined
+              }
+            >
+              <p>{n.message}</p>
+            </Banner>
+          );
+        })}
       </BlockStack>
     </div>
   );

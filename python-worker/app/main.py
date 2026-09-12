@@ -92,6 +92,14 @@ async def lifespan(app: FastAPI):
     reconciler_task = asyncio.create_task(attribution_reconciler.run_forever())
     logger.info("✅ Attribution reconciler started")
 
+    # Rollover reconciler for usage-based billing. Detects 30-day Shopify cycle
+    # rollovers for suspended shops and reactivates them while draining backlogged
+    # commissions.
+    from app.domains.billing.services import rollover_reconciler
+
+    rollover_task = asyncio.create_task(rollover_reconciler.run_forever())
+    logger.info("✅ Rollover reconciler started")
+
     # FX rates for billing. Attributed revenue is in the shopper's currency and
     # commissions are USD; without these rates every non-USD shop is either
     # unbillable or billed at its FX rate, which over-charged an INR merchant
@@ -117,7 +125,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
 
-    for task in (sweeper_task, reconciler_task, fx_task, backstop_task):
+    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task):
         task.cancel()
         try:
             await task

@@ -11,7 +11,6 @@ export interface SuspensionStatus {
   requiresBillingSetup: boolean;
   trialCompleted: boolean;
   subscriptionActive: boolean;
-  subscriptionPending: boolean;
 }
 
 /**
@@ -102,13 +101,6 @@ export async function checkServiceSuspension(
               shop_id: shopId,
               is_active: true,
             },
-            include: {
-              billing_cycles: {
-                where: { status: "ACTIVE" },
-                orderBy: { cycle_number: "desc" },
-                take: 1,
-              },
-            },
           }),
         ]);
 
@@ -119,7 +111,6 @@ export async function checkServiceSuspension(
             requiresBillingSetup: false,
             trialCompleted: false,
             subscriptionActive: false,
-            subscriptionPending: false,
           };
         }
 
@@ -141,14 +132,11 @@ export async function checkServiceSuspension(
               reason === "payment_failure",
             trialCompleted: shopSubscription.status !== "TRIAL",
             subscriptionActive: false,
-            subscriptionPending: shopSubscription.status === "PENDING_APPROVAL",
           };
         }
 
         // Check subscription status
         const subscriptionActive = shopSubscription.status === "ACTIVE";
-        const subscriptionPending =
-          shopSubscription.status === "PENDING_APPROVAL";
 
         // ✅ Trial active - services active
         if (shopSubscription.status === "TRIAL") {
@@ -158,33 +146,20 @@ export async function checkServiceSuspension(
             requiresBillingSetup: false,
             trialCompleted: false,
             subscriptionActive: false,
-            subscriptionPending: false,
           };
         }
 
         // ✅ NEW: Trial completed - services SUSPENDED until user sets up billing
         // NOTE: "TRIAL_COMPLETED" should be added to the Prisma SubscriptionStatus enum.
         // Using string comparison until schema is updated.
-        if (shopSubscription.status === "TRIAL_COMPLETED") {
+        // Also treat legacy "PENDING_APPROVAL" as TRIAL_COMPLETED since we no longer lock the UI
+        if (shopSubscription.status === "TRIAL_COMPLETED" || shopSubscription.status === "PENDING_APPROVAL") {
           return {
             isSuspended: true,
             reason: "trial_completed_awaiting_setup",
             requiresBillingSetup: true,
             trialCompleted: true,
             subscriptionActive: false,
-            subscriptionPending: false,
-          };
-        }
-
-        // ✅ Subscription pending approval - services SUSPENDED
-        if (subscriptionPending) {
-          return {
-            isSuspended: true,
-            reason: "subscription_pending_approval",
-            requiresBillingSetup: false,
-            trialCompleted: true,
-            subscriptionActive: false,
-            subscriptionPending: true,
           };
         }
 
@@ -196,7 +171,6 @@ export async function checkServiceSuspension(
             requiresBillingSetup: false,
             trialCompleted: true,
             subscriptionActive: true,
-            subscriptionPending: false,
           };
         }
 
@@ -207,7 +181,6 @@ export async function checkServiceSuspension(
           requiresBillingSetup: shopSubscription.status === "SUSPENDED",
           trialCompleted: true,
           subscriptionActive: false,
-          subscriptionPending: false,
         };
       },
       300, // 5 minutes TTL
@@ -239,7 +212,6 @@ export async function checkServiceSuspension(
           requiresBillingSetup: false,
           trialCompleted: false,
           subscriptionActive: false,
-          subscriptionPending: false,
         };
       }
 
@@ -254,7 +226,6 @@ export async function checkServiceSuspension(
           requiresBillingSetup: false,
           trialCompleted: false,
           subscriptionActive: false,
-          subscriptionPending: false,
         };
       }
 
@@ -268,7 +239,6 @@ export async function checkServiceSuspension(
             shop.suspension_reason === "payment_failure",
           trialCompleted: shopSubscription.status !== "TRIAL",
           subscriptionActive: false,
-          subscriptionPending: false,
         };
       }
 
@@ -279,7 +249,6 @@ export async function checkServiceSuspension(
           requiresBillingSetup: false,
           trialCompleted: true,
           subscriptionActive: true,
-          subscriptionPending: false,
         };
       }
 
@@ -290,7 +259,6 @@ export async function checkServiceSuspension(
         requiresBillingSetup: false,
         trialCompleted: true,
         subscriptionActive: false,
-        subscriptionPending: false,
       };
     } catch (dbError) {
       // Both Redis and DB failed — fail-open: allow service access
@@ -309,7 +277,6 @@ export async function checkServiceSuspension(
         requiresBillingSetup: false,
         trialCompleted: false,
         subscriptionActive: false,
-        subscriptionPending: false,
       };
     }
   }
@@ -334,7 +301,6 @@ export async function checkServiceSuspensionByDomain(
         requiresBillingSetup: false,
         trialCompleted: false,
         subscriptionActive: false,
-        subscriptionPending: false,
       };
     }
 
@@ -356,7 +322,6 @@ export async function checkServiceSuspensionByDomain(
       requiresBillingSetup: false,
       trialCompleted: false,
       subscriptionActive: false,
-      subscriptionPending: false,
     };
   }
 }

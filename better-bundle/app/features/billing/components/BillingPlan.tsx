@@ -2,7 +2,6 @@ import { Card, Text } from "@shopify/polaris";
 import type { BillingState, BillingSetupData } from "../types/billing.types";
 import { TrialActive } from "./TrialActive";
 import { TrialCompleted } from "./TrialCompleted";
-import { SubscriptionPending } from "./SubscriptionPending";
 import { SubscriptionActive } from "./SubscriptionActive";
 import { SubscriptionSuspended } from "./SubscriptionSuspended";
 
@@ -60,14 +59,6 @@ export function BillingPlan({
               }
               return result;
             }}
-          />
-        );
-
-      case "subscription_pending":
-        return (
-          <SubscriptionPending
-            subscriptionData={billingState.subscriptionData!}
-            shopCurrency={shopCurrency}
           />
         );
 

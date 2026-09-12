@@ -65,8 +65,10 @@ export function SubscriptionActive({
             {/* Header with status */}
             <InlineStack align="space-between" blockAlign="center">
               <Box padding="400" background="bg-surface-info" borderRadius="300">
-                <Text as="h3" variant="headingMd" fontWeight="bold">
-                  📊 Current Plan
+                <Text as="span">
+                  <Text as="h3" variant="headingMd" fontWeight="bold">
+                    💡 Pay As You Go Pricing
+                  </Text>
                 </Text>
               </Box>
             </InlineStack>
@@ -194,9 +196,10 @@ export function SubscriptionActive({
             {/* Info Banner */}
             <Box padding="400" background="bg-surface-warning" borderRadius="300">
               <Text as="p" variant="bodySm" tone="subdued">
-                💡 Your flat-rate plan gives you full access to all features.
-                No usage tracking, no surprise charges — just one predictable
-                monthly fee.
+                💡 You are charged {ratePercent}% of the revenue we
+                attribute to our recommendations, never more than{" "}
+                {formatCurrency(subscriptionData.cappedAmount)} in a 30-day cycle.
+                A month we generate nothing costs you nothing.
               </Text>
             </Box>
           </BlockStack>

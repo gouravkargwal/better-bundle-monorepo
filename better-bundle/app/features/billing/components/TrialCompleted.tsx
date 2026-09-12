@@ -121,7 +121,7 @@ export function TrialCompleted({
               <Box padding="400" background="bg-surface-info" borderRadius="300">
                 <Text as="span">
                   <Text as="h3" variant="headingMd" fontWeight="bold">
-                    💡 Flat Rate Pricing Plan
+                    💡 Pay As You Go Pricing
                   </Text>
                 </Text>
               </Box>
@@ -132,7 +132,7 @@ export function TrialCompleted({
                     Plan:
                   </Text>
                   <Text as="p" variant="bodyMd" fontWeight="bold">
-                    Pro
+                    Pay As You Go
                   </Text>
                 </InlineStack>
 

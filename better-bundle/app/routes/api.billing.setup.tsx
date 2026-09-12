@@ -69,12 +69,14 @@ export async function action({ request }: ActionFunctionArgs) {
       shopSubscription.commission_rate_override ?? plan?.commission_rate ?? 0.03,
     );
     const cappedAmount = Number(
-      shopSubscription.cap_amount_override ?? plan?.cap_amount ?? 299,
+      shopSubscription.cap_amount_override ?? plan?.cap_amount ?? 29,
     );
 
     const currency = shopRecord.currency_code || "USD";
-    const appHandle = process.env.SHOPIFY_APP_HANDLE || "better-bundle-dev";
-    const returnUrl = `https://admin.shopify.com/store/${shop}/apps/${appHandle}/app/billing`;
+    const clientId = process.env.SHOPIFY_API_KEY || "";
+    // Using the classic /admin/apps/{clientId} deep link allows Shopify to automatically
+    // format the URL for the new admin.shopify.com structure and wrap the app in the iframe.
+    const returnUrl = `https://${shop}/admin/apps/${clientId}/app/billing`;
 
     // AppUsagePricing, not AppRecurringPricing: there is no fixed monthly fee.
     // `terms` is shown to the merchant on the approval screen, and cappedAmount
@@ -183,19 +185,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 500 },
       );
     }
-
-    // Update shop subscription with Shopify subscription info
-    await prisma.shop_subscriptions.update({
-      where: { id: shopSubscription.id },
-      data: {
-        shopify_subscription_id: subscription.id,
-        shopify_line_item_id: subscription.lineItems[0]?.id,
-        confirmation_url: confirmationUrl,
-        shopify_status: "PENDING",
-        status: "PENDING_APPROVAL",
-        updated_at: new Date(),
-      },
-    });
 
     logger.info(
       {
