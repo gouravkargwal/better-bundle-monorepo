@@ -156,11 +156,6 @@ export function HomePage({ data }: HomePageProps) {
                 Set up
               </Button>
             )}
-            {effectiveStatus === "awaiting_traffic" && meta && (
-              <Button url={meta.setupHref} variant="plain">
-                Test
-              </Button>
-            )}
           </InlineStack>
         </IndexTable.Cell>
         {/* An em dash, never a zero — "0" reads as "it tried and failed". */}
