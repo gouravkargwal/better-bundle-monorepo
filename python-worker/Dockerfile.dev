@@ -25,7 +25,11 @@ COPY requirements.txt .
 # sentence-transformers pulls PyTorch, which by default is the CUDA build —
 # well over a gigabyte of libraries this image can never use. The CPU index
 # serves a far smaller wheel, and nothing here runs on a GPU.
+# --timeout/--retries because torch is a 159 MB wheel and pip's 15s default
+# read timeout aborts the whole install if the CDN stalls mid-download — which
+# it does often enough that a rebuild became a coin flip.
 RUN pip install --no-cache-dir \
+        --timeout 120 --retries 5 \
         --extra-index-url https://download.pytorch.org/whl/cpu \
         -r requirements.txt
 

@@ -60,3 +60,306 @@ Elegoo,us.elegoo.com,,batch2,skipped,unreachable,2026-09-11 00:19:28
 Kanopi by Armstrong,kanopibyarmstrong.com,,batch2,skipped,too_large,2026-09-11 00:22:35
 Zea,zea.com.au,,batch2,skipped,catchall,2026-09-11 00:25:43
 Full Leaf Tea Company,fullleafteacompany.com,,batch2,skipped,no_personal_email,2026-09-11 00:31:40
+Bold Bean Coffee Roasters,boldbeancoffee.com,zack@boldbeancoffee.com,batch3,new,,2026-09-11 09:39:53
+Goody's of Bend,goodysofbend.com,dave@goodysofbend.com,batch3,new,,2026-09-11 09:39:53
+Shop MDSkincare,,,batch3,skipped,too_large (enterprise dermatology group),2026-09-11 09:39:53
+Fellow Products,,,batch3,skipped,too_large (VC-backed enterprise),2026-09-11 09:39:53
+Gathre,,,batch3,skipped,"no_personal_email (L2 inferred, SMTP port 25 blocked for verification)",2026-09-11 09:39:53
+Shop Pet Life,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Vignette Coffee,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Vinigandra,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Country House Furniture,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+My Spring Energy,,,batch3,skipped,catalog_too_small (37 products),2026-09-11 09:39:53
+Bending Branches,,,batch3,skipped,no_volume_signal,2026-09-11 09:39:53
+Padel Only,,,batch3,skipped,no_volume_signal,2026-09-11 09:39:53
+Elsk Botanical,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Circuit Coffee,,,batch3,skipped,catalog_too_small (20 products),2026-09-11 09:39:53
+Swing's Coffee,,,batch3,skipped,no_personal_email (only mailorder@),2026-09-11 09:39:53
+Brown Dog Roasting,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Overview Coffee,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Caffeina Coffee,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Mondo Coffee,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+She Biology,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Whole Life Pet,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+My Bee Balm Co,,,batch3,skipped,catalog_too_small (30 products),2026-09-11 09:39:53
+Milcasa Store,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Paper Lantern Store,,,batch3,skipped,no_personal_email,2026-09-11 09:39:53
+Pono Woodworks,ponowoodworks.com,brett@ponowoodworks.com,batch4,new,,2026-09-11 09:43:21
+Kukio Jewelry,kukiojewelry.com,sarah@kukiojewelry.com,batch4,new,,2026-09-11 09:43:21
+Common Pottery,,,batch4,skipped,no_volume_signal,2026-09-11 09:43:21
+Gathering Folds,,,batch4,skipped,no_volume_signal,2026-09-11 09:43:21
+Savor Tooth Prebiotic,,,batch4,skipped,catalog_too_small (10 products),2026-09-11 09:43:21
+Doublesix Dice,doublesixdice.com,Matt@DoubleSixDice.com,batch5,new,,2026-09-11 13:19:11
+Green Bee Tea Towels,greenbeeteatowels.com,Rena@greenbeeteatowels.com,batch5,new,,2026-09-11 13:19:11
+Teri James Photography,terijames.com,teri@terijames.com,batch5,new,,2026-09-11 13:19:11
+Flora and the Fox,floraandthefox.com,helen@floraandthefox.com,batch5,new,,2026-09-11 13:19:11
+Platinum Sass,platinumsass.com,nicole@platinumsass.com,batch5,new,,2026-09-11 13:19:11
+Birdmoss,birdmoss.com,shannon@birdmoss.com,batch5,new,,2026-09-11 13:19:11
+Farmhouse Teas,farmhouseteas.com,ceanne@farmhouseteas.com,batch5,new,,2026-09-11 13:19:11
+Plaine Products,plaineproducts.com,Lindsey@PlaineProducts.com,batch5,new,,2026-09-11 13:19:11
+Honeyberry Studios,honeyberrystudios.com,yuko@honeyberrystudios.com,batch5,new,,2026-09-11 13:19:11
+KMWatt,kmwatt.com,kim@kmwatt.com,batch5,new,,2026-09-11 13:19:11
+LE Pottery,lepottery.com,Lindsey@lepottery.com,batch5,new,,2026-09-11 13:19:11
+Goody's of Bend,goodysofbend.com,dave@goodysofbend.com,skipped,2026-09-11 13:26:34,verify_queued,"catchall — 250 for any address, cannot confirm"
+Kukio Jewelry,kukiojewelry.com,sarah@kukiojewelry.com,skipped,2026-09-11 13:26:34,verify_queued,mx_unreachable — could not verify
+Doublesix Dice,doublesixdice.com,Matt@DoubleSixDice.com,skipped,2026-09-11 13:26:34,verify_queued,"catchall — 250 for any address, cannot confirm"
+Teri James Photography,terijames.com,teri@terijames.com,skipped,2026-09-11 13:26:34,verify_queued,"catchall — 250 for any address, cannot confirm"
+Platinum Sass,platinumsass.com,nicole@platinumsass.com,skipped,2026-09-11 13:26:34,verify_queued,"catchall — 250 for any address, cannot confirm"
+Birdmoss,birdmoss.com,shannon@birdmoss.com,skipped,2026-09-11 13:26:34,verify_queued,"catchall — 250 for any address, cannot confirm"
+KMWatt,kmwatt.com,kim@kmwatt.com,skipped,2026-09-11 13:26:34,verify_queued,smtp_550 — address rejected
+Pinecone Home,pineconehome.com,Carolyn@PineconeHome.com,batch6,new,,2026-09-11 13:29:00
+DianaHDesigns,dianahdesigns.com,Info@DianaHDesigns.com,batch6,new,,2026-09-11 13:29:00
+Hennessey Jewelry,hennesseyjewelry.com,michele@hennesseyjewelry.com,batch6,new,,2026-09-11 13:29:00
+Annie Walker Art,anniewalker.art,annie@anniewalker.art,batch6,new,,2026-09-11 13:29:00
+Paige Barbee Jewelry,paigebarbee.com,,batch6,skipped,"catalog_too_small (48 products, low volume)",2026-09-11 13:29:00
+Pinecone Home,pineconehome.com,Carolyn@PineconeHome.com,skipped,2026-09-11 13:29:37,verify_queued,smtp_550 — address rejected
+DianaHDesigns,dianahdesigns.com,Info@DianaHDesigns.com,skipped,2026-09-11 13:29:37,verify_queued,smtp_550 — address rejected
+Hennessey Jewelry,hennesseyjewelry.com,michele@hennesseyjewelry.com,skipped,2026-09-11 13:29:37,verify_queued,smtp_550 — address rejected
+Annie Walker Art,anniewalker.art,annie@anniewalker.art,skipped,2026-09-11 13:29:37,verify_queued,mx_unreachable — could not verify
+De Soto Sport,desotosport.com,tracy@desotosport.com,batch7,new,,2026-09-11 13:41:54
+Au Marche,aumarche.com,lora@aumarche.com,batch7,new,,2026-09-11 13:41:54
+Pet Musings,petmusings.com,bobo@petmusings.com,batch7,new,,2026-09-11 13:41:54
+Fabric 4 Fun,fabric4fun.com,tonya@fabric4fun.com,batch7,new,,2026-09-11 13:41:54
+The Woolly Dragon,thewoollydragon.com,sarah@thewoollydragon.com,batch7,new,,2026-09-11 13:41:54
+Rising Tide Fiber Co.,risingtidefiberco.com,Melissa@risingtidefiberco.com,batch7,new,,2026-09-11 13:41:54
+Hobby Addicts,hobby-addicts.com,michael@hobby-addicts.com,batch7,new,,2026-09-11 13:41:54
+De Soto Sport,desotosport.com,tracy@desotosport.com,skipped,2026-09-11 13:46:42,verify_queued,mx_unreachable — could not verify
+Au Marche,aumarche.com,lora@aumarche.com,skipped,2026-09-11 13:46:42,verify_queued,"catchall — 250 for any address, cannot confirm"
+Pet Musings,petmusings.com,bobo@petmusings.com,skipped,2026-09-11 13:46:42,verify_queued,"catchall — 250 for any address, cannot confirm"
+Fabric 4 Fun,fabric4fun.com,tonya@fabric4fun.com,skipped,2026-09-11 13:46:42,verify_queued,"catchall — 250 for any address, cannot confirm"
+Rising Tide Fiber Co.,risingtidefiberco.com,Melissa@risingtidefiberco.com,skipped,2026-09-11 13:46:42,verify_queued,"catchall — 250 for any address, cannot confirm"
+Hobby Addicts,hobby-addicts.com,michael@hobby-addicts.com,skipped,2026-09-11 13:46:42,verify_queued,"catchall — 250 for any address, cannot confirm"
+Seven Sundays,sevensundays.com,hannah@sevensundays.com,batch8,new,,2026-09-11 13:56:01
+Amino Man,aminoman.com,matt@aminoman.com,batch8,new,,2026-09-11 13:56:01
+MaxWell Nutrition,maxwellnutrition.com,Spencer@MaxWellNutrition.com,batch8,new,,2026-09-11 13:56:01
+Tara Leigh Art,taraleighart.com,tara@taraleighart.com,batch8,new,,2026-09-11 13:56:01
+Dog Mamma's,dogmammas.com,mamma@dogmammas.com,batch8,new,,2026-09-11 13:56:01
+Amino Man,aminoman.com,matt@aminoman.com,skipped,2026-09-11 13:58:02,verify_queued,mx_unreachable — could not verify
+Game Toppers,gametoppersllc.com,burky@gametoppersllc.com,batch9,new,,2026-09-11 14:01:35
+Anton Thomas Art,antonthomasart.com,anton@antonthomasart.com,batch9,new,,2026-09-11 14:01:35
+Great Escape Games,greatescapegames.com,Gary@greatescapegames.com,batch9,new,,2026-09-11 14:01:35
+Blissful Spirit Candles,blissfulspiritcandles.com,patty@blissfulspiritcandles.com,batch9,new,,2026-09-11 14:01:35
+Home Inn Candle,homeinncandle.com,cynthia@homeinncandle.com,batch9,new,,2026-09-11 14:01:35
+Indigo Guinea Fiber,indigoguineafiber.com,lindsey@indigoguinea.com,batch9,new,,2026-09-11 14:01:35
+Summer Day Crochet,summerdaycrochet.com,mack@summerdaycrochet.com,batch9,new,,2026-09-11 14:01:35
+Oil Water Lye,oilwaterlye.com,Kyli@oilwaterlye.com,batch9,new,,2026-09-11 14:01:35
+Amber Share Design,ambersharedesign.com,amber@ambersharedesign.com,batch9,new,,2026-09-11 14:01:35
+Maison Blue,maisonblue.com,alexandra@maisonblue.com,batch9,new,,2026-09-11 14:01:35
+Game Toppers,gametoppersllc.com,burky@gametoppersllc.com,skipped,2026-09-11 16:01:57,verify_queued,smtp_550 — address rejected
+Home Inn Candle,homeinncandle.com,cynthia@homeinncandle.com,skipped,2026-09-11 16:01:57,verify_queued,smtp_550 — address rejected
+Oil Water Lye,oilwaterlye.com,Kyli@oilwaterlye.com,skipped,2026-09-11 16:01:57,verify_queued,mx_unreachable — could not verify
+Maison Blue,maisonblue.com,alexandra@maisonblue.com,skipped,2026-09-11 16:01:57,verify_queued,smtp_550 — address rejected
+Prairie Road Organic Seed,prairieroadorganic.co,theresa@prairieroadorganic.co,batch11,new,,2026-09-11 16:04:47
+November Maker,novembermaker.com,howdy@novembermaker.com,batch11,new,,2026-09-11 16:04:47
+Henry Hyde Handmade Knives,hydehandmadeknives.com,henry@hydehandmadeknives.com,batch11,new,,2026-09-11 16:04:47
+York Knife,yorkknife.co.uk,luke@yorkknife.co.uk,batch11,new,,2026-09-11 16:04:47
+Lone Star Knife,lonestarknife.com,chris@lonestarknife.com,batch11,new,,2026-09-11 16:04:47
+Jetsy Designs,jetsydesigns.com,Betsy@JetsyDesigns.com,batch11,new,,2026-09-11 16:04:47
+SÄDÉ Spa,sadespa.com,tracy@sadespa.com,batch11,new,,2026-09-11 16:04:47
+Fleurish Gifts,fleurishllp.com,sharon@fleurishgifts.com,batch11,new,,2026-09-11 16:04:47
+Bless This Mess,blessthismessplease.com,melissa@blessthismessplease.com,batch11,new,,2026-09-11 16:04:47
+Willow Rock Acres,willowrockacres.com,Sarahjane@willowrockacres.com,batch11,new,,2026-09-11 16:04:47
+Prairie Road Organic Seed,prairieroadorganic.co,theresa@prairieroadorganic.co,skipped,2026-09-11 16:06:02,verify_queued,smtp_550 — address rejected
+November Maker,novembermaker.com,howdy@novembermaker.com,skipped,2026-09-11 16:06:02,verify_queued,mx_unreachable — could not verify
+York Knife,yorkknife.co.uk,luke@yorkknife.co.uk,skipped,2026-09-11 16:06:02,verify_queued,mx_unreachable — could not verify
+Fleurish Gifts,fleurishllp.com,sharon@fleurishgifts.com,skipped,2026-09-11 16:06:02,verify_queued,smtp_550 — address rejected
+Willow Rock Acres,willowrockacres.com,Sarahjane@willowrockacres.com,skipped,2026-09-11 16:06:02,verify_queued,smtp_550 — address rejected
+Crow Tarot,crowtarotshop.com,mj@crowtarot.com,batch12,new,,2026-09-11 16:07:20
+Apos Audio,apos.audio,alex@apos.audio,batch12,new,,2026-09-11 16:07:20
+I Am Hot Honey,iamhothoney.com,hello@iamhothoney.com,batch12,new,,2026-09-11 16:07:20
+Wild Veil Perfume,wildveilperfume.com,abby@wildveil.com,batch12,new,,2026-09-11 16:07:20
+Henny Faire Co.,hennyfaire.com,erica@hennyfaire.com,batch12,new,,2026-09-11 16:07:20
+Peony Pepper,peonypepper.com,Megan@peonypepper.com,batch12,new,,2026-09-11 16:07:20
+SaltyKatie,saltykatie.com,kate@saltykatie.com,batch12,new,,2026-09-11 16:07:20
+Atlas Wood Company,atlaswoodcompany.com,andrew@atlaswoodcompany.com,batch12,new,,2026-09-11 16:07:20
+SimpleXpressions Personalized,simplexpressionspersonalized.com,melissa@simplexpressionspersonalized.com,batch12,new,,2026-09-11 16:07:20
+Elissa Marie Creative,elissamariecreative.com,elissa@elissamariecreative.com,batch12,new,,2026-09-11 16:07:20
+VotixEDC,votixedc.com,alfred@votixedc.com,batch13,new,,2026-09-11 21:40:49
+Ketalon,ketalon.com,hello@ketalon.com,batch13,new,,2026-09-11 21:40:49
+Drink Great Tea,drinkgreattea.com,pparda@drinkgreattea.com,batch13,new,,2026-09-11 21:40:49
+Thimble Blossoms,thimbleblossoms.com,camille@thimbleblossoms.com,batch13,new,,2026-09-11 21:40:49
+Finley Fabric,finleyfabric.com,Laura@FinleyFabric.com,batch13,new,,2026-09-11 21:40:49
+TopKnot Stitcher,topknotstitcher.com,abby@topknotstitcher.com,batch13,new,,2026-09-11 21:40:49
+Sewn Handmade,sewnhandmade.com,amy@sewnhandmade.com,batch13,new,,2026-09-11 21:40:49
+Geekly Whimsical,geeklywhimsical.com,hello@geeklywhimsical.com,batch13,new,,2026-09-11 21:40:49
+Old Faithful Golf,oldfaithfulgolf.com,proshop@oldfaithfulgolf.com,batch13,new,,2026-09-11 21:40:49
+Last Cut Crystal,lastcutcrystal.com,aaron@lastcutcrystal.com,batch13,new,,2026-09-11 21:40:49
+Subterra Coffee,subterracoffee.com,will@subterracoffee.com,batch14,new,,2026-09-11 21:53:16
+Velodrome Coffee Company,velodromecoffeecompany.com,Brice@velodromecoffeecompany.com,batch14,new,,2026-09-11 21:53:16
+Janus Tobak,janustobak.com,shad@janustobak.com,batch14,new,,2026-09-11 21:53:16
+East Alstead Roasting Co.,eastalsteadroastingco.com,owen@eastalsteadroastingco.com,batch14,new,,2026-09-11 21:53:16
+Savage Coffees,savagecoffees.net,jamie@savagecoffees.net,batch14,new,,2026-09-11 21:53:16
+Lucid Aquatics,lucidaquatics.com,kris@lucidaquatics.com,batch14,new,,2026-09-11 21:53:16
+NAH Miniatures,nahminiatures.com,Greg@NahMiniatures.com,batch14,new,,2026-09-11 21:53:16
+Shiny Upgrades,shinyupgrades.com,niki@shinyupgrades.com,batch14,new,,2026-09-11 21:53:16
+Red Wine Dice,redwinedice.com,tara@redwinedice.com,batch14,new,,2026-09-11 21:53:16
+Dice Functional,dicefunctional.com,alan@dicefunctional.com,batch14,new,,2026-09-11 21:53:16
+Small Axe Music,smallaxemusic.com,andy@smallaxemusic.com,batch14,new,,2026-09-11 21:53:16
+Spyderweb Targets,spyderwebtargets.net,kelly@spyderwebtargets.net,batch14,new,,2026-09-11 21:53:16
+Altitude Outdoors,altitudeoutdoors.com,brad@altitudeoutdoors.com,batch14,new,,2026-09-11 21:53:16
+Doe a Deer Design,doeadeerdesign.com,regan@doeadeerdesign.com,batch14,new,,2026-09-11 21:53:16
+Mohawkmomma Studio,mohawkmommastudio.com,andrea@mohawkmommastudio.com,batch14,new,,2026-09-11 21:53:16
+Play Better,playbetter.com,chris@playbetter.com,batch14,new,,2026-09-11 21:53:16
+Great Lakes Angler,gl-tackle.com,Tom.Schultz@GL-Tackle.com,batch14,new,,2026-09-11 21:53:16
+Coast 2 Coast Leather,coast2coastleather.com,Nick@coast2coastleather.com,batch14,new,,2026-09-11 21:53:16
+Karen Gunna,karengunna.com,karen@karengunna.com,batch14,new,,2026-09-11 21:53:16
+Mad Shrimp,madshrimp.com,hello@madshrimp.com,batch14,new,,2026-09-11 21:53:16
+I Am Hot Honey,iamhothoney.com,hello@iamhothoney.com,skipped,2026-09-11 21:52:58,verify_queued,smtp_550 — address rejected
+Wild Veil Perfume,wildveilperfume.com,abby@wildveil.com,skipped,2026-09-11 21:52:58,verify_queued,mx_unreachable — could not verify
+Atlas Wood Company,atlaswoodcompany.com,andrew@atlaswoodcompany.com,skipped,2026-09-11 21:52:58,verify_queued,smtp_550 — address rejected
+Ketalon,ketalon.com,hello@ketalon.com,skipped,2026-09-11 21:52:58,verify_queued,smtp_550 — address rejected
+Thimble Blossoms,thimbleblossoms.com,camille@thimbleblossoms.com,skipped,2026-09-11 21:52:58,verify_queued,smtp_550 — address rejected
+Old Faithful Golf,oldfaithfulgolf.com,proshop@oldfaithfulgolf.com,skipped,2026-09-11 21:52:58,verify_queued,smtp_550 — address rejected
+Bullseye Billiards,bullseyebilliards.com,gage@bullseyebilliards.com,batch15,new,,2026-09-11 22:00:02
+Golden Fly Shop,goldenflyshop.com,tryston@goldenflyshop.com,batch15,new,,2026-09-11 22:00:02
+Bertram's Inkwell,bertramsinkwell.com,jack@bertramsinkwell.com,batch15,new,,2026-09-11 22:00:02
+Checkerboards,checkerboards.xyz,nasp@checkerboards.xyz,batch15,new,,2026-09-11 22:00:02
+Tiny Whoop,tinywhoop.com,Orders@tinywhoop.com,batch15,new,,2026-09-11 22:00:02
+Best Planet,best-planet.com,carol@best-planet.com,batch15,new,,2026-09-11 22:00:02
+Leaves & Prickles,leavesandprickles.co.uk,contact@leavesandprickles.co.uk,batch15,new,,2026-09-11 22:00:02
+Darkside Studio Arts,darksidestudioarts.com,info@darksidestudioarts.com,batch15,new,,2026-09-11 22:00:02
+Team Power Products,teampowerproducts.com,info@teampowerproducts.com,batch15,new,,2026-09-11 22:00:02
+RC Antics,rc-antics.com,contact@rc-antics.com,batch15,new,,2026-09-11 22:00:02
+Tool Tech,tooltech.ca,Bill@tooltech.ca,batch15,new,,2026-09-11 22:00:02
+PitLab RC,pitlabrc.com,Pitlabrc@outlook.com,batch15,new,,2026-09-11 22:00:02
+My Grandpa's Den,mygrandpasden.com,rad1paul@charter.net,batch15,new,,2026-09-11 22:00:02
+Xialla,xialla.com,hello@xialla.com,batch15,new,,2026-09-11 22:00:02
+Serenetea,serenetea-cha.com,info@serenetea-cha.com,batch15,new,,2026-09-11 22:00:02
+Jr Junction Train & Hobby,jrjunction.com,junction@twcny.rr.com,batch15,new,,2026-09-11 22:00:02
+Dolan Tools,dolantools.com,info@ceramictools.com,batch15,new,,2026-09-11 22:00:02
+Thought & Mind Leathercraft,tmleathercraft.com,support@tmleathercraft.com,batch15,new,,2026-09-11 22:00:02
+T&O Leathercraft,toleathercraft.com,toleathercraft@outlook.com,batch15,new,,2026-09-11 22:00:02
+Paul Fraser Collectibles,paulfrasercollectibles.com,info@paulfrasercollectibles.com,batch15,new,,2026-09-11 22:00:02
+Janus Tobak,janustobak.com,shad@janustobak.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+Shiny Upgrades,shinyupgrades.com,niki@shinyupgrades.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Red Wine Dice,redwinedice.com,tara@redwinedice.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+Dice Functional,dicefunctional.com,alan@dicefunctional.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+Small Axe Music,smallaxemusic.com,andy@smallaxemusic.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Spyderweb Targets,spyderwebtargets.net,kelly@spyderwebtargets.net,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Mad Shrimp,madshrimp.com,hello@madshrimp.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Tiny Whoop,tinywhoop.com,Orders@tinywhoop.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Leaves & Prickles,leavesandprickles.co.uk,contact@leavesandprickles.co.uk,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Darkside Studio Arts,darksidestudioarts.com,info@darksidestudioarts.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+Team Power Products,teampowerproducts.com,info@teampowerproducts.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+RC Antics,rc-antics.com,contact@rc-antics.com,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+Tool Tech,tooltech.ca,Bill@tooltech.ca,skipped,2026-09-11 22:02:26,verify_queued,smtp_550 — address rejected
+PitLab RC,pitlabrc.com,Pitlabrc@outlook.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+My Grandpa's Den,mygrandpasden.com,rad1paul@charter.net,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+Jr Junction Train & Hobby,jrjunction.com,junction@twcny.rr.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+T&O Leathercraft,toleathercraft.com,toleathercraft@outlook.com,skipped,2026-09-11 22:02:26,verify_queued,mx_unreachable — could not verify
+SynthHacker,synthhacker.com,tombeven@live.co.uk,batch16,new,,2026-09-11 22:23:57
+SynthCraft,synthcraft.co,info@synthcraft.co,batch16,new,,2026-09-11 22:23:57
+TFWATH,tfwath.com,darren@tfwath.com,batch16,new,,2026-09-11 22:23:57
+MaiVino,maivino.com,mai@maivino.com,batch16,new,,2026-09-11 22:23:57
+Ferne's Reptile Toppers,fernes-reptiletoppers.com,info@fernes-reptiletoppers.com,batch16,new,,2026-09-11 22:23:57
+Oregon Silkworms,oregonsilkworms.com,sheller@oregonsilkworms.com,batch16,new,,2026-09-11 22:23:57
+Basking Club,baskingclub.com,support@baskingclub.com,batch16,new,,2026-09-11 22:23:57
+ThreeKC,threekc.shop,info@threekc.shop,batch16,new,,2026-09-11 22:23:57
+Wild Blossoms,wild-blossoms.com,shawn@wild-blossoms.com,batch16,new,,2026-09-11 22:23:57
+Solo Blacksmith,soloblacksmith.com,sales@soloblacksmith.com,batch16,new,,2026-09-11 22:23:57
+Jan Virt,janvirt.com,info@janvirt.com,batch16,new,,2026-09-11 22:23:57
+Clean Trek,clean-trek.com,john.mcshane@clean-trek.com,batch16,new,,2026-09-11 22:23:57
+Mack Glass,mackglass.com,Jason@mackglass.com,batch16,new,,2026-09-11 22:23:57
+Turnstyle Glass,turnstyleglass.com,info@turnstyleglass.com,batch16,new,,2026-09-11 22:23:57
+Emily's Homestead,emilyshomestead.com,emily@emilyshomestead.com,batch16,new,,2026-09-11 22:23:57
+Ticklebelly Herbal Organics,ticklebellyherbalorganics.com,Admin@ticklebellyherbalorganics.com,batch16,new,,2026-09-11 22:23:57
+Zenith Coins,zenithcoins.com,business@zenithcoins.com,batch16,new,,2026-09-11 22:23:57
+Sedwick Coins,sedwickcoins.com,office@sedwickcoins.com,batch16,new,,2026-09-11 22:23:57
+Hit Em Right Coffee,hitemrightcoffee.com,sales@hitemrightcoffee.com,batch16,new,,2026-09-11 22:23:57
+Oxford Weaving Studio,oxfordweavingstudio.com,info@oxfordweavingstudio.com,batch16,new,,2026-09-11 22:23:57
+Bri Weaves,briweaves.com,bri@briweaves.com,batch16,new,,2026-09-11 22:23:57
+The Creativity Patch,thecreativitypatch.com,lucy@thecreativitypatch.com,batch16,new,,2026-09-11 22:23:57
+Red Hen Craft Books,redhencraftbooks.com,hello@redhencraftbooks.com,batch16,new,,2026-09-11 22:23:57
+Susan Ryza,susanryza.com,susan@susanryza.com,batch16,new,,2026-09-11 22:23:57
+Cultural Patina,culturalpatina.com,dlbent@culturalpatina.com,batch16,new,,2026-09-11 22:23:57
+Falconry Equipment,falconryequipment.com,sales@falconryequipment.com,batch16,new,,2026-09-11 22:23:57
+Wicked Warlock,wickedwarlock.com,danavir@wickedwarlock.com,batch16,new,,2026-09-11 22:23:57
+Bean Horse Car,beanhorsecar.com,wholesale@beanhorsecar.com,batch16,new,,2026-09-11 22:23:57
+Shitty Wine Memes,shittywinememes.com,info@shittywinememes.com,batch16,new,,2026-09-11 22:23:57
+The Salvaged Sawhorse,thesalvagedsawhorse.com,jenn@thesalvagedsawhorse.com,batch16,new,,2026-09-11 22:23:57
+McKenzie's Meats,mckenziesmeats.com.au,hello@mckenziesmeats.com.au,batch16,new,,2026-09-11 22:23:57
+2T Toys,2ttoys.nl,INFO@2TTOYS.NL,batch16,new,,2026-09-11 22:23:57
+Emerald Isle Design,emeraldisledesign.com,info@emeraldisledesign.com,batch16,new,,2026-09-11 22:23:57
+Traisto,traisto.gr,hi@traisto.gr,batch16,new,,2026-09-11 22:23:57
+Pops Studio,pops.studio,barbara@pops.studio,batch16,new,,2026-09-11 22:23:57
+Domolds,domolds.com,d003@domolds.com,batch16,new,,2026-09-11 22:23:57
+Barrita Orchids,barritaorchids.com,scott@barritaorchids.com,batch16,new,,2026-09-11 22:23:57
+SynthHacker,synthhacker.com,tombeven@live.co.uk,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+SynthCraft,synthcraft.co,info@synthcraft.co,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Ferne's Reptile Toppers,fernes-reptiletoppers.com,info@fernes-reptiletoppers.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+ThreeKC,threekc.shop,info@threekc.shop,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Wild Blossoms,wild-blossoms.com,shawn@wild-blossoms.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Solo Blacksmith,soloblacksmith.com,sales@soloblacksmith.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Turnstyle Glass,turnstyleglass.com,info@turnstyleglass.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Emily's Homestead,emilyshomestead.com,emily@emilyshomestead.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Ticklebelly Herbal Organics,ticklebellyherbalorganics.com,Admin@ticklebellyherbalorganics.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Sedwick Coins,sedwickcoins.com,office@sedwickcoins.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Hit Em Right Coffee,hitemrightcoffee.com,sales@hitemrightcoffee.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+The Creativity Patch,thecreativitypatch.com,lucy@thecreativitypatch.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Susan Ryza,susanryza.com,susan@susanryza.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Cultural Patina,culturalpatina.com,dlbent@culturalpatina.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Falconry Equipment,falconryequipment.com,sales@falconryequipment.com,skipped,2026-09-11 22:30:19,verify_queued,smtp_550 — address rejected
+Emerald Isle Design,emeraldisledesign.com,info@emeraldisledesign.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Domolds,domolds.com,d003@domolds.com,skipped,2026-09-11 22:30:19,verify_queued,mx_unreachable — could not verify
+Brooks 1953,brooks1953.com,brooks_1953@outlook.com,batch17,new,,2026-09-11 22:52:52
+Bejewelled by Keli,bejewelledbykeli.com.au,info@bejewelledbykeli.com.au,batch17,new,,2026-09-11 22:52:52
+ScandiClay Co,scandiclayco.com,scandiclay@hotmail.com,batch17,new,,2026-09-11 22:52:52
+Metalsmith Society,metalsmithsociety.com,corkie@metalsmithsociety.com,batch17,new,,2026-09-11 22:52:52
+Crystal Moon Designs,crystalmoondesigns.com,chris@crystalmoondesigns.com,batch17,new,,2026-09-11 22:52:52
+Genevieve Schwartz,genevieveschwartz.com,info@genevieveschwartz.com,batch17,new,,2026-09-11 22:52:52
+Geme Jewelry,gemejewelry.com,info@gemejewelry.com,batch17,new,,2026-09-11 22:52:52
+Jovy Rockey Jewelry,jovyrockeyjewelry.com,hello@jovyrockeyjewelry.com,batch17,new,,2026-09-11 22:52:52
+Candico Jewellery,candicojewellery.com,info@candicojewellery.com,batch17,new,,2026-09-11 22:52:52
+Libby & Smee,libbyandsmee.com,sue@libbyandsmee.com,batch17,new,,2026-09-11 22:52:52
+Design By Dawn,designbydawn.com,dawn@designbydawn.com,batch17,new,,2026-09-11 22:52:52
+AdventKindness,adventkindness.com,Crystal@AdventKindness.com,batch17,new,,2026-09-11 22:52:52
+Selenic Spirit,selenicspirit.com,Selenicspirit@outlook.com,batch17,new,,2026-09-11 22:52:52
+Deep Black,deepblack.shop,hello@deepblack.design,batch17,new,,2026-09-11 22:52:52
+Allison's Goods,allisonsgoods.com,allison@allisonsgoods.com,batch17,new,,2026-09-11 22:52:52
+Mila's Apothecary,milasapothecary.co.uk,info@milasapothecary.co.uk,batch17,new,,2026-09-11 22:52:52
+Robin's Nest Apothecary,robinsnestapothecary.com,shopatrobinsnest@hotmail.com,batch17,new,,2026-09-11 22:52:52
+First Curve Apothecary,firstcurveapothecary.com,alex@firstcurveapothecary.com,batch17,new,,2026-09-11 22:52:52
+Sculptress Jewelry,sculptressjewelry.com,natilie@sculptressjewelry.com,batch17,new,,2026-09-11 22:52:52
+Kensington Sourdough,kensingtonsourdough.ca,info@kensingtonsourdough.ca,batch17,new,,2026-09-11 22:52:52
+Boards By Shore,boardsbyshore.com,josh@boardsbyshore.com,batch17,new,,2026-09-11 22:52:52
+Taylor Wood Crafts,taylorwoodcrafts.com,info@taylorwoodcrafts.com,batch17,new,,2026-09-11 22:52:52
+Timber Traditions,timbertraditions.com,info@timbertraditions.com,batch17,new,,2026-09-11 22:52:52
+Gilded Olive Apothecary,gildedolive.com,Valerie@gildedolive.com,batch17,new,,2026-09-11 22:52:52
+Miggy's Toronto,miggystoronto.com,orders@miggystoronto.com,batch17,new,,2026-09-11 22:52:52
+Purefined,purefined.com.au,Christian@PuRefined.com.au,batch17,new,,2026-09-11 22:52:52
+Loma Prieta Pottery,lomaprietapottery.com,terry@lomaprietapottery.com,batch17,new,,2026-09-11 22:52:52
+Collected Joy,collected-joy.com,sharon@collected-joy.com,batch17,new,,2026-09-11 22:52:52
+Milou Chocolate,milouchocolate.com,jan@milouchocolate.com,batch17,new,,2026-09-11 22:52:52
+Jo Darling Wellness,jodarling.co.uk,hello@jodarling.co.uk,batch17,new,,2026-09-11 22:52:52
+Noo Wave,noowave.co,greg@noowave.co,batch17,new,,2026-09-11 22:52:52
+The Nut Bank,thenutbank.com.au,sales@thenutbank.com.au,batch17,new,,2026-09-11 22:52:52
+There's Good in Store,theresgoodinstore.com,MJ@theresgoodinstore.com,batch17,new,,2026-09-11 22:52:52
+Gma B's Store,gmabsestore.com,support@gmabsestore.com,batch17,new,,2026-09-11 22:52:52
+TripleStudio,triplestudio.ca,crystal@triplestudio.ca,batch17,new,,2026-09-11 22:52:52
+Prairie Chick Prints,prairiechickprints.com,prairiechickprints@shaw.ca,batch17,new,,2026-09-11 22:52:52
+Frances Bonet Studio,francesbonetstudio.com,frances_bonet@hotmail.com,batch17,new,,2026-09-11 22:52:52
+O&P Metalworks,oandpmetalworks.com,info@oandpmetalworks.com,batch17,new,,2026-09-11 22:52:52
+Brooks 1953,brooks1953.com,brooks_1953@outlook.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Bejewelled by Keli,bejewelledbykeli.com.au,info@bejewelledbykeli.com.au,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+ScandiClay Co,scandiclayco.com,scandiclay@hotmail.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Crystal Moon Designs,crystalmoondesigns.com,chris@crystalmoondesigns.com,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+Geme Jewelry,gemejewelry.com,info@gemejewelry.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Libby & Smee,libbyandsmee.com,sue@libbyandsmee.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Design By Dawn,designbydawn.com,dawn@designbydawn.com,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+Selenic Spirit,selenicspirit.com,Selenicspirit@outlook.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Robin's Nest Apothecary,robinsnestapothecary.com,shopatrobinsnest@hotmail.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Taylor Wood Crafts,taylorwoodcrafts.com,info@taylorwoodcrafts.com,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+Timber Traditions,timbertraditions.com,info@timbertraditions.com,skipped,2026-09-12 08:48:14,verify_queued,TEMPFAIL
+Loma Prieta Pottery,lomaprietapottery.com,terry@lomaprietapottery.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Collected Joy,collected-joy.com,sharon@collected-joy.com,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+Milou Chocolate,milouchocolate.com,jan@milouchocolate.com,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+Jo Darling Wellness,jodarling.co.uk,hello@jodarling.co.uk,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+The Nut Bank,thenutbank.com.au,sales@thenutbank.com.au,skipped,2026-09-12 08:48:14,verify_queued,smtp_550 — address rejected
+There's Good in Store,theresgoodinstore.com,MJ@theresgoodinstore.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Gma B's Store,gmabsestore.com,support@gmabsestore.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+TripleStudio,triplestudio.ca,crystal@triplestudio.ca,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Prairie Chick Prints,prairiechickprints.com,prairiechickprints@shaw.ca,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Frances Bonet Studio,francesbonetstudio.com,frances_bonet@hotmail.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+O&P Metalworks,oandpmetalworks.com,info@oandpmetalworks.com,skipped,2026-09-12 08:48:14,verify_queued,mx_unreachable — could not verify
+Pique,piquelife.com,simon@piquelife.com,batch_next,new,,2026-09-12 08:56:48
+Spyderweb Targets,spyderwebtargets.net,kelly@spyderwebtargets.net,skipped,2026-09-12 09:55:25,verify_queued,smtp_550 — address rejected

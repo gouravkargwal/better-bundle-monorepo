@@ -1,16 +1,16 @@
 {
-  "name": "High HTTP Error Rate",
-  "stream_type": "logs",
-  "stream_name": "default",
+  "name": "High-HTTP-Error-Rate",
+  "stream_type": "metrics",
+  "stream_name": "http_server_request_duration_count",
   "is_real_time": false,
   "enabled": true,
   "description": "5xx responses exceeded 10 in the last 5 minutes",
   "query_condition": {
     "type": "sql",
-    "sql": "SELECT COUNT(*) AS error_count FROM \"default\" WHERE status >= 500",
+    "sql": "SELECT SUM(value) AS error_count FROM \"http_server_request_duration_count\" WHERE http_response_status_code >= 500",
     "aggregation": {
       "group_by": [],
-      "function": "count",
+      "function": "sum",
       "having": {
         "column": "error_count",
         "operator": ">=",
@@ -25,5 +25,7 @@
     "frequency": 5,
     "silence": 30
   },
-  "destinations": ["slack"]
+  "destinations": [
+    "slack"
+  ]
 }

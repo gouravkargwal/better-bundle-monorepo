@@ -1,20 +1,20 @@
 {
-  "name": "High Request Latency",
-  "stream_type": "logs",
-  "stream_name": "default",
+  "name": "High-Request-Latency",
+  "stream_type": "metrics",
+  "stream_name": "http_server_request_duration_max",
   "is_real_time": false,
   "enabled": true,
-  "description": "p95-ish request duration above 2s over 5 minutes",
+  "description": "Max request duration above 2s over 5 minutes",
   "query_condition": {
     "type": "sql",
-    "sql": "SELECT approx_percentile_cont(duration, 0.95) AS p95 FROM \"default\" WHERE service_name = 'python-worker'",
+    "sql": "SELECT max(value) AS max_duration FROM \"http_server_request_duration_max\" WHERE service_name = 'python-worker'",
     "aggregation": {
       "group_by": [],
       "function": "max",
       "having": {
-        "column": "p95",
+        "column": "max_duration",
         "operator": ">=",
-        "value": 2000
+        "value": 2.0
       }
     }
   },
@@ -25,5 +25,7 @@
     "frequency": 5,
     "silence": 30
   },
-  "destinations": ["slack"]
+  "destinations": [
+    "slack"
+  ]
 }

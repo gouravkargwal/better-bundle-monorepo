@@ -23,7 +23,7 @@ priors-first design exists to prevent.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import text
 
@@ -51,6 +51,81 @@ _ACTIVE_PRODUCTS_SQL = text("""
     """)
 
 
+# Above this median pairwise cosine similarity the catalog is one kind of thing
+# wearing different titles — wall art, posters, single-line jewellery. The
+# enrichment prompt then gets near-identical text for every SKU and returns
+# near-identical complement categories, which `resolution.py` grounds against a
+# catalog where everything is equally close to everything. The resulting priors
+# are not merely weak, they are arbitrary, and they cost an API call per batch
+# to produce.
+#
+# ponytail: one global threshold measured on bge-small. Per-vertical tuning if
+# it misfires; the number is a knob, not a law.
+HOMOGENEITY_THRESHOLD = 0.75
+
+# Under this many products "everything looks alike" is not a ranking problem —
+# there is barely anything to rank — and a small shop needs whatever it can get.
+HOMOGENEITY_MIN_PRODUCTS = 20
+
+# Pairs grow quadratically. 60 products is 1,770 comparisons inside Postgres,
+# which is cheaper than the single LLM call this decision avoids.
+HOMOGENEITY_SAMPLE = 60
+
+
+_CATALOG_STATS_SQL = text("""
+    SELECT (SELECT COUNT(*) FROM product_data
+             WHERE shop_id = :shop_id AND is_active = true) AS products,
+           (SELECT COUNT(*) FROM product_edges
+             WHERE shop_id = :shop_id AND observed_count > 0) AS observed_pairs
+    """)
+
+# Median rather than mean: a handful of duplicate listings should not drag a
+# genuinely varied catalog over the line.
+_MEDIAN_SIMILARITY_SQL = text("""
+    WITH sample AS (
+        SELECT product_id, vector
+        FROM product_vectors
+        WHERE shop_id = :shop_id
+        ORDER BY random()
+        LIMIT :sample_size
+    )
+    SELECT percentile_cont(0.5) WITHIN GROUP (
+               ORDER BY 1 - (a.vector <=> b.vector)
+           ) AS median_similarity
+    FROM sample a
+    JOIN sample b ON a.product_id < b.product_id
+    """)
+
+
+def prior_mode(
+    median_similarity: Optional[float],
+    product_count: int,
+    observed_pairs: int,
+) -> str:
+    """Which kind of prior this catalog should get.
+
+    "categories" — the default. Complements resolved from LLM category
+                   descriptions, which is the right question for a shop selling
+                   different kinds of thing.
+    "style"      — the catalog is one kind of thing, so the only useful pairing
+                   is a second piece that matches the first.
+    "none"       — same catalog, but it already has real co-purchase data, so
+                   there is nothing for a prior to add and no reason to pay for
+                   one.
+
+    Kept pure and separate from the queries so the policy is testable without a
+    database, and so the whole decision is readable in one place.
+    """
+    if median_similarity is None:
+        # No vectors, or not enough of them to compare. Unknown is not uniform.
+        return "categories"
+    if product_count < HOMOGENEITY_MIN_PRODUCTS:
+        return "categories"
+    if median_similarity < HOMOGENEITY_THRESHOLD:
+        return "categories"
+    return "none" if observed_pairs > 0 else "style"
+
+
 @dataclass
 class InstallReport:
     """What the install actually managed to do, for logs and the admin UI."""
@@ -67,6 +142,9 @@ class InstallReport:
     enrichment_reused: int = 0
     enrichment_failed: int = 0
     enrichment_dead_lettered: int = 0
+    # Which prior strategy the catalog's shape selected. See `prior_mode`.
+    prior_mode: str = "categories"
+    catalog_similarity: Optional[float] = None
     warnings: List[str] = field(default_factory=list)
 
     @property
@@ -90,6 +168,8 @@ class InstallReport:
             "enrichment_reused": self.enrichment_reused,
             "enrichment_failed": self.enrichment_failed,
             "enrichment_dead_lettered": self.enrichment_dead_lettered,
+            "prior_mode": self.prior_mode,
+            "catalog_similarity": self.catalog_similarity,
             "servable": self.is_servable,
             "warnings": self.warnings,
         }
@@ -128,19 +208,26 @@ class EdgeInstallPipeline:
             return report
 
         report.embedded = await self.ensure_embeddings(shop_id, report)
-        enrichments = await self.enrich(shop_id, products, report)
-        report.enriched = len(enrichments)
 
-        if enrichments:
-            report.prior_edges = await self.resolver.resolve_products(
-                shop_id, enrichments
-            )
-        else:
-            report.warnings.append("enrichment produced nothing; shop has no priors")
-
+        # History first, so the homogeneity check below can see whether this
+        # shop has co-purchase edges to fall back on before it decides to spend
+        # nothing on enrichment. Backfill does not depend on enrichment.
         mined = await self.backfill_history(shop_id, report)
         report.observed_pairs = mined.get("pairs", 0)
         report.orders_mined = mined.get("total_orders", 0)
+
+        if await self._decide_prior_mode(shop_id, report) != "none":
+            enrichments = await self.enrich(shop_id, products, report)
+            report.enriched = len(enrichments)
+
+            if enrichments:
+                report.prior_edges = await self._resolve(
+                    shop_id, report.prior_mode, enrichments
+                )
+            else:
+                report.warnings.append(
+                    "enrichment produced nothing; shop has no priors"
+                )
 
         if not report.is_servable:
             report.warnings.append("shop has no edges and cannot serve")
@@ -166,15 +253,85 @@ class EdgeInstallPipeline:
         report.embedded = await self.ensure_embeddings(
             shop_id, report, list(product_ids)
         )
+
+        # Checked here too, or a uniform catalog quietly pays for enrichment on
+        # every `products/update` webhook for the life of the install.
+        if await self._decide_prior_mode(shop_id, report) == "none":
+            return report
+
         enrichments = await self.enrich(shop_id, products, report)
         report.enriched = len(enrichments)
         if enrichments:
-            report.prior_edges = await self.resolver.resolve_products(
-                shop_id, enrichments
+            if report.prior_mode == "style":
+                # Style matching is relative — a new print's neighbours are the
+                # rest of the catalog — so re-resolve against every stored
+                # descriptor rather than the handful this webhook carried.
+                enrichments = await EnrichmentStore(
+                    model_version=self._model_version()
+                ).load_succeeded(shop_id)
+            report.prior_edges = await self._resolve(
+                shop_id, report.prior_mode, enrichments
             )
         return report
 
     # ---------- steps ----------
+
+    async def _resolve(
+        self, shop_id: str, mode: str, enrichments: Sequence[Any]
+    ) -> int:
+        if mode == "style":
+            return await self.resolver.resolve_style_affinity(shop_id, enrichments)
+        return await self.resolver.resolve_products(shop_id, enrichments)
+
+    async def _decide_prior_mode(self, shop_id: str, report: InstallReport) -> str:
+        """Measure the catalog and record which prior strategy it selected.
+
+        Fails open to "categories": any error here leaves the pipeline behaving
+        exactly as it did before, because a broken heuristic must not be able to
+        switch off a shop's recommendations.
+        """
+        try:
+            async with get_transaction_context() as session:
+                stats = (
+                    await session.execute(_CATALOG_STATS_SQL, {"shop_id": shop_id})
+                ).one()
+                row = (
+                    await session.execute(
+                        _MEDIAN_SIMILARITY_SQL,
+                        {"shop_id": shop_id, "sample_size": HOMOGENEITY_SAMPLE},
+                    )
+                ).one_or_none()
+        except Exception as e:
+            logger.error(f"Shop {shop_id}: homogeneity check failed: {e}")
+            return "categories"
+
+        median = (
+            float(row.median_similarity)
+            if row is not None and row.median_similarity is not None
+            else None
+        )
+        report.catalog_similarity = median
+        report.prior_mode = prior_mode(median, stats.products, stats.observed_pairs)
+
+        if report.prior_mode == "style":
+            report.warnings.append(
+                f"catalog is near-uniform (median product similarity "
+                f"{median:.2f}); pairing on style instead of category"
+            )
+        elif report.prior_mode == "none":
+            report.warnings.append(
+                f"catalog is near-uniform (median product similarity "
+                f"{median:.2f}); priors skipped as arbitrary, serving "
+                "co-purchase edges only"
+            )
+
+        if report.prior_mode != "categories":
+            logger.info(
+                f"Shop {shop_id}: prior mode {report.prior_mode}, median "
+                f"similarity {median:.2f} over {stats.products} products with "
+                f"{stats.observed_pairs} observed pairs"
+            )
+        return report.prior_mode
 
     async def load_products(
         self, shop_id: str, product_ids: Optional[List[str]] = None

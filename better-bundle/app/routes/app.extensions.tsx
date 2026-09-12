@@ -1,10 +1,11 @@
+import { useState, useCallback } from "react";
 import {
   json,
   type ActionFunctionArgs,
   type LoaderFunctionArgs,
 } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { BlockStack, Card, Divider, Page } from "@shopify/polaris";
+import { useLoaderData, useSearchParams } from "@remix-run/react";
+import { BlockStack, Card, Page, Tabs } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 
 import { ExtensionSetupGuide } from "../components/Extensions/ExtensionSetupGuide";
@@ -62,6 +63,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   });
 
   return json({
+    apiKey: process.env.SHOPIFY_API_KEY || "",
     shopDomain: session.shop,
     shopCurrency: shopRecord.currency_code || "USD",
     products,
@@ -133,7 +135,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Setup() {
-  const { shopDomain, shopCurrency, products } = useLoaderData<typeof loader>();
+  const { apiKey, shopDomain, shopCurrency, products } = useLoaderData<typeof loader>();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialTab = searchParams.get("tab") === "preview" ? 1 : 0;
+  const [selectedTab, setSelectedTab] = useState(initialTab);
+
+  const handleTabChange = useCallback(
+    (index: number) => {
+      setSelectedTab(index);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (index === 1) {
+            next.set("tab", "preview");
+          } else {
+            next.delete("tab");
+          }
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const tabs = [
+    {
+      id: "extensions",
+      content: "Extensions",
+      accessibilityLabel: "Extension setup",
+      panelID: "extensions-panel",
+    },
+    {
+      id: "preview",
+      content: "Preview",
+      accessibilityLabel: "Preview recommendations",
+      panelID: "preview-panel",
+    },
+  ];
 
   return (
     <Page
@@ -141,18 +181,23 @@ export default function Setup() {
       subtitle="Add each placement to your store, then preview what a shopper will see."
     >
       <TitleBar title="Setup" />
-      <BlockStack gap="400">
-
-        <ExtensionSetupGuide shopDomain={shopDomain} />
-
-        <Divider />
-
-        {/* Anchor target for "not installed" links from Home. */}
-        <div id="preview">
-          <Card>
-            <PreviewPanel shopCurrency={shopCurrency} products={products} />
-          </Card>
-        </div>
+      <BlockStack gap="300">
+        <Tabs
+          tabs={tabs}
+          selected={selectedTab}
+          onSelect={handleTabChange}
+          fitted
+        >
+          <div style={{ padding: "16px 0" }}>
+            {selectedTab === 0 ? (
+              <ExtensionSetupGuide shopDomain={shopDomain} apiKey={apiKey} />
+            ) : (
+              <Card>
+                <PreviewPanel shopCurrency={shopCurrency} products={products} />
+              </Card>
+            )}
+          </div>
+        </Tabs>
       </BlockStack>
     </Page>
   );

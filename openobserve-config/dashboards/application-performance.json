@@ -1,0 +1,348 @@
+{
+  "title": "Application Performance",
+  "description": "Recommendation serving, cache behaviour and Kafka consumption",
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Recommendation Latency",
+          "description": "Total seconds spent serving recommendations",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_recommendation_duration_sum\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_recommendation_duration_sum",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Seconds",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "line",
+          "title": "Recommendation Requests",
+          "description": "Served requests, from the histogram count",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_recommendation_duration_count\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_recommendation_duration_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "line",
+          "title": "Cache Hits",
+          "description": "Lookups served from Redis",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_cache_hits\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_cache_hits",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Hits",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 8,
+            "h": 9,
+            "i": 3
+          }
+        },
+        {
+          "id": "panel_4",
+          "type": "line",
+          "title": "Cache Misses",
+          "description": "Lookups that fell through to the source",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_cache_misses\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_cache_misses",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Misses",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 8,
+            "y": 9,
+            "w": 8,
+            "h": 9,
+            "i": 4
+          }
+        },
+        {
+          "id": "panel_5",
+          "type": "bar",
+          "title": "Cache Misses by Namespace",
+          "description": "Which cache is cold",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT namespace as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_cache_misses\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_cache_misses",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Namespace",
+                    "alias": "x_axis_1",
+                    "column": "namespace",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Misses",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 16,
+            "y": 9,
+            "w": 8,
+            "h": 9,
+            "i": 5
+          }
+        },
+        {
+          "id": "panel_6",
+          "type": "bar",
+          "title": "Kafka Messages Consumed",
+          "description": "By topic",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT topic as x_axis_1, sum(value) as y_axis_1 FROM \"messaging_client_consumed_messages\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "messaging_client_consumed_messages",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Topic",
+                    "alias": "x_axis_1",
+                    "column": "topic",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Messages",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 24,
+            "h": 9,
+            "i": 6
+          }
+        }
+      ]
+    }
+  ]
+}

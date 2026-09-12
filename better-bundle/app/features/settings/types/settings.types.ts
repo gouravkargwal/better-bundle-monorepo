@@ -25,7 +25,7 @@ export const SURFACE_DESCRIPTIONS: Record<SurfaceKey, string> = {
   thank_you:
     "Recommendations on the post-purchase Thank You page — available on every plan.",
   phoenix:
-    "AI recommendation blocks placed on your storefront pages (product page, homepage, cart).",
+    "AI recommendation blocks placed on your storefront pages (product page and cart page).",
   venus:
     "Personalized recommendations on customer account order status pages.",
 };

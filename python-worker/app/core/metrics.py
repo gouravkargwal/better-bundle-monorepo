@@ -1,12 +1,39 @@
 """
-Standard metric definitions for BetterBundle Python Worker
+Metric definitions for the BetterBundle Python Worker.
 
-All application metrics are defined here so they are created once (module-level)
-and can be imported anywhere instrumentation is needed.
+Naming follows OpenTelemetry semantic conventions where one exists, and the
+`betterbundle.*` namespace where one does not — which is what semconv itself
+prescribes for application-specific metrics, so that ours can never collide
+with a name the spec later standardises.
+
+Two rules this file now obeys that it did not before:
+
+1. NOTHING HERE DUPLICATES AUTO-INSTRUMENTATION. `http.requests.total` and
+   `http.requests.duration` used to be recorded by a middleware in main.py,
+   while opentelemetry-instrumentation-fastapi was independently recording the
+   same three facts as `http.server.duration`, `http.server.active_requests`
+   and friends. That is where half of the 42 metric streams in OpenObserve came
+   from: two names for one measurement, neither obviously canonical. The
+   middleware is gone; the auto-instrumentation is the single source.
+
+2. NOTHING HERE IS UNRECORDED. Six metrics were defined and never called from
+   anywhere: db.query.duration, db.connection_pool.size, kafka.messages.produced,
+   kafka.consumer.lag, llm.token_usage and llm.cost. They are deleted rather
+   than kept "for later" — an always-empty stream is worse than a missing one,
+   because a dashboard panel or alert built on it looks healthy while measuring
+   nothing. The Kafka consumer-lag alert was doing exactly that.
+
+Add a metric here at the moment you add the call that records it, not before.
 """
 
-from opentelemetry import metrics
 from functools import lru_cache
+
+from opentelemetry import metrics
+
+# Namespace for metrics with no OpenTelemetry semantic convention. Prefixing is
+# the spec's own guidance for application metrics: it keeps ours distinguishable
+# from anything the ecosystem standardises later.
+NS = "betterbundle"
 
 
 @lru_cache(maxsize=1)
@@ -19,76 +46,70 @@ def get_meter() -> metrics.Meter:
 
 
 # ---------------------------------------------------------------------------
-# HTTP / request metrics
+# Messaging — OpenTelemetry semantic conventions
 # ---------------------------------------------------------------------------
-request_count = get_meter().create_counter(
-    "http.requests.total",
-    description="Total number of HTTP requests",
-    unit="1",
-)
-request_duration = get_meter().create_histogram(
-    "http.requests.duration",
-    description="HTTP request duration in seconds",
-    unit="s",
-)
-
-# ---------------------------------------------------------------------------
-# Kafka metrics
-# ---------------------------------------------------------------------------
+# `messaging.client.consumed.messages` is the semconv name; the old
+# `kafka.messages.consumed` said the same thing in a vocabulary only this repo
+# spoke, so no off-the-shelf dashboard or exporter could read it.
 kafka_messages_consumed = get_meter().create_counter(
-    "kafka.messages.consumed",
-    description="Total number of Kafka messages consumed",
-    unit="1",
-)
-kafka_messages_produced = get_meter().create_counter(
-    "kafka.messages.produced",
-    description="Total number of Kafka messages produced",
-    unit="1",
-)
-kafka_consumer_lag = get_meter().create_gauge(
-    "kafka.consumer.lag",
-    description="Current Kafka consumer lag",
-    unit="1",
+    "messaging.client.consumed.messages",
+    description="Messages consumed from the broker",
+    unit="{message}",
 )
 
 # ---------------------------------------------------------------------------
-# Database metrics
-# ---------------------------------------------------------------------------
-db_query_duration = get_meter().create_histogram(
-    "db.query.duration",
-    description="Database query duration in seconds",
-    unit="s",
-)
-db_connection_pool_size = get_meter().create_gauge(
-    "db.connection_pool.size",
-    description="Current database connection pool size",
-    unit="1",
-)
-
-# ---------------------------------------------------------------------------
-# Business metrics
+# Recommendations — application-specific, namespaced
 # ---------------------------------------------------------------------------
 recommendations_served = get_meter().create_counter(
-    "recommendations.served",
-    description="Total number of recommendations served",
-    unit="1",
+    f"{NS}.recommendations.served",
+    description="Recommendations returned to a storefront surface",
+    unit="{recommendation}",
 )
 recommendation_duration = get_meter().create_histogram(
-    "recommendation.duration",
-    description="Recommendation computation duration in seconds",
+    f"{NS}.recommendation.duration",
+    description="Time to serve a recommendation request",
     unit="s",
 )
 
 # ---------------------------------------------------------------------------
-# Cache metrics
+# LLM usage — OpenTelemetry GenAI semantic conventions
 # ---------------------------------------------------------------------------
+# `gen_ai.client.token.usage` is the semconv name and shape: a histogram, split
+# by a `gen_ai.token.type` attribute of "input" or "output", because input and
+# output tokens are priced differently everywhere and a single total cannot be
+# costed after the fact.
+#
+# This replaces an `llm.token_usage` counter that was defined here and recorded
+# nowhere — the reason the old "Application Performance & Costs" dashboard had a
+# cost section with no cost in it.
+gen_ai_token_usage = get_meter().create_histogram(
+    "gen_ai.client.token.usage",
+    description="Tokens used per LLM request, split by input/output",
+    unit="{token}",
+)
+
+# No semantic convention exists for spend, so it is namespaced. Recorded in USD
+# at the moment of the call, because the price of a model is a property of when
+# it ran — repricing old usage from today's table gives the wrong number.
+gen_ai_cost = get_meter().create_counter(
+    f"{NS}.gen_ai.cost",
+    description="Estimated LLM spend in USD",
+    unit="USD",
+)
+
+# ---------------------------------------------------------------------------
+# Cache — application-specific, namespaced
+# ---------------------------------------------------------------------------
+# Two counters rather than one with a `hit`/`miss` attribute: the hit-ratio
+# alert divides one by the other, and OpenObserve cannot divide across two
+# attribute values of a single stream without a subquery per side.
 cache_hits = get_meter().create_counter(
-    "cache.hits",
-    description="Total number of cache hits",
-    unit="1",
+    f"{NS}.cache.hits",
+    description="Cache lookups served from cache",
+    unit="{operation}",
 )
 cache_misses = get_meter().create_counter(
-    "cache.misses",
-    description="Total number of cache misses",
-    unit="1",
+    f"{NS}.cache.misses",
+    description="Cache lookups that fell through to the source",
+    unit="{operation}",
 )

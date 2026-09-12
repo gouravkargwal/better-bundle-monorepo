@@ -1,0 +1,348 @@
+{
+  "title": "Database Performance",
+  "description": "Query latency, throughput and pool saturation for Postgres and Redis",
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Query Latency (avg ms)",
+          "description": "Mean statement duration across all engines",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, avg(duration)/1000 as y_axis_1 FROM \"default\" WHERE db_system IS NOT NULL GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Milliseconds",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "line",
+          "title": "Query Throughput",
+          "description": "Statements executed per time bucket",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE db_system IS NOT NULL GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Statements",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "table",
+          "title": "Slowest Operations",
+          "description": "By average duration -- a rare slow query still shows",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT operation_name as x_axis_1, avg(duration)/1000 as y_axis_1 FROM \"default\" WHERE db_system IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Operation",
+                    "alias": "x_axis_1",
+                    "column": "operation_name",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Avg ms",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        },
+        {
+          "id": "panel_4",
+          "type": "donut",
+          "title": "Statements by Engine",
+          "description": "Postgres vs Redis share of the traffic",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT db_system as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE db_system IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Engine",
+                    "alias": "x_axis_1",
+                    "column": "db_system",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Statements",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 4
+          }
+        },
+        {
+          "id": "panel_5",
+          "type": "line",
+          "title": "Connection Pool In Use",
+          "description": "The saturation signal: a pool pinned at its ceiling is why requests queue",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, max(value) as y_axis_1 FROM \"db_client_connections_usage\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "db_client_connections_usage",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Connections",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 5
+          }
+        },
+        {
+          "id": "panel_6",
+          "type": "line",
+          "title": "Failed Statements",
+          "description": "Spans whose status is ERROR",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE db_system IS NOT NULL AND span_status = 'ERROR' GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Errors",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 6
+          }
+        }
+      ]
+    }
+  ]
+}

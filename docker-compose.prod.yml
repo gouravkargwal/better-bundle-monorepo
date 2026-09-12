@@ -318,6 +318,13 @@ services:
     container_name: betterbundle-python-worker
     ports:
       - "127.0.0.1:8000:8000"
+    environment:
+      # Emit the STABLE http semantic conventions:
+      # http.server.request.duration (seconds) rather than the older
+      # http.server.duration (milliseconds). Without this the metric names in
+      # OpenObserve are the pre-1.23 ones, which no off-the-shelf dashboard or
+      # runbook is written against.
+      - OTEL_SEMCONV_STABILITY_OPT_IN=http
     env_file:
       - .env.prod
     volumes:
@@ -483,6 +490,37 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+
+  # ── OpenObserve config import ────────────────────────
+  # One-shot: brings the dashboards, alerts and destinations in this repo into
+  # OpenObserve on every `up`, so observability config is deployed with the code
+  # that emits the telemetry rather than clicked in by hand afterwards.
+  #
+  # It exits as soon as it is done — `docker compose ps` showing it stopped is
+  # success, not a crash. import.py is idempotent, so repeated runs update in
+  # place instead of piling up copies.
+  openobserve-import:
+    image: python:3.12-alpine
+    container_name: betterbundle-openobserve-import
+    depends_on:
+      - openobserve
+    # Profile-gated in prod only. `up -d` would otherwise start a container that
+    # does its job and exits, which shows in `docker compose ps` as Exited and
+    # reads like a crash. deploy-prod.yml invokes it explicitly with
+    # `run --rm`, and `run` turns a service's profile on for you.
+    # Dev and local have no profile on purpose: there, `up` should import.
+    profiles:
+      - import
+    env_file:
+      - .env.prod
+    volumes:
+      - ./openobserve-config:/config:ro
+    # Waits for OpenObserve to answer before importing; see wait_for() in the script.
+    command: python /config/import.py http://openobserve:5080
+    restart: "no"
+    networks:
+      - backend
 
 volumes:
   postgres_data:

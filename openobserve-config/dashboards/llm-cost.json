@@ -1,0 +1,292 @@
+{
+  "title": "LLM Cost",
+  "description": "Gemini spend and token usage, priced at call time",
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Spend Over Time",
+          "description": "USD, summed per time bucket",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_gen_ai_cost\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_gen_ai_cost",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "USD",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "bar",
+          "title": "Spend by Model",
+          "description": "Which model the money is going to",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT gen_ai_request_model as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_gen_ai_cost\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_gen_ai_cost",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Model",
+                    "alias": "x_axis_1",
+                    "column": "gen_ai_request_model",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "USD",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "donut",
+          "title": "Tokens by Type",
+          "description": "Input vs output -- they are priced differently, so the split is what explains the bill",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT gen_ai_token_type as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_sum\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "gen_ai_client_token_usage_sum",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Token Type",
+                    "alias": "x_axis_1",
+                    "column": "gen_ai_token_type",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Tokens",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        },
+        {
+          "id": "panel_4",
+          "type": "line",
+          "title": "Token Volume Over Time",
+          "description": "Total tokens per time bucket",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_sum\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "gen_ai_client_token_usage_sum",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Tokens",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 4
+          }
+        },
+        {
+          "id": "panel_5",
+          "type": "line",
+          "title": "LLM Calls",
+          "description": "Request count, from the histogram's _count series",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_count\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "gen_ai_client_token_usage_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Calls",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 5
+          }
+        }
+      ]
+    }
+  ]
+}

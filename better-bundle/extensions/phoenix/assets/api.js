@@ -75,6 +75,15 @@ class RecommendationAPI {
         requestBody.session_id = visitorId;
       }
 
+      // Diagnostics for the theme sniffer, riding a request we were making
+      // anyway. No extra round trip, nothing on the critical path, and no
+      // shopper data: it is which of our own selectors matched, plus the theme
+      // name Shopify itself publishes. It answers the only question we cannot
+      // answer from here — which real themes our probe lists fail on.
+      if (window.bbThemeAdapt) {
+        requestBody.theme_adapt = window.bbThemeAdapt;
+      }
+
       const apiUrl = `${this.baseUrl}/api/v1/recommendations`;
 
       // Create AbortController for timeout with retry logic

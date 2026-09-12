@@ -145,3 +145,14 @@ outreach/outreach.db
 outreach/outreach.db-shm
 outreach/outreach.db-wal
 outreach/__pycache__/
+outreach/prospects.csv
+outreach/processed_log.csv
+# Agent state & skills cache
+.kilo/worktrees/
+.kilo/agent-manager.json
+.agents
+.claude
+agent
+.kilo
+# Playwright MCP session artifacts (snapshots, console logs)
+.playwright-mcp/

@@ -12,11 +12,65 @@ chmod +x import.sh
 ./import.sh http://localhost:5080 default <api_key>
 ```
 
+Nothing has to be run by hand, though. A one-shot `openobserve-import` service
+runs the same import on `docker compose up` in dev and local, and
+`.github/workflows/deploy-prod.yml` runs it on every production deploy. The
+import is idempotent — it matches dashboards by title and alerts by name and
+updates them in place, so repeated runs never accumulate duplicates.
+
 ### Prerequisites
 
 - OpenObserve instance running (see Phase 1 deployment)
 - API key with permissions to create dashboards and alerts
-- `curl` installed on the machine running the import
+- `python3` on the machine running the import (stdlib only — no pip install,
+  no `jq`, so it works unchanged on a bare Ubuntu host)
+
+### SLACK_WEBHOOK_URL
+
+Not currently set in `.env.dev` or `.env.prod`. Without it:
+
+- the Slack **destination** cannot be created (the webhook is the one field only
+  the secret can supply);
+- **alerts** are still imported, as long as a destination already exists in the
+  org — an alert left pointing at a renamed stream does not error, it silently
+  never fires, so getting the definitions in matters more than the delivery path;
+- **dashboards** are unaffected.
+
+Set it to get Slack delivery working.
+
+## Verifying the dashboards
+
+```bash
+KEY=$(grep -m1 '^OPENOBSERVE_API_KEY=' ../.env.dev | cut -d= -f2-) \
+  python3 dashboards/verify_panels.py
+```
+
+Runs every panel's real query and classifies each one. This exists because the
+OpenObserve UI cannot tell you the difference between the four:
+
+| Result | Meaning |
+|---|---|
+| `ok` | returned rows |
+| `BROKEN` | unknown field, and OpenObserve suggested a real one — a typo in our query |
+| `UNSEEN` | unknown field with no suggestion, on a stream that exists — an attribute nothing has sent yet |
+| `EMPTY` | query is valid, nothing matched — e.g. no 5xx in the window |
+
+A panel with a misspelled column renders in the UI as an empty chart, identical
+to a healthy panel in a quiet period. Exits non-zero only on `BROKEN`, so it can
+gate a deploy.
+
+## Editing dashboards
+
+Edit `dashboards/generate.py`, not the JSON. The JSON is generated:
+
+```bash
+python3 dashboards/generate.py
+```
+
+OpenObserve's dashboard schema is v8 — panels live under `tabs[].panels[]`, and
+each panel needs an explicit `queries[].fields` block naming the stream and the
+x/y columns. A POST with an unrecognised shape returns 200 and silently stores a
+dashboard with no panels, so hand-editing is unusually easy to get wrong.
 
 ## Dashboards
 

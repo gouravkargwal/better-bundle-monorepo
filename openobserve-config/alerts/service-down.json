@@ -1,5 +1,5 @@
 {
-  "name": "Service Down",
+  "name": "Service-Down",
   "stream_type": "logs",
   "stream_name": "default",
   "is_real_time": false,

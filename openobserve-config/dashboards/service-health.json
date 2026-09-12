@@ -1,50 +1,572 @@
 {
   "title": "Service Health Overview",
-  "description": "Core service health metrics: request rates, latency, Kafka lag, DB connections, cache health, and active services",
-  "panels": [
+  "description": "Request rate, errors and latency for every service (RED method)",
+  "tabs": [
     {
-      "title": "HTTP Request Rate",
-      "type": "line",
-      "query": "SELECT rate(count(*), 1m) as request_rate FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h GROUP BY service.name",
-      "unit": "req/s"
-    },
-    {
-      "title": "HTTP Error Rate",
-      "type": "line",
-      "query": "SELECT rate(count(*), 1m) as error_rate FROM \"python-worker-metrics\" WHERE status >= 500 AND timestamp > now() - 1h",
-      "unit": "errors/s",
-      "color": "#e74c3c"
-    },
-    {
-      "title": "Request Latency (p50 / p95 / p99)",
-      "type": "line",
-      "query": "SELECT percentile(http_request_duration_seconds, 0.50) as p50, percentile(http_request_duration_seconds, 0.95) as p95, percentile(http_request_duration_seconds, 0.99) as p99 FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h",
-      "unit": "s"
-    },
-    {
-      "title": "Kafka Consumer Lag",
-      "type": "gauge",
-      "query": "SELECT max(kafka_consumer_lag) as lag FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
-      "unit": "messages",
-      "max": 10000
-    },
-    {
-      "title": "DB Connection Pool Size",
-      "type": "gauge",
-      "query": "SELECT max(db_connection_pool_size) as pool_size FROM \"python-worker-metrics\" WHERE timestamp > now() - 5m",
-      "unit": "connections"
-    },
-    {
-      "title": "Cache Hit Ratio",
-      "type": "stat",
-      "query": "SELECT sum(cache_hits) / (sum(cache_hits) + sum(cache_misses)) as hit_ratio FROM \"python-worker-metrics\" WHERE timestamp > now() - 10m",
-      "unit": "ratio",
-      "format": "0.00%"
-    },
-    {
-      "title": "Active Services",
-      "type": "table",
-      "query": "SELECT service.name, count(*) as log_count, max(timestamp) as last_seen FROM \"python-worker-logs\" WHERE timestamp > now() - 5m GROUP BY service.name ORDER BY log_count DESC"
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Request Rate",
+          "description": "Requests per time bucket, all services",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_count\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "line",
+          "title": "Error Rate (5xx)",
+          "description": "Server errors only",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_count\" WHERE http_response_status_code >= 500 GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "5xx",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "line",
+          "title": "Average Latency",
+          "description": "sum/count of the duration histogram, in seconds",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_sum\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_sum",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Seconds",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        },
+        {
+          "id": "panel_4",
+          "type": "line",
+          "title": "In-flight Requests",
+          "description": "Concurrent requests being served",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, max(value) as y_axis_1 FROM \"http_server_active_requests\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_active_requests",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Active",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 4
+          }
+        },
+        {
+          "id": "panel_5",
+          "type": "bar",
+          "title": "Requests by Status Code",
+          "description": "Where the traffic is landing",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT http_response_status_code as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_count\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Status Code",
+                    "alias": "x_axis_1",
+                    "column": "http_response_status_code",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 5
+          }
+        },
+        {
+          "id": "panel_7",
+          "type": "line",
+          "title": "Client Errors (4xx)",
+          "description": "Separate from 5xx on purpose: a 404 storm is a broken link or a bad integration, not a failing service",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_count\" WHERE http_response_status_code >= 400 AND http_response_status_code < 500 GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "4xx",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 27,
+            "w": 24,
+            "h": 9,
+            "i": 7
+          }
+        },
+        {
+          "id": "panel_6",
+          "type": "table",
+          "title": "Slowest Routes",
+          "description": "By total time, so a slow rare route still shows",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT http_route as x_axis_1, sum(value) as y_axis_1 FROM \"http_server_request_duration_sum\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "http_server_request_duration_sum",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Route",
+                    "alias": "x_axis_1",
+                    "column": "http_route",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Seconds",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 6
+          }
+        },
+        {
+          "id": "panel_8",
+          "type": "line",
+          "title": "Process CPU",
+          "description": "Utilisation of the worker process, 0-1 per core",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, max(value) as y_axis_1 FROM \"process_runtime_cpython_cpu_utilization\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "process_runtime_cpython_cpu_utilization",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Utilisation",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 36,
+            "w": 8,
+            "h": 9,
+            "i": 8
+          }
+        },
+        {
+          "id": "panel_9",
+          "type": "line",
+          "title": "Process Memory (RSS)",
+          "description": "Resident set size in bytes",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, max(value) as y_axis_1 FROM \"process_runtime_cpython_memory\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "process_runtime_cpython_memory",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Bytes",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 8,
+            "y": 36,
+            "w": 8,
+            "h": 9,
+            "i": 9
+          }
+        },
+        {
+          "id": "panel_10",
+          "type": "line",
+          "title": "Thread Count",
+          "description": "A climbing thread count under steady traffic is a leak",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, max(value) as y_axis_1 FROM \"process_runtime_cpython_thread_count\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "process_runtime_cpython_thread_count",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Threads",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 16,
+            "y": 36,
+            "w": 8,
+            "h": 9,
+            "i": 10
+          }
+        }
+      ]
     }
   ]
 }

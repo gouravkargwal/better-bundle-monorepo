@@ -1,13 +1,13 @@
 {
-  "name": "Kafka Consumption Stalled",
+  "name": "Kafka-Consumption-Stalled",
   "stream_type": "metrics",
-  "stream_name": "kafka_messages_consumed",
+  "stream_name": "messaging_client_consumed_messages",
   "is_real_time": false,
   "enabled": true,
   "description": "No Kafka messages consumed in 15 minutes",
   "query_condition": {
     "type": "sql",
-    "sql": "SELECT SUM(value) AS consumed FROM \"kafka_messages_consumed\"",
+    "sql": "SELECT SUM(value) AS consumed FROM \"messaging_client_consumed_messages\"",
     "aggregation": {
       "group_by": [],
       "function": "sum",
@@ -25,5 +25,7 @@
     "frequency": 15,
     "silence": 60
   },
-  "destinations": ["slack"]
+  "destinations": [
+    "slack"
+  ]
 }

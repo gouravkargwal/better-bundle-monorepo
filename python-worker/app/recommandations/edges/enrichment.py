@@ -56,6 +56,11 @@ Rules:
 - replenish_days: for consumables only, the typical number of days before a
   customer would need another. null for everything else.
 - strength: 0..1, how reliably that category is bought alongside this product.
+- style_descriptor: a short phrase for how the product LOOKS and FEELS —
+  palette, material, mood, format ("warm gold, abstract, minimalist, landscape
+  format"). No brand or product names. This is what makes two items of the
+  same kind belong together, and it is the only useful signal in a shop where
+  every product is the same kind of thing.
 - Return ONLY a JSON array, one object per input product, in the same order.
   No markdown fences, no preamble, no trailing commentary."""
 
@@ -98,6 +103,10 @@ class ProductEnrichment(BaseModel):
     use_case_tags: List[str] = Field(default_factory=list)
     price_tier: str = "mid"
     is_giftable: bool = False
+    # Asked for on every product, not just uniform catalogs: it is a handful of
+    # output tokens, and branching the prompt per shop would mean two schemas,
+    # two parsers and two things to keep in step.
+    style_descriptor: str = Field(default="", max_length=200)
 
     @field_validator("role")
     @classmethod

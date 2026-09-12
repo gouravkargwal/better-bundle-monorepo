@@ -1,35 +1,180 @@
 {
   "title": "Business KPIs",
-  "description": "Business metrics: recommendation throughput and latency, error rates by module, slow function tracking",
-  "panels": [
+  "description": "What the product actually delivered to shoppers",
+  "tabs": [
     {
-      "title": "Recommendations Served per Minute",
-      "type": "line",
-      "query": "SELECT rate(count(*), 1m) as rec_rate FROM \"python-worker-metrics\" WHERE metric_name = 'recommendations.served' AND timestamp > now() - 1h",
-      "unit": "rec/min"
-    },
-    {
-      "title": "Recommendation Latency (p50 / p95)",
-      "type": "line",
-      "query": "SELECT percentile(recommendation_duration_seconds, 0.50) as p50, percentile(recommendation_duration_seconds, 0.95) as p95 FROM \"python-worker-metrics\" WHERE timestamp > now() - 1h",
-      "unit": "s"
-    },
-    {
-      "title": "Top Recommendation Sources",
-      "type": "bar",
-      "query": "SELECT source, count(*) as served FROM \"python-worker-metrics\" WHERE metric_name = 'recommendations.served' AND timestamp > now() - 1h GROUP BY source ORDER BY served DESC"
-    },
-    {
-      "title": "Function Error Rate by Module",
-      "type": "line",
-      "query": "SELECT module, rate(count(*), 5m) as error_rate FROM \"python-worker-metrics\" WHERE metric_name = 'function.errors' AND timestamp > now() - 1h GROUP BY module",
-      "unit": "errors/5m"
-    },
-    {
-      "title": "Slow Functions",
-      "type": "table",
-      "query": "SELECT timestamp, service.name, module, function, duration_ms, threshold_ms FROM \"python-worker-metrics\" WHERE metric_name = 'function.threshold_exceeded' AND timestamp > now() - 6h ORDER BY timestamp DESC",
-      "unit": "ms"
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Recommendations Served",
+          "description": "Individual recommendations returned",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_recommendations_served\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_recommendations_served",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Recommendations",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "bar",
+          "title": "By Surface",
+          "description": "Which storefront surface asked",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT context as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_recommendations_served\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_recommendations_served",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Surface",
+                    "alias": "x_axis_1",
+                    "column": "context",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Recommendations",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "donut",
+          "title": "By Source",
+          "description": "Edges, fallback or cache -- how the answer was found",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_recommendations_served\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "betterbundle_recommendations_served",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "Source",
+                    "alias": "x_axis_1",
+                    "column": "source",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Recommendations",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        }
+      ]
     }
   ]
 }

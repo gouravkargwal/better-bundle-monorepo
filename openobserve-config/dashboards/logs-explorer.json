@@ -1,34 +1,180 @@
 {
   "title": "Logs Explorer",
-  "description": "Explore and analyze log volume, error patterns, and search across all services",
-  "panels": [
+  "description": "Log volume and errors across every service",
+  "tabs": [
     {
-      "title": "Log Volume by Service",
-      "type": "bar",
-      "query": "SELECT service.name, count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 1h GROUP BY service.name ORDER BY log_count DESC"
-    },
-    {
-      "title": "Log Volume by Level",
-      "type": "bar",
-      "query": "SELECT level, count(*) as log_count FROM \"python-worker-logs\" WHERE timestamp > now() - 1h GROUP BY level ORDER BY log_count DESC"
-    },
-    {
-      "title": "Error Logs Timeline",
-      "type": "line",
-      "query": "SELECT rate(count(*), 5m) as error_rate FROM \"python-worker-logs\" WHERE level = 'error' AND timestamp > now() - 6h",
-      "unit": "errors/5m",
-      "color": "#e74c3c"
-    },
-    {
-      "title": "Log Search",
-      "type": "table",
-      "query": "SELECT timestamp, level, service.name, message FROM \"python-worker-logs\" WHERE timestamp > now() - 1h ORDER BY timestamp DESC LIMIT 100",
-      "search": true
-    },
-    {
-      "title": "Top Error Messages",
-      "type": "table",
-      "query": "SELECT message, count(*) as occurrence_count, max(timestamp) as last_seen FROM \"python-worker-logs\" WHERE level = 'error' AND timestamp > now() - 24h GROUP BY message ORDER BY occurrence_count DESC LIMIT 20"
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "line",
+          "title": "Log Volume by Service",
+          "description": "Every service that is reporting at all",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Log lines",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "bar",
+          "title": "Errors by Service",
+          "description": "severity ERROR or above",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT service_name as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE severity IN ('ERROR','FATAL','CRITICAL') GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Service",
+                    "alias": "x_axis_1",
+                    "column": "service_name",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Errors",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "donut",
+          "title": "Volume by Severity",
+          "description": "Shape of the logging, not just the errors",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT severity as x_axis_1, count(*) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Severity",
+                    "alias": "x_axis_1",
+                    "column": "severity",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Log lines",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        }
+      ]
     }
   ]
 }

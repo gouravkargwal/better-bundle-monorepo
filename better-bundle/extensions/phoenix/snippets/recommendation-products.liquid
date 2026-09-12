@@ -23,8 +23,20 @@
     <div class="swiper-slide">
       <div class="product-card" data-product-id="{{ product_id }}">
         <div class="product-card__image-container">
-          <svg class="product-card__image" viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg" width="600" height="400" style="background:#{{ dummy_colors[product_index] | default: 'e0e0e0' }};border-radius:4px">
-            <text x="300" y="200" text-anchor="middle" dominant-baseline="middle" font-family="Arial,sans-serif" font-size="24" font-weight="600" fill="#fff">{{ product }}</text>
+          {% comment %}
+            No inline border-radius and no font-family.
+
+            The radius was a hardcoded 4px, which is the one value on this
+            placeholder the merchant can see is wrong the moment their theme is
+            square or heavily rounded — and the card clips it anyway. The font
+            was pinned to Arial, so the preview in the theme editor was set in a
+            typeface the merchant's store does not use; dropping the attribute
+            lets the SVG text inherit the theme face like every other label in
+            the card. The fill stays white on purpose: these swatches are
+            mid-tone brand colours, not theme surfaces.
+          {% endcomment %}
+          <svg class="product-card__image" viewBox="0 0 600 400" xmlns="http://www.w3.org/2000/svg" width="600" height="400" style="background:#{{ dummy_colors[product_index] | default: 'e0e0e0' }}">
+            <text x="300" y="200" text-anchor="middle" dominant-baseline="middle" font-size="24" font-weight="600" fill="#fff">{{ product }}</text>
           </svg>
         </div>
         <div class="product-card__body">

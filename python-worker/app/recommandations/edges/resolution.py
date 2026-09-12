@@ -21,6 +21,7 @@ same code path as the pre-install bundle report.
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -38,6 +39,25 @@ SIMILARITY_THRESHOLD = 0.55
 
 # Products considered per category string.
 MATCHES_PER_CATEGORY = 10
+
+# Neighbours kept per product when matching on style instead of category. A
+# gallery wall is three or four pieces, not thirty.
+STYLE_MATCHES = 8
+
+# Style descriptors drawn from one catalog sit closer together than category
+# strings do, so this floor only drops the genuinely unrelated — the real
+# selection is the top-k ranking, which is relative and needs no tuning.
+STYLE_SIMILARITY_FLOOR = 0.5
+
+# "These match" is a weaker claim than "these are used together", so a style
+# prior must not outrank a real complement prior in a shop that has both.
+# ponytail: flat damping. Rank-aware weighting if it proves too blunt.
+STYLE_PRIOR_WEIGHT = 0.6
+
+# Rows per similarity block. The full matrix is N x N, which stops being free
+# somewhere around a few thousand products; blocking caps memory at
+# block x N regardless of catalog size.
+STYLE_BLOCK = 1000
 
 # Imported, never redeclared. The model that embedded the products must be the
 # model that embeds the category queries searched against them.
@@ -232,6 +252,73 @@ class CategoryResolver:
         written = await self.persist(all_edges)
         logger.info(
             f"Shop {shop_id}: resolved {len(enrichments)} products -> "
+            f"{written} prior edges"
+        )
+        return written
+
+    async def resolve_style_affinity(
+        self, shop_id: str, enrichments: Sequence[ProductEnrichment]
+    ) -> int:
+        """Write priors by matching products to each other on style.
+
+        For a catalog where every product is the same kind of thing — prints,
+        candles, single-line jewellery — "what category goes with this?" has no
+        useful answer, because there is only one category. What the shopper
+        actually adds is a second piece that goes with the first, and what
+        decides that is look, not function.
+
+        Descriptors are compared to each other rather than to the product
+        vectors `resolve_products` searches. The product text is dominated by
+        the boilerplate every listing in such a shop shares — "museum-quality
+        giclée, ships in three days" — which is precisely what makes the
+        catalog look uniform in vector space. The descriptor carries none of
+        it, so the differences that remain are the ones that matter.
+        """
+        usable = [e for e in enrichments if (e.style_descriptor or "").strip()]
+        if len(usable) < 2:
+            logger.warning(
+                f"Shop {shop_id}: style affinity needs at least two products "
+                f"with descriptors, got {len(usable)}"
+            )
+            return 0
+
+        vectors = np.asarray(
+            self.embed([e.style_descriptor for e in usable]), dtype="float32"
+        )
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        # An all-zero vector would divide to NaN and then match nothing in a way
+        # that is very hard to see in the output.
+        norms[norms == 0] = 1.0
+        unit = vectors / norms
+
+        k = min(STYLE_MATCHES, len(usable) - 1)
+        edges: List[dict] = []
+
+        for start in range(0, len(usable), STYLE_BLOCK):
+            block = unit[start : start + STYLE_BLOCK] @ unit.T
+            for offset, row in enumerate(block):
+                i = start + offset
+                # Self-similarity is 1.0 and would otherwise take every slot.
+                row[i] = -1.0
+                for j in np.argpartition(-row, k - 1)[:k]:
+                    score = float(row[j])
+                    if score < STYLE_SIMILARITY_FLOOR:
+                        continue
+                    edges.append(
+                        self._edge(
+                            shop_id,
+                            usable[i].product_id,
+                            usable[int(j)].product_id,
+                            "complement",
+                            STYLE_PRIOR_WEIGHT * score,
+                            f"style match @ {score:.2f}: "
+                            f"{usable[int(j)].style_descriptor}",
+                        )
+                    )
+
+        written = await self.persist(_dedupe_keep_strongest(edges))
+        logger.info(
+            f"Shop {shop_id}: style affinity over {len(usable)} products -> "
             f"{written} prior edges"
         )
         return written

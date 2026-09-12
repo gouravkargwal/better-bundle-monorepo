@@ -17,7 +17,6 @@ from app.core.logging import get_logger
 from app.core.logging.otel_logger import init_otel_logger
 from app.core.logging.otel_metrics import init_otel_metrics
 from app.core.logging.otel_tracing import init_otel_tracing
-from app.core.metrics import request_count, request_duration
 from app.shared.helpers import now_utc
 
 from app.domains.shopify.services import (
@@ -190,29 +189,17 @@ app.add_middleware(
 )
 
 
-# Metrics middleware — records request count and duration for every request
-@app.middleware("http")
-async def metrics_middleware(request: Request, call_next):
-    start = time.time()
-    response = await call_next(request)
-    duration = time.time() - start
-    request_count.add(
-        1,
-        {
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-        },
-    )
-    request_duration.record(
-        duration,
-        {
-            "method": request.method,
-            "path": request.url.path,
-            "status": response.status_code,
-        },
-    )
-    return response
+# No metrics middleware.
+#
+# opentelemetry-instrumentation-fastapi already records every request as
+# `http.server.request.duration` (a histogram, so count comes free from its
+# _count series) plus `http.server.active_requests` and the request/response
+# size histograms — with semconv-correct attributes including `http.route`, the
+# TEMPLATED path. The middleware here recorded the same requests a second time
+# under `http.requests.total` / `http.requests.duration`, and used
+# `request.url.path`, the RAW path: every product id became its own attribute
+# value, so the series count grew without bound as traffic grew. Two names for
+# one measurement, and the hand-rolled one was the cardinality bomb.
 
 
 # Global service instances
@@ -227,12 +214,60 @@ async def initialize_services():
     try:
         logger.info("Starting service initialization...")
 
-        # Instrument HTTPX and Redis clients
+        # Instrument the outbound clients.
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
+        from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 
         HTTPXClientInstrumentor().instrument()
         RedisInstrumentor().instrument()
+
+        # SQLAlchemy was in requirements.txt but was never instrumented, which
+        # is why there was no database signal of any kind — the hand-written
+        # `db.query.duration` metric it was presumably meant to pair with had no
+        # callers either. This emits a span per statement, carrying the SQL and
+        # the table, so a slow endpoint can be traced down to the query.
+        #
+        # `enable_commenter` off deliberately: it appends the trace id as a SQL
+        # comment, which defeats prepared-statement caching in pgbouncer and
+        # shows up as a different query text per request in pg_stat_statements.
+        from app.core.database.engine import get_engine as _engine_for_otel
+
+        # Process-level saturation. The config is explicit and short on purpose:
+        # the default set emits around forty streams covering every filesystem,
+        # NIC and CPU state on the box, which is precisely the unreadable metric
+        # list this work set out to fix. These four answer "is the worker itself
+        # the bottleneck", which is the only question the box can answer that
+        # the request metrics cannot.
+        #
+        # Guarded, and the guard is load-bearing: this is the only optional
+        # package in the list. An image built before it was added to
+        # requirements.txt raises ImportError here, and an unguarded import
+        # takes the whole service down at startup over a metric. Telemetry is
+        # never worth refusing to serve traffic for.
+        try:
+            from opentelemetry.instrumentation.system_metrics import (
+                SystemMetricsInstrumentor,
+            )
+
+            SystemMetricsInstrumentor(
+                config={
+                    "process.runtime.cpu.utilization": None,
+                    "process.runtime.memory": ["rss"],
+                    "process.runtime.thread_count": None,
+                    "process.runtime.gc_count": None,
+                }
+            ).instrument()
+        except ImportError:
+            logger.warning(
+                "opentelemetry-instrumentation-system-metrics not installed; "
+                "process CPU/memory metrics unavailable. Rebuild the image."
+            )
+
+        SQLAlchemyInstrumentor().instrument(
+            engine=(await _engine_for_otel()).sync_engine,
+            enable_commenter=False,
+        )
         logger.info("✅ OpenTelemetry instrumentations applied")
 
         # 1. Check Database connectivity first (critical - fail if unavailable)

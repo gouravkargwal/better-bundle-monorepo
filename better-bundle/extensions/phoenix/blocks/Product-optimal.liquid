@@ -109,7 +109,8 @@
     },
 
     { "type": "header", "content": "Card Styles" },
-    { "type": "paragraph", "content": "Leave colours empty to inherit your theme's own colours and fonts. Set one only where you want to override." },
+    { "type": "checkbox", "id": "theme_adapt", "label": "Match my theme's styles", "default": true },
+    { "type": "paragraph", "content": "On, the widget reads your theme's own buttons and cards and copies their colours, corners and lettering — so it keeps matching if you switch themes. Off, it uses the settings below. Either way, a colour you set here always wins." },
     {
       "type": "range",
       "id": "card_border_radius",

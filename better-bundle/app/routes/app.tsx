@@ -97,7 +97,10 @@ export default function App() {
           </div>
         )}
 
-        <Outlet />
+        {/* App content with bottom breathing room on scroll */}
+        <div style={{ paddingBottom: "var(--p-space-1200, 48px)" }}>
+          <Outlet />
+        </div>
       </Frame>
     </AppProvider>
   );

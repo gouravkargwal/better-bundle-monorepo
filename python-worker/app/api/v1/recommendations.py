@@ -26,6 +26,7 @@ from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Header
+from opentelemetry import trace
 
 from app.core.database.session import get_transaction_context
 from app.core.logging import get_logger
@@ -533,6 +534,55 @@ def _empty(
 # see the original scheme), so the browser blocks it as mixed content — the POST
 # never leaves the page, nothing reaches this worker, and the storefront sits on
 # its loading skeleton forever with no failed request visible in the network tab.
+# Keys we accept from the storefront diagnostics payload, and nothing else.
+# The body is attacker-controllable — it arrives from a script running on a
+# merchant's page — so this is an allowlist, not a loop over whatever was sent.
+# Unbounded keys would let anyone mint arbitrary span attributes in our traces.
+_THEME_ADAPT_KEYS = (
+    "enabled",
+    "theme_name",
+    "theme_store_id",
+    "button",
+    "button_fill",
+    "input",
+    "price",
+    "title",
+    "card",
+)
+
+
+def _record_theme_adapt(payload: Optional[dict]) -> None:
+    """Put the storefront's theme-sniffing result on the request span.
+
+    Span attributes rather than a log line: FastAPI is already tracing every
+    request and no sampler is configured, so this rides an existing span at no
+    extra volume and lands in OpenObserve as queryable fields. Grouping the
+    traces stream by `theme_adapt.theme_name` where `theme_adapt.button` is
+    'none' is the whole point — it names the themes the probe lists miss.
+
+    Diagnostics must never break serving, hence the blanket except.
+    """
+    if not payload:
+        return
+    try:
+        span = trace.get_current_span()
+        if not span or not span.is_recording():
+            return
+        for key in _THEME_ADAPT_KEYS:
+            value = payload.get(key)
+            if value is None:
+                continue
+            # Span attributes take str/bool/int/float only; a dict or list here
+            # would be dropped silently by the SDK, so coerce and cap length.
+            if not isinstance(value, (str, bool, int, float)):
+                value = str(value)
+            if isinstance(value, str):
+                value = value[:200]
+            span.set_attribute(f"theme_adapt.{key}", value)
+    except Exception:
+        logger.debug("theme_adapt telemetry skipped", exc_info=True)
+
+
 # Every other route in this API is unslashed; this was the only exception.
 @router.post("", response_model=RecommendationResponse)
 async def get_recommendations(
@@ -542,6 +592,7 @@ async def get_recommendations(
 ):
     """Context-aware recommendations, served from precomputed edges."""
     start = time.time()
+    _record_theme_adapt(request.theme_adapt)
     try:
         if not authorization or not authorization.startswith("Bearer "):
             raise HTTPException(

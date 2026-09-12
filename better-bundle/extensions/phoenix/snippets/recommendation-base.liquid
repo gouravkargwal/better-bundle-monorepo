@@ -25,6 +25,10 @@
   // impression — but only design_mode renders dummy data instead of fetching,
   // so preview links need the flag sent to the API.
   window.previewMode = {{ request.design_mode | json }} || {{ request.visual_preview_mode | json }};
+  // Read by theme-adapt.js. When false it publishes no CSS variables, so every
+  // `var(--bb-..., fallback)` in recommendation-styles falls through to the
+  // merchant's own block settings.
+  window.themeAdapt = {{ block.settings.theme_adapt | json }};
   window.shopDomain = {{ shop.permanent_domain | json }};
   window.customerId = {{ customer.id | json }};
   window.cartProductIds = {{ cart.items | map: 'product_id' | json }};
@@ -53,6 +57,14 @@
 
 <!-- Load our custom JavaScript files in correct order -->
 <script src="{{ 'config.js' | asset_url }}" defer></script>
+{% comment %}
+  First of the modules, deliberately: it publishes the CSS variables the whole
+  stylesheet reads. Deferred scripts run in document order after parsing, so the
+  variables are set before any card is rendered. The inline skeleton paints one
+  frame ahead of it, which is why the skeleton's own greys are derived from the
+  theme text colour rather than sniffed — nothing visible changes when this lands.
+{% endcomment %}
+<script src="{{ 'theme-adapt.js' | asset_url }}" defer></script>
 <script src="{{ 'visitor-id.js' | asset_url }}" defer></script>
 <script src="{{ 'attribution.js' | asset_url }}" defer></script>
 <!-- JWT Authentication (load synchronously before others) -->

@@ -108,10 +108,10 @@
        cards in a row equal to each other. */
     height: 100%;
     background: {% if block.settings.card_bg != blank %}{{ block.settings.card_bg }}{% else %}transparent{% endif %};
-    border-radius: {{ block.settings.card_border_radius | default: 8 }}px;
+    border-radius: var(--bb-card-radius, {{ block.settings.card_border_radius | default: 8 }}px);
     overflow: hidden;
-    border: 1px solid #f1f5f9;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    border: var(--bb-card-border, 1px solid var(--bb-border, #f1f5f9));
+    box-shadow: var(--bb-card-shadow, 0 1px 3px rgba(0, 0, 0, 0.05));
     margin: 0 auto;
     transition: all 0.2s ease;
     position: relative;
@@ -120,7 +120,7 @@
   .better-bundle-recommendations .product-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    border-color: #e2e8f0;
+    border-color: var(--bb-border-strong, #e2e8f0);
   }
   .better-bundle-recommendations .product-card__image-container {
     position: relative;
@@ -128,14 +128,17 @@
     /* Square, not a fixed 200px: the image scales with the card so the whole
        thing shrinks on a narrow screen instead of only the text shrinking. */
     aspect-ratio: 1 / 1;
+    /* No radius of its own. `.product-card` has `overflow: hidden` and a
+       theme-derived radius, so it already clips this box to exactly the right
+       shape. Stating 4px here fought that: square on a square theme, and a
+       visible step inside a heavily rounded one. */
     overflow: hidden;
-    border-radius: 4px 4px 0 0;
   }
 
   .better-bundle-recommendations .product-card__image {
     width: 100%;
     height: 100%;
-    background: #f8fafc;
+    background: var(--bb-skeleton, #f8fafc);
     display: block;
     object-fit: cover;
     object-position: center center;
@@ -197,11 +200,16 @@
   }
   .better-bundle-recommendations .product-card__title {
     font-size: 16px;
-    font-weight: 500;
+    /* Typeface from the theme's own card heading; size stays ours, because a
+       theme's heading scale is set for its grid, not for a carousel card. */
+    font-family: var(--bb-title-font, inherit);
+    font-weight: var(--bb-title-weight, 500);
+    font-style: var(--bb-title-style, normal);
+    letter-spacing: var(--bb-title-tracking, 0);
+    text-transform: var(--bb-title-transform, none);
     margin: 0;
-    color: {% if block.settings.title_color != blank %}{{ block.settings.title_color }}{% else %}currentColor{% endif %};
+    color: {% if block.settings.title_color != blank %}{{ block.settings.title_color }}{% else %}var(--bb-text, currentColor){% endif %};
     line-height: 1.4;
-    letter-spacing: 0;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -212,10 +220,13 @@
   }
   .better-bundle-recommendations .product-card__price {
     font-size: 18px;
-    font-weight: 600;
-    color: {% if block.settings.price_color != blank %}{{ block.settings.price_color }}{% else %}currentColor{% endif %};
+    font-family: var(--bb-price-font, inherit);
+    font-weight: var(--bb-price-weight, 600);
+    font-style: var(--bb-price-style, normal);
+    text-transform: var(--bb-price-transform, none);
+    color: {% if block.settings.price_color != blank %}{{ block.settings.price_color }}{% else %}var(--bb-text, currentColor){% endif %};
     margin: 0;
-    letter-spacing: 0;
+    letter-spacing: var(--bb-price-tracking, 0);
   }
   .better-bundle-recommendations .product-card__btn {
     display: inline-flex;
@@ -227,18 +238,28 @@
        claimed it would be. */
     min-height: 44px;
     padding: 10px 14px;
-    background: {% if block.settings.button_bg != blank %}{{ block.settings.button_bg }}{% else %}rgb(var(--color-button, 18 18 18)){% endif %};
-    color: {% if block.settings.button_text != blank %}{{ block.settings.button_text }}{% else %}rgb(var(--color-button-text, 255 255 255)){% endif %};
+    background: {% if block.settings.button_bg != blank %}{{ block.settings.button_bg }}{% else %}var(--bb-btn-bg, #121212){% endif %};
+    background-image: var(--bb-btn-bg-image, none);
+    color: {% if block.settings.button_text != blank %}{{ block.settings.button_text }}{% else %}var(--bb-btn-fg, #ffffff){% endif %};
     border: none;
-    border-radius: {{ block.settings.button_border_radius | default: 6 }}px;
+    border-radius: var(--bb-btn-radius, {{ block.settings.button_border_radius | default: 6 }}px);
     cursor: pointer;
-    font-weight: 500;
+    /* Type follows the theme's own button, not just its colour: a theme whose
+       buttons are uppercase letterspaced caps looks wrong with sentence-case
+       14px inside it, even when the red matches. */
+    font-family: var(--bb-btn-font, inherit);
+    font-weight: var(--bb-btn-weight, 500);
+    text-transform: var(--bb-btn-transform, none);
     font-size: 14px;
-    letter-spacing: 0;
+    letter-spacing: var(--bb-btn-tracking, 0);
     transition: all 0.2s ease;
   }
+  /* filter, not a darkened colour. `color_darken` is a Liquid filter, so it can
+     only act on a value we know at render time — and once the colour comes from
+     the theme at runtime we no longer do. Brightness works on whatever lands,
+     including a gradient, and darkens a light button as readily as a dark one. */
   .better-bundle-recommendations .product-card__btn:hover {
-    background: {% if block.settings.button_bg != blank %}{{ block.settings.button_bg | color_darken: 10 }}{% else %}rgb(var(--color-button, 18 18 18)){% endif %};
+    filter: brightness(0.88);
     transform: none;
   }
   .better-bundle-recommendations .product-card__btn:active {
@@ -345,31 +366,31 @@
   .better-bundle-recommendations .qty-btn {
     width: 32px;
     height: 32px;
-    border: 1px solid #e2e8f0;
-    background: #ffffff;
-    border-radius: 6px;
+    border: var(--bb-input-border-width, 1px) solid var(--bb-input-border-color, var(--bb-border, #e2e8f0));
+    background: var(--bb-surface, #ffffff);
+    border-radius: var(--bb-input-radius, 6px);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     font-size: 16px;
     font-weight: 500;
-    color: #374151;
+    color: var(--bb-text-muted, #374151);
     transition: all 0.2s ease;
   }
   .better-bundle-recommendations .qty-btn:hover {
-    border-color: #000;
-    background: #f9fafb;
+    border-color: var(--bb-border-strong, #000);
+    background: var(--bb-surface-alt, #f9fafb);
   }
   .better-bundle-recommendations .qty-input {
     width: 50px;
     height: 32px;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
+    border: var(--bb-input-border-width, 1px) solid var(--bb-input-border-color, var(--bb-border, #e2e8f0));
+    border-radius: var(--bb-input-radius, 6px);
     text-align: center;
     font-size: 14px;
-    color: #374151;
-    background: #ffffff;
+    color: var(--bb-text-muted, #374151);
+    background: var(--bb-surface, #ffffff);
     -moz-appearance: textfield;
   }
   .better-bundle-recommendations .qty-input::-webkit-outer-spin-button,
@@ -379,25 +400,25 @@
   }
   .better-bundle-recommendations .qty-input:focus {
     outline: none;
-    border-color: #000;
+    border-color: var(--bb-border-strong, #000);
   }
 
   /* Dependent dropdown styles */
   .better-bundle-recommendations .variant-select option.unavailable {
-    color: #9ca3af !important;
-    background-color: #f9fafb !important;
+    color: var(--bb-text-muted, #9ca3af) !important;
+    background-color: var(--bb-surface-alt, #f9fafb) !important;
     opacity: 0.5;
   }
 
   .better-bundle-recommendations .variant-select option:disabled {
-    color: #9ca3af !important;
-    background-color: #f9fafb !important;
+    color: var(--bb-text-muted, #9ca3af) !important;
+    background-color: var(--bb-surface-alt, #f9fafb) !important;
     opacity: 0.5;
   }
 
   .better-bundle-recommendations .variant-select:disabled {
-    background-color: #f9fafb;
-    color: #9ca3af;
+    background-color: var(--bb-surface-alt, #f9fafb);
+    color: var(--bb-text-muted, #9ca3af);
     cursor: not-allowed;
   }
 
@@ -414,12 +435,12 @@
     top: 50%;
     transform: translateY(-50%);
     font-size: 12px;
-    color: #6b7280;
+    color: var(--bb-text-muted, #6b7280);
   }
 
   /* Centralized Loading Skeleton Styles */
   .better-bundle-recommendations .loading-skeleton {
-    background: #f0f0f0 !important;
+    background: var(--bb-skeleton, #f0f0f0) !important;
     border-radius: 4px;
     border: none !important;
     box-shadow: none !important;
@@ -439,7 +460,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: linear-gradient(90deg, transparent 25%, rgba(255, 255, 255, 0.5) 50%, transparent 75%);
+    background: linear-gradient(90deg, transparent 25%, var(--bb-shimmer, rgba(255, 255, 255, 0.5)) 50%, transparent 75%);
     background-size: 200% 100%;
     animation: skeleton-shimmer 1.5s linear infinite;
     border-radius: inherit;
@@ -492,14 +513,14 @@
   .better-bundle-recommendations .product-card__quantity .qty-btn.loading-skeleton {
     height: 32px;
     width: 32px;
-    border-radius: 6px;
+    border-radius: var(--bb-input-radius, 6px);
     display: block !important;
   }
 
   .better-bundle-recommendations .product-card__quantity .qty-input.loading-skeleton {
     height: 32px;
     width: 50px;
-    border-radius: 6px;
+    border-radius: var(--bb-input-radius, 6px);
     display: block !important;
   }
 
@@ -526,7 +547,7 @@
        button below it sat 4px high. Height comes from `.variant-select` so the
        two can only ever agree. */
     width: 100%;
-    border-radius: 6px;
+    border-radius: var(--bb-input-radius, 6px);
     display: block !important;
   }
 
@@ -534,7 +555,7 @@
   .better-bundle-recommendations .product-card__btn.loading-skeleton {
     height: 44px;
     width: 100%;
-    border-radius: 6px;
+    border-radius: var(--bb-btn-radius, {{ block.settings.button_border_radius | default: 6 }}px);
     display: block !important;
   }
 
@@ -587,16 +608,15 @@
   /* Product Card Skeleton */
   .better-bundle-recommendations .loading-placeholder .product-card {
     height: 100%;
-    background: #ffffff;
-    border: 1px solid #f1f5f9;
-    border-radius: 8px;
+    background: var(--bb-surface, #ffffff);
+    border: var(--bb-card-border, 1px solid var(--bb-border, #f1f5f9));
+    border-radius: var(--bb-card-radius, {{ block.settings.card_border_radius | default: 8 }}px);
     overflow: hidden;
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__image {
     aspect-ratio: 1 / 1;
     width: 100%;
-    border-radius: 4px 4px 0 0;
     display: block;
     object-fit: none;
   }
@@ -630,14 +650,14 @@
   .better-bundle-recommendations .loading-placeholder .product-card__quantity .qty-btn {
     height: 32px;
     width: 32px;
-    border-radius: 6px;
+    border-radius: var(--bb-input-radius, 6px);
     display: inline-block;
   }
 
   .better-bundle-recommendations .loading-placeholder .product-card__quantity .qty-input {
     height: 32px;
     width: 50px;
-    border-radius: 6px;
+    border-radius: var(--bb-input-radius, 6px);
     display: inline-block;
   }
 
@@ -755,7 +775,7 @@
     font-weight: 500;
     margin-bottom: 0;
     font-size: 13px;
-    color: #374151;
+    color: var(--bb-text-muted, #374151);
     flex-shrink: 0; /* Prevent label from shrinking */
     /* Exactly one line, always.
        Option names are the merchant's words, not ours — "Size" fits on one
@@ -774,11 +794,11 @@
   .better-bundle-recommendations .variant-select {
     width: 100%;
     padding: 6px 10px;
-    border: 1px solid #e2e8f0;
-    border-radius: 6px;
-    background: #fff;
+    border: var(--bb-input-border-width, 1px) solid var(--bb-input-border-color, var(--bb-border, #e2e8f0));
+    border-radius: var(--bb-input-radius, 6px);
+    background: var(--bb-surface, #fff);
     font-size: 13px;
-    color: #374151;
+    color: var(--bb-text, #374151);
     cursor: pointer;
     transition: all 0.2s ease;
     -webkit-appearance: none;
@@ -793,36 +813,36 @@
 
   .better-bundle-recommendations .variant-select:focus {
     outline: none;
-    border-color: #000;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    border-color: var(--bb-border-strong, #000);
+    box-shadow: 0 0 0 1px var(--bb-border, rgba(0, 0, 0, 0.1));
   }
 
   .better-bundle-recommendations .variant-select:hover {
-    border-color: #666;
+    border-color: var(--bb-border-strong, #666);
   }
 
   /* Selected state for variant selectors */
   .better-bundle-recommendations .variant-select:not([value=""]) {
-    border-color: #000;
-    background-color: #f9f9f9;
+    border-color: var(--bb-border-strong, #000);
+    background-color: var(--bb-surface-alt, #f9f9f9);
     font-weight: 500;
   }
 
   .variant-select:not([value=""]):focus {
-    border-color: #000;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    border-color: var(--bb-border-strong, #000);
+    box-shadow: 0 0 0 1px var(--bb-border, rgba(0, 0, 0, 0.1));
   }
 
   /* JavaScript-triggered selected state */
   .better-bundle-recommendations .variant-select.selected {
-    border-color: #000;
-    background-color: #f9f9f9;
+    border-color: var(--bb-border-strong, #000);
+    background-color: var(--bb-surface-alt, #f9f9f9);
     font-weight: 500;
   }
 
   .variant-select.selected:focus {
-    border-color: #000;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+    border-color: var(--bb-border-strong, #000);
+    box-shadow: 0 0 0 1px var(--bb-border, rgba(0, 0, 0, 0.1));
   }
 
   /* Responsive Design */

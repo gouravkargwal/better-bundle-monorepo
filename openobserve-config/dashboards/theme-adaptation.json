@@ -1,0 +1,292 @@
+{
+  "title": "Theme Adaptation",
+  "description": "Which storefront themes the CSS probes succeed and fail on",
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel_1",
+          "type": "bar",
+          "title": "Themes Where The Button Probe Failed",
+          "description": "These are the themes to fix first: the widget fell back to its own colours",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT theme_adapt_theme_name as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE theme_adapt_button = 'none' GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Theme",
+                    "alias": "x_axis_1",
+                    "column": "theme_adapt_theme_name",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 9,
+            "i": 1
+          }
+        },
+        {
+          "id": "panel_2",
+          "type": "donut",
+          "title": "Which Selector Tier Answered",
+          "description": "platform / structural / substring -- a long tail here means the lists are carrying too much",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT theme_adapt_button as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE theme_adapt_button IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Selector",
+                    "alias": "x_axis_1",
+                    "column": "theme_adapt_button",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "bar",
+          "title": "Button Fill Style",
+          "description": "outline-inverted is the branch where we change the theme's intent rather than copy it",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT theme_adapt_button_fill as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE theme_adapt_button_fill IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Fill",
+                    "alias": "x_axis_1",
+                    "column": "theme_adapt_button_fill",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 9,
+            "w": 12,
+            "h": 9,
+            "i": 3
+          }
+        },
+        {
+          "id": "panel_4",
+          "type": "bar",
+          "title": "Price Probe Outcome",
+          "description": "The probe most likely to miss, since it has no platform-guaranteed selector",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT theme_adapt_price as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE theme_adapt_price IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Selector",
+                    "alias": "x_axis_1",
+                    "column": "theme_adapt_price",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 4
+          }
+        },
+        {
+          "id": "panel_5",
+          "type": "donut",
+          "title": "Adaptation Switched Off",
+          "description": "Merchants driving colours from block settings instead",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT theme_adapt_enabled as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE theme_adapt_enabled IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Enabled",
+                    "alias": "x_axis_1",
+                    "column": "theme_adapt_enabled",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 18,
+            "w": 12,
+            "h": 9,
+            "i": 5
+          }
+        }
+      ]
+    }
+  ]
+}

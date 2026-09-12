@@ -55,6 +55,15 @@ class RecommendationRequest(BaseModel):
         default=False,
         description="Theme editor or preview render; serve but do not record",
     )
+    # Diagnostics from the storefront's theme sniffer (theme-adapt.js). Not used
+    # to serve anything — it is recorded on the request span so we can answer
+    # "which real themes do our CSS probe lists fail on", which is not knowable
+    # from this side. Typed rather than left to pydantic's extra-ignore so the
+    # shape is documented and a malformed payload is rejected at the edge.
+    theme_adapt: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Which theme-adaptation selectors matched on the storefront",
+    )
 
 
 class RecommendationResponse(BaseModel):

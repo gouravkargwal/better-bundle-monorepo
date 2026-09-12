@@ -48,6 +48,11 @@ opentelemetry-instrumentation-fastapi==0.51b0
 opentelemetry-instrumentation-httpx==0.51b0
 opentelemetry-instrumentation-sqlalchemy==0.51b0
 opentelemetry-instrumentation-redis==0.51b0
+# Process CPU, memory and thread count -- the saturation half of the four
+# golden signals, which nothing else here reports. Pinned to the same
+# 0.51b0 as the other instrumentations: they share the SDK contract and
+# mixing versions is how you get a silently disabled instrumentation.
+opentelemetry-instrumentation-system-metrics==0.51b0
 
 # Development
 pytest==7.4.3

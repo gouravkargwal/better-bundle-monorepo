@@ -1,13 +1,13 @@
 {
-  "name": "Cache Hit Ratio Low",
+  "name": "Cache-Hit-Ratio-Low",
   "stream_type": "metrics",
-  "stream_name": "cache_hits_total",
+  "stream_name": "betterbundle_cache_hits",
   "is_real_time": false,
   "enabled": true,
   "description": "Cache hits fell below 100 in 15 minutes, suggesting the cache is cold or bypassed",
   "query_condition": {
     "type": "sql",
-    "sql": "SELECT SUM(value) AS hits FROM \"cache_hits_total\"",
+    "sql": "SELECT SUM(value) AS hits FROM \"betterbundle_cache_hits\"",
     "aggregation": {
       "group_by": [],
       "function": "sum",
@@ -25,5 +25,7 @@
     "frequency": 15,
     "silence": 60
   },
-  "destinations": ["slack"]
+  "destinations": [
+    "slack"
+  ]
 }

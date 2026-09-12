@@ -142,6 +142,13 @@ services:
     container_name: betterbundle-python-worker-dev
     ports:
       - "8000:8000"
+    environment:
+      # Emit the STABLE http semantic conventions:
+      # http.server.request.duration (seconds) rather than the older
+      # http.server.duration (milliseconds). Without this the metric names in
+      # OpenObserve are the pre-1.23 ones, which no off-the-shelf dashboard or
+      # runbook is written against.
+      - OTEL_SEMCONV_STABILITY_OPT_IN=http
     env_file:
       - .env.dev
     volumes:
@@ -184,6 +191,28 @@ services:
     volumes:
       - openobserve_data:/data
     restart: unless-stopped
+
+
+  # ── OpenObserve config import ────────────────────────
+  # One-shot: brings the dashboards, alerts and destinations in this repo into
+  # OpenObserve on every `up`, so observability config is deployed with the code
+  # that emits the telemetry rather than clicked in by hand afterwards.
+  #
+  # It exits as soon as it is done — `docker compose ps` showing it stopped is
+  # success, not a crash. import.py is idempotent, so repeated runs update in
+  # place instead of piling up copies.
+  openobserve-import:
+    image: python:3.12-alpine
+    container_name: betterbundle-openobserve-import
+    depends_on:
+      - openobserve
+    env_file:
+      - .env.dev
+    volumes:
+      - ./openobserve-config:/config:ro
+    # Waits for OpenObserve to answer before importing; see wait_for() in the script.
+    command: python /config/import.py http://openobserve:5080
+    restart: "no"
 
 volumes:
   postgres_data:

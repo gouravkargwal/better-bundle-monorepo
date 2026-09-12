@@ -53,6 +53,15 @@ jobs:
               docker compose -f docker-compose.prod.yml up -d "$SERVICE"
             fi
 
+            echo "=== Importing OpenObserve dashboards and alerts ==="
+            # Always, regardless of which service was deployed: dashboards and
+            # alerts describe the telemetry the code emits, so they have to move
+            # with the code rather than be clicked in afterwards. import.py is
+            # idempotent, so this updates in place instead of adding a copy per
+            # deploy. `run --rm` rather than `up` because it is a one-shot job —
+            # `up -d` on a service that exits immediately reads as a crash loop.
+            docker compose -f docker-compose.prod.yml run --rm openobserve-import
+
             echo "=== Cleaning up old images ==="
             docker image prune -f
 

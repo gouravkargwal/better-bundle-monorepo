@@ -12,7 +12,10 @@ import logging
 import random
 from typing import Optional, Protocol
 
+from app.core.metrics import gen_ai_cost, gen_ai_token_usage
+
 from .llm_budget import LLMBudget
+from .llm_pricing import cost_usd, is_priced
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,44 @@ class GeminiProvider:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
+    def _record_usage(self, response) -> None:
+        """Record tokens and spend for one successful call.
+
+        Recorded here rather than inferred from the prompt later: only the
+        provider knows the real token count, and only this moment knows which
+        model actually served the request.
+
+        Telemetry must never be the reason a completion fails, so every branch
+        is defensive — a provider that stops returning usage_metadata should
+        cost us the metric, not the answer we already have in hand.
+        """
+        try:
+            usage = getattr(response, "usage_metadata", None)
+            if usage is None:
+                return
+            prompt = int(getattr(usage, "prompt_token_count", 0) or 0)
+            # Gemini reports thinking tokens separately, and they are billed as
+            # output. Leaving them out understates the cost of a reasoning model.
+            output = int(getattr(usage, "candidates_token_count", 0) or 0) + int(
+                getattr(usage, "thoughts_token_count", 0) or 0
+            )
+
+            base = {"gen_ai.system": "gcp.gemini", "gen_ai.request.model": self.model}
+            gen_ai_token_usage.record(prompt, {**base, "gen_ai.token.type": "input"})
+            gen_ai_token_usage.record(output, {**base, "gen_ai.token.type": "output"})
+
+            if not is_priced(self.model):
+                # Not an error, but it means the cost dashboard is undercounting
+                # by however much this model is being used.
+                logger.warning(
+                    "No price entry for model %s; cost recorded as 0. "
+                    "Add it to llm_pricing.PRICES.",
+                    self.model,
+                )
+            gen_ai_cost.add(cost_usd(self.model, prompt, output), base)
+        except Exception:
+            logger.debug("LLM usage metric skipped", exc_info=True)
+
     async def complete(self, system: str, user: str) -> str:
         from google.genai import types
 
@@ -92,6 +133,7 @@ class GeminiProvider:
                 if not text:
                     raise RuntimeError("empty response from model")
                 await self.budget.record_success()
+                self._record_usage(response)
                 return text
             except Exception as e:
                 last_error = e
