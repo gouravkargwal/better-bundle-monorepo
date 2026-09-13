@@ -342,11 +342,12 @@ async def fetch_recommendations_logic(
         source = "baseline_fallback"
     else:
         candidates = context_candidates
-        source = (
-            "edges_observed"
-            if candidates and any(c.get("source") == "observed" for c in candidates)
-            else "edges_prior"
-        )
+        if candidates and any(c.get("source") == "vector" for c in candidates):
+            source = "vector_similarity"
+        elif candidates and any(c.get("source") == "observed" for c in candidates):
+            source = "edges_observed"
+        else:
+            source = "edges_prior"
 
     # 8. Hydrate with product detail, drop anything unavailable
     enriched = await services.enrichment.enrich_items(

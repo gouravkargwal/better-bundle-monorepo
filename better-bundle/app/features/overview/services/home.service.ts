@@ -16,6 +16,8 @@ import type {
   SurfaceStatus,
   TopProduct,
   SurfaceKey,
+  SurfaceLiveStatus,
+  SyncStatus,
 } from "../types/home.types";
 
 // Placements come from the shared registry rather than a local copy. This
@@ -51,6 +53,74 @@ export async function getEdgeStatus(shopId: string): Promise<EdgeStatus> {
     };
   } catch {
     return unavailable;
+  }
+}
+
+interface SyncStatusRow {
+  products_total: number;
+  products_active: number;
+  products_embedded: number;
+  collections_total: number;
+  orders_total: number;
+  edges_total: number;
+  edges_observed: number;
+  last_synced_at: Date | string | null;
+}
+
+export async function getSyncStatus(shopId: string): Promise<SyncStatus> {
+  const fallback: SyncStatus = {
+    productsTotal: 0,
+    productsActive: 0,
+    productsEmbedded: 0,
+    collectionsTotal: 0,
+    ordersTotal: 0,
+    edgesTotal: 0,
+    edgesObserved: 0,
+    lastSyncedAt: null,
+  };
+
+  try {
+    const rows = await prisma.$queryRaw<SyncStatusRow[]>`
+      SELECT
+        (SELECT COUNT(*)::int FROM product_data WHERE shop_id = ${shopId}) AS products_total,
+        (SELECT COUNT(*)::int FROM product_data WHERE shop_id = ${shopId} AND is_active = true) AS products_active,
+        (SELECT COUNT(*)::int FROM product_vectors WHERE shop_id = ${shopId}) AS products_embedded,
+        (SELECT COUNT(*)::int FROM collection_data WHERE shop_id = ${shopId}) AS collections_total,
+        (SELECT COUNT(*)::int FROM order_data WHERE shop_id = ${shopId}) AS orders_total,
+        (SELECT COUNT(*)::int FROM product_edges WHERE shop_id = ${shopId}) AS edges_total,
+        (SELECT COUNT(*)::int FROM product_edges WHERE shop_id = ${shopId} AND observed_count > 0) AS edges_observed,
+        GREATEST(
+          (SELECT MAX(updated_at) FROM product_data WHERE shop_id = ${shopId}),
+          (SELECT MAX(updated_at) FROM collection_data WHERE shop_id = ${shopId}),
+          (SELECT MAX(updated_at) FROM order_data WHERE shop_id = ${shopId})
+        ) AS last_synced_at
+    `;
+
+    if (!rows || rows.length === 0) {
+      return fallback;
+    }
+
+    const row = rows[0];
+    let lastSyncedAt: string | null = null;
+    if (row.last_synced_at) {
+      const d = new Date(row.last_synced_at);
+      if (!isNaN(d.getTime())) {
+        lastSyncedAt = d.toISOString();
+      }
+    }
+
+    return {
+      productsTotal: Number(row.products_total) || 0,
+      productsActive: Number(row.products_active) || 0,
+      productsEmbedded: Number(row.products_embedded) || 0,
+      collectionsTotal: Number(row.collections_total) || 0,
+      ordersTotal: Number(row.orders_total) || 0,
+      edgesTotal: Number(row.edges_total) || 0,
+      edgesObserved: Number(row.edges_observed) || 0,
+      lastSyncedAt,
+    };
+  } catch {
+    return fallback;
   }
 }
 
@@ -133,8 +203,9 @@ export async function getHomeData(
   // as a number this page can invent. Everything else here is deterministic
   // and read straight from Postgres, so the page still renders in full if the
   // worker is unreachable.
-  const [edges, surfaceStats, topProducts, proof, cycle] = await Promise.all([
+  const [edges, sync, surfaceStats, topProducts, proof, cycle] = await Promise.all([
     getEdgeStatus(shopId),
+    getSyncStatus(shopId),
     getSurfaceStats(shopId),
     getTopProducts(shopId),
     getLiftSummary(shopId),
@@ -180,6 +251,7 @@ export async function getHomeData(
     proof,
     holdoutPercent: settings.holdoutDisabled ? 0 : 10,
     edges,
+    sync,
     surfaces,
     topProducts,
     shopCurrency: settings.shopCurrency,

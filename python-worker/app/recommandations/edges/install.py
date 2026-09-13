@@ -426,7 +426,24 @@ class EdgeInstallPipeline:
             logger.error(f"Shop {shop_id}: failed to claim enrichment rows: {e}")
 
         try:
-            service = EnrichmentService(self.provider)
+            # Query active distinct product types in this shop to ground LLM complements
+            catalog_types = []
+            try:
+                async with get_transaction_context() as session:
+                    type_rows = (
+                        await session.execute(
+                            text(
+                                "SELECT DISTINCT product_type FROM product_data "
+                                "WHERE shop_id = :shop_id AND product_type IS NOT NULL AND is_active = true"
+                            ),
+                            {"shop_id": shop_id},
+                        )
+                    ).scalars().all()
+                    catalog_types = [t for t in type_rows if t and t.strip()]
+            except Exception as e:
+                logger.warning(f"Shop {shop_id}: could not query catalog product types: {e}")
+
+            service = EnrichmentService(self.provider, catalog_types=catalog_types)
             result = await service.enrich_catalog_with_outcomes(to_enrich)
         except Exception as e:
             # The provider itself is unavailable (no key, total outage). Every

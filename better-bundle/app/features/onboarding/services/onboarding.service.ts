@@ -1,6 +1,7 @@
 import prisma from "../../../db.server";
 import { getCurrencySymbol } from "../../../utils/currency";
 import { KafkaProducerService } from "../../../services/kafka/kafka-producer.service";
+import { BillingService } from "../../billing/services/billing.service";
 import logger from "app/utils/logger";
 
 export class OnboardingService {
@@ -28,12 +29,10 @@ export class OnboardingService {
     try {
       // Get shop data from Shopify
       const shopData = await this.getShopInfoFromShopify(admin);
+      const activeSubscription = await BillingService.fetchActiveShopifySubscription(admin);
 
       // Create shop + trial subscription
-      const shop = await this.completeOnboardingTransaction(session, shopData);
-
-      // Activate web pixel (non-critical, best-effort)
-      await this.activateWebPixel(admin, session.shop);
+      const shop = await this.completeOnboardingTransaction(session, shopData, activeSubscription);
 
       // Trigger historical data analysis via Kafka. Deliberately fatal.
       //
@@ -126,14 +125,14 @@ export class OnboardingService {
     }
   }
 
-  private async completeOnboardingTransaction(session: any, shopData: any) {
+  private async completeOnboardingTransaction(session: any, shopData: any, activeSubscription: any) {
     return await prisma.$transaction(async (tx) => {
       try {
         // Create or update shop
         const shop = await this.createOrUpdateShop(session, shopData, tx);
 
-        // Activate trial billing plan
-        await this.activateTrialBillingPlan(session.shop, shop, tx);
+        // Activate initial billing plan
+        await this.activateInitialBillingPlan(session.shop, shop, activeSubscription, tx);
 
         return shop;
       } catch (error) {
@@ -197,9 +196,10 @@ export class OnboardingService {
     }
   }
 
-  private async activateTrialBillingPlan(
+  private async activateInitialBillingPlan(
     shopDomain: string,
     shopRecord: any,
+    activeSubscription: any,
     tx: any,
   ) {
     try {
@@ -235,6 +235,24 @@ export class OnboardingService {
         throw new Error("No default subscription plan found");
       }
 
+      if (activeSubscription) {
+        const shopSubscription = await tx.shop_subscriptions.create({
+          data: {
+            shop_id: shopRecord.id,
+            subscription_plan_id: defaultPlan.id,
+            shopify_subscription_id: activeSubscription.subscriptionId,
+            shopify_status: activeSubscription.status,
+            subscription_type: "PAID",
+            status: activeSubscription.status === "ACTIVE" || activeSubscription.status === "PENDING" ? "ACTIVE" : "TRIAL",
+            cap_amount_override: activeSubscription.cappedAmount,
+            started_at: new Date(),
+            is_active: true,
+            auto_renew: true,
+          },
+        });
+        return shopSubscription;
+      }
+
       // Create the trial subscription. No duration: the trial ends when
       // attributed revenue reaches the plan's threshold, and the terms are
       // read from the plan rather than copied onto the row.
@@ -261,9 +279,9 @@ export class OnboardingService {
             meta: error?.meta,
           },
         },
-        "Error activating trial billing plan",
+        "Error activating initial billing plan",
       );
-      throw new Error("Failed to activate trial billing plan");
+      throw new Error("Failed to activate initial billing plan");
     }
   }
 

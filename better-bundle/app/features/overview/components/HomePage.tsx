@@ -32,6 +32,7 @@ import {
   detectInstalledSurfaces,
   type DetectedSurfaces,
 } from "../utils/detectExtensions";
+import { SyncStatusCard } from "./SyncStatusCard";
 
 /**
  * Home: what recommendations earned, what it costs, and where they're running.
@@ -77,6 +78,7 @@ export function HomePage({ data }: HomePageProps) {
     proof,
     holdoutPercent,
     edges,
+    sync,
     surfaces,
     topProducts,
     shopCurrency,
@@ -365,6 +367,9 @@ export function HomePage({ data }: HomePageProps) {
           </Card>
         )}
 
+        {/* 2. Store data and AI model status */}
+        {sync && <SyncStatusCard sync={sync} />}
+
         {nothingServedYet ? (
           <Card>
             <EmptyState
@@ -459,14 +464,6 @@ export function HomePage({ data }: HomePageProps) {
               )}
             </Card>
           </>
-        )}
-
-        {edges.products > 0 && (
-          <Text as="p" variant="bodySm" tone="subdued">
-            {edges.products.toLocaleString()} products analysed ·{" "}
-            {edges.totalEdges.toLocaleString()} recommendation links ·{" "}
-            {edges.observedEdges.toLocaleString()} learned from real orders
-          </Text>
         )}
       </BlockStack>
     </Page>

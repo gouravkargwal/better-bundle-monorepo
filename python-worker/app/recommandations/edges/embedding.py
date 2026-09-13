@@ -19,8 +19,12 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
-from google import genai
-from google.genai import types
+# Use the Vertex AI SDK specifically for the multimodal embedding model.
+# The unified `google.genai` SDK's embed_content() does not yet properly format
+# the payload for the `multimodalembedding` predict endpoint.
+import vertexai
+from vertexai.vision_models import MultiModalEmbeddingModel, Image
+
 from sqlalchemy import select, and_
 
 from app.core.database.models.product_data import ProductData
@@ -68,7 +72,6 @@ class ProductEmbedder:
         project_id: Optional[str] = None,
         location: str = "us-central1",
         model_name: str = EMBEDDING_MODEL,
-        client: Optional[genai.Client] = None,
     ):
         self.model_name = model_name
         self.location = location
@@ -85,14 +88,9 @@ class ProductEmbedder:
                 ) or os.environ.get("VERTEX_LOCATION", "us-central1")
         self.project_id = project_id
 
-        if client is not None:
-            self.client = client
-        else:
-            self.client = genai.Client(
-                vertexai=True,
-                project=self.project_id or None,
-                location=self.location,
-            )
+        # Initialize the Vertex AI legacy SDK for multimodal models
+        vertexai.init(project=self.project_id or None, location=self.location)
+        self.model = MultiModalEmbeddingModel.from_pretrained(self.model_name)
 
     async def _encode_multimodal(
         self, products: Sequence[ProductData]
@@ -120,21 +118,26 @@ class ProductEmbedder:
                 # 2. Build the context text (Title + Type)
                 context_text = f"{product.title} | {product.product_type}"
 
-                # 3. Call the unified GenAI SDK
-                contents = []
-                if image_bytes:
-                    contents.append(
-                        types.Part.from_bytes(
-                            data=image_bytes, mime_type="image/jpeg"
-                        )
+                # 3. Call Vertex AI Vision Models SDK
+                # The Vertex SDK is synchronous, so we run it in a thread to not block the event loop
+                import asyncio
+                
+                def get_embedding():
+                    img = None
+                    if image_bytes:
+                        img = Image(image_bytes)
+                    
+                    return self.model.get_embeddings(
+                        image=img,
+                        contextual_text=context_text,
                     )
-                contents.append(types.Part.from_text(text=context_text))
 
-                result = await self.client.aio.models.embed_content(
-                    model=self.model_name,
-                    contents=contents,
-                )
-                embeddings.append(result.embeddings[0].values)
+                result = await asyncio.to_thread(get_embedding)
+                
+                if image_bytes and result.image_embedding:
+                    embeddings.append(result.image_embedding)
+                else:
+                    embeddings.append(result.text_embedding)
 
         return embeddings
 

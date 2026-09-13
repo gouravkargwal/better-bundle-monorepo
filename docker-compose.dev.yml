@@ -154,6 +154,7 @@ services:
     volumes:
       - ./python-worker:/app
       - /app/__pycache__
+      - ./.secrets/gcp-service-account.json:/etc/gcp/service-account.json:ro
     depends_on:
       postgres:
         condition: service_healthy

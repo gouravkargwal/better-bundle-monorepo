@@ -140,7 +140,14 @@ async function handleActiveSubscription(
     // ── Find OR upsert the shop subscription by shopify_subscription_id ──
     // Try to find an existing subscription first
     let shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: { shop_id: shopRecord.id },
+      where: {
+        shop_id: shopRecord.id,
+        OR: [
+          { shopify_subscription_id: subscriptionId },
+          { shopify_subscription_id: null } // Target the current trial if not yet bound
+        ]
+      },
+      orderBy: { created_at: "desc" },
       include: {
         subscription_plans: {
           select: { cap_amount: true },
@@ -214,7 +221,14 @@ async function handleCancelledSubscription(
 ) {
   try {
     const shopSubscription = await prisma.shop_subscriptions.findFirst({
-      where: { shop_id: shopRecord.id },
+      where: { 
+        shop_id: shopRecord.id,
+        OR: [
+          { shopify_subscription_id: subscriptionId },
+          { is_active: true }
+        ]
+      },
+      orderBy: { created_at: "desc" }
     });
 
     if (!shopSubscription) {

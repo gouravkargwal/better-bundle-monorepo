@@ -50,6 +50,10 @@ Rules:
   ("yoga blocks and props"), never as specific products ("Manduka Cork Block").
 - A complement is something bought IN ADDITION to the product. A substitute is
   an ALTERNATIVE to it. Never put a substitute in complement_categories.
+- Complements MUST logically match what this merchant actually sells or could carry.
+  If the store sells art prints/paintings, complements should be other artistic themes,
+  styles, companion artworks, or related decorative formats—NOT completely unrelated
+  retail items like books or electronics unless the merchant catalog includes them.
 - role: "consumable" if it is used up and rebought, "durable" if bought once,
   "accessory" if it attaches to or supports another product, "apparel" for worn
   items.
@@ -63,6 +67,25 @@ Rules:
   every product is the same kind of thing.
 - Return ONLY a JSON array, one object per input product, in the same order.
   No markdown fences, no preamble, no trailing commentary."""
+
+
+def build_system_prompt(catalog_types: Optional[Sequence[str]] = None) -> str:
+    """Build system prompt with merchant inventory awareness if available."""
+    if not catalog_types:
+        return SYSTEM_PROMPT
+
+    types_str = ", ".join(sorted(t for t in catalog_types if t))
+    if not types_str:
+        return SYSTEM_PROMPT
+
+    return (
+        f"{SYSTEM_PROMPT}\n\n"
+        f"STORE CONTEXT:\n"
+        f"The merchant's store catalog consists exclusively or primarily of the following product types:\n"
+        f"[{types_str}]\n"
+        f"Ensure your complement category suggestions describe products that could realistically exist "
+        f"within these product types or directly complement them within the merchant's domain."
+    )
 
 
 @dataclass
@@ -145,9 +168,12 @@ class EnrichmentService:
         provider: LLMProvider,
         batch_size: int = BATCH_SIZE,
         concurrency: int = 4,
+        catalog_types: Optional[Sequence[str]] = None,
     ):
         self.provider = provider
         self.batch_size = batch_size
+        self.catalog_types = catalog_types
+        self.system_prompt = build_system_prompt(catalog_types)
         # Bounded so a 2,000-SKU install does not open 100 simultaneous calls.
         self._semaphore = asyncio.Semaphore(concurrency)
 
@@ -241,7 +267,7 @@ class EnrichmentService:
         ids = [str(p.get("product_id")) for p in batch]
 
         for attempt in (1, 2):
-            raw = await self.provider.complete(SYSTEM_PROMPT, prompt)
+            raw = await self.provider.complete(self.system_prompt, prompt)
             try:
                 return self.parse_response(raw, ids)
             except (ValueError, ValidationError, json.JSONDecodeError) as e:

@@ -67,6 +67,7 @@ _CANDIDATES_SQL = text(
            pe.edge_type,
            pe.blended_score,
            pe.observed_count,
+           pe.prior_score,
            pd.title,
            pd.price,
            pd.product_type,
@@ -77,7 +78,7 @@ _CANDIDATES_SQL = text(
     WHERE pe.shop_id = :shop_id
       AND pe.source_product_id = ANY(:context_ids)
       AND pe.edge_type = ANY(:edge_types)
-      AND pe.blended_score > 0
+      AND (pe.blended_score > 0 OR pe.observed_count > 0 OR pe.prior_score > 0)
       AND pd.is_active = true
       AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
       AND NOT (pe.target_product_id = ANY(:exclude_ids))
@@ -88,7 +89,7 @@ _CANDIDATES_SQL = text(
               AND sub.target_product_id = pe.target_product_id
               AND sub.source_product_id = ANY(:context_ids)
       )
-    ORDER BY pe.target_product_id, pe.blended_score DESC
+    ORDER BY pe.target_product_id, pe.blended_score DESC, pe.observed_count DESC, pe.prior_score DESC
     LIMIT :candidate_limit
     """
 )
@@ -138,12 +139,20 @@ def expected_value(candidate: Dict[str, Any], margin: Optional[float] = None) ->
     is the objective that matches revenue-share billing — ranking on similarity
     alone optimises for looking relevant, which is not the same thing.
 
-    Margin is applied when the merchant exposes cost. It usually is not, so the
-    default of 1.0 makes this price-weighted, which is why the surface price
-    ceiling has to stay in place: without it, price-weighting alone would push
-    the most expensive item in the catalog to the top of every checkout.
+    If blended_score is 0 but observed_count > 0 (sub-threshold observations),
+    we assign a small positive probability proxy based on observed count.
     """
     score = float(candidate.get("blended_score") or 0.0)
+    if score <= 0.0:
+        obs = int(candidate.get("observed_count") or 0)
+        prior = float(candidate.get("prior_score") or 0.0)
+        if obs > 0:
+            # Proxy score: 0.1 to 0.4 for 1 to 4 observations
+            score = min(0.4, 0.1 * obs)
+        elif prior > 0:
+            score = prior
+        elif candidate.get("source") == "vector":
+            score = float(candidate.get("similarity") or 0.2)
     price = float(candidate.get("price") or 0.0)
     return score * price * (margin if margin is not None else 1.0)
 
@@ -245,11 +254,17 @@ class EdgeRecommender:
 
         candidates = await self._fetch_candidates(shop_id, context_ids, sorted(exclude))
         if not candidates:
+            # Fall back to visual / multimodal vector similarity before baseline
+            candidates = await self._fetch_vector_candidates(shop_id, context_ids, sorted(exclude), limit=CANDIDATE_LIMIT)
+            if not candidates:
+                logger.info(
+                    f"Shop {shop_id}: no edge or vector candidates for {len(context_ids)} "
+                    f"context products on {surface}"
+                )
+                return []
             logger.info(
-                f"Shop {shop_id}: no edge candidates for {len(context_ids)} "
-                f"context products on {surface}"
+                f"Shop {shop_id}: serving {len(candidates)} vector similarity candidates for {context_ids}"
             )
-            return []
 
         ceiling = price_ceiling(surface, context_value)
         if ceiling is not None:
@@ -323,6 +338,71 @@ class EdgeRecommender:
 
         return candidates[:limit]
 
+    async def _fetch_vector_candidates(
+        self, shop_id: str, context_ids: List[str], exclude_ids: List[str], limit: int = CANDIDATE_LIMIT
+    ) -> List[Dict[str, Any]]:
+        """Find candidates using multimodal vector similarity when graph edges are absent."""
+        query = text(
+            """
+            WITH context_vecs AS (
+                SELECT vector
+                FROM product_vectors
+                WHERE shop_id = :shop_id
+                  AND product_id = ANY(:context_ids)
+            )
+            SELECT pv.product_id,
+                   pd.title,
+                   pd.price,
+                   pd.product_type,
+                   (1.0 - (pv.vector <=> cv.vector)) AS similarity
+            FROM context_vecs cv
+            CROSS JOIN product_vectors pv
+            JOIN product_data pd
+              ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
+            WHERE pv.shop_id = :shop_id
+              AND NOT (pv.product_id = ANY(:exclude_ids))
+              AND pd.is_active = true
+              AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
+            ORDER BY similarity DESC
+            LIMIT :limit
+            """
+        )
+        async with get_transaction_context() as session:
+            rows = (
+                await session.execute(
+                    query,
+                    {
+                        "shop_id": shop_id,
+                        "context_ids": context_ids,
+                        "exclude_ids": exclude_ids or [""],
+                        "limit": limit,
+                    },
+                )
+            ).all()
+
+        seen = set()
+        candidates = []
+        for r in rows:
+            if r.product_id in seen:
+                continue
+            seen.add(r.product_id)
+            sim = float(r.similarity or 0.0)
+            candidates.append(
+                {
+                    "product_id": r.product_id,
+                    "edge_type": "complement",
+                    "blended_score": max(0.0, sim),
+                    "observed_count": 0,
+                    "prior_score": max(0.0, sim),
+                    "title": r.title,
+                    "price": float(r.price or 0.0),
+                    "product_type": r.product_type,
+                    "similarity": sim,
+                    "source": "vector",
+                }
+            )
+        return candidates
+
     async def _fetch_baseline_candidates(
         self, shop_id: str, exclude_ids: List[str]
     ) -> List[Dict[str, Any]]:
@@ -376,12 +456,17 @@ class EdgeRecommender:
                 "edge_type": r.edge_type,
                 "blended_score": float(r.blended_score or 0.0),
                 "observed_count": int(r.observed_count or 0),
+                "prior_score": float(getattr(r, "prior_score", 0.0) or 0.0),
                 "title": r.title,
                 "price": float(r.price or 0.0),
                 "product_type": r.product_type,
                 # Where the score came from, so a merchant asking "why this
                 # product?" gets an answer instead of a shrug.
-                "source": "observed" if (r.observed_count or 0) >= 5 else "prior",
+                "source": (
+                    "observed"
+                    if (r.observed_count or 0) > 0
+                    else ("prior" if float(getattr(r, "prior_score", 0.0) or 0.0) > 0 else "observed")
+                ),
             }
             for r in rows
         ]

@@ -156,3 +156,11 @@ agent
 .kilo
 # Playwright MCP session artifacts (snapshots, console logs)
 .playwright-mcp/
+
+# Google Cloud Credentials
+*-key.json
+*gcp-key.json
+cookd-prod-vertex-key.json
+
+# Credentials directory
+.credentials/

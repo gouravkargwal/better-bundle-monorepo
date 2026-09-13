@@ -45,6 +45,17 @@ export interface EdgeStatus {
   observedEdges: number;
 }
 
+export interface SyncStatus {
+  productsTotal: number;
+  productsActive: number;
+  productsEmbedded: number;
+  collectionsTotal: number;
+  ordersTotal: number;
+  edgesTotal: number;
+  edgesObserved: number;
+  lastSyncedAt: string | null;
+}
+
 export interface HomeData {
   /** Money for the open billing cycle, from commission_records/billing_cycles. */
   cycle: CycleMetrics;
@@ -60,6 +71,7 @@ export interface HomeData {
   proof: ProofResult;
   holdoutPercent: number;
   edges: EdgeStatus;
+  sync: SyncStatus;
   surfaces: SurfaceStatus[];
   topProducts: TopProduct[];
   shopCurrency: string;

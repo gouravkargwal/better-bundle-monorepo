@@ -270,24 +270,18 @@ export class BillingService {
   }
 
   /**
-   * Get real-time Shopify subscription status via GraphQL.
-   *
-   * Reads AppUsagePricing: `cappedAmount` is the ceiling the merchant approved
-   * and `balanceUsed` is what Shopify has actually billed this cycle — the
-   * authoritative figure, since Shopify rejects usage records past the cap.
+   * Pure helper to fetch the active Shopify subscription.
+   * Does not touch the database.
    */
-  static async getShopifySubscriptionStatus(
-    shopId: string,
-    admin: any,
-  ): Promise<{
+  static async fetchActiveShopifySubscription(admin: any): Promise<{
     status: string;
-    subscriptionId?: string;
-    confirmationUrl?: string;
+    subscriptionId: string;
     cappedAmount?: number;
     balanceUsed?: number;
     currency?: string;
     currentPeriodEnd?: string;
     currentPeriodStart?: string;
+    planName?: string;
   } | null> {
     try {
       const currentInstallationQuery = `
@@ -332,7 +326,6 @@ export class BillingService {
         );
       }
 
-      // Check for active subscriptions from Shopify
       if (data.data?.currentAppInstallation?.activeSubscriptions?.length > 0) {
         const subscription =
           data.data.currentAppInstallation.activeSubscriptions[0];
@@ -347,39 +340,6 @@ export class BillingService {
           cappedAmount = Number(pricingDetails.cappedAmount?.amount);
           balanceUsed = Number(pricingDetails.balanceUsed?.amount);
           currency = pricingDetails.cappedAmount?.currencyCode;
-        }
-
-        // Sync with database
-        const dbSubscription = await prisma.shop_subscriptions.findFirst({
-          where: {
-            shop_id: shopId,
-            is_active: true,
-          },
-          orderBy: { created_at: "desc" },
-        });
-
-        if (dbSubscription) {
-          try {
-            await prisma.shop_subscriptions.update({
-              where: { id: dbSubscription.id },
-              data: {
-                shopify_subscription_id: subscription.id,
-                shopify_status: subscription.status,
-                subscription_type: "PAID",
-                status:
-                  subscription.status === "ACTIVE" ||
-                  subscription.status === "PENDING"
-                    ? "ACTIVE"
-                    : dbSubscription.status,
-                updated_at: new Date(),
-              },
-            });
-          } catch (error) {
-            logger.error(
-              { error },
-              "Failed to update subscription with Shopify ID",
-            );
-          }
         }
 
         let currentPeriodStart: string | undefined;
@@ -398,7 +358,75 @@ export class BillingService {
           currency,
           currentPeriodEnd: subscription.currentPeriodEnd,
           currentPeriodStart,
+          planName: subscription.name,
         };
+      }
+
+      return null;
+    } catch (error) {
+      logger.error({ error }, "Error getting active Shopify subscription");
+      return null;
+    }
+  }
+
+  /**
+   * Get real-time Shopify subscription status via GraphQL.
+   *
+   * Reads AppUsagePricing: `cappedAmount` is the ceiling the merchant approved
+   * and `balanceUsed` is what Shopify has actually billed this cycle — the
+   * authoritative figure, since Shopify rejects usage records past the cap.
+   */
+  static async getShopifySubscriptionStatus(
+    shopId: string,
+    admin: any,
+  ): Promise<{
+    status: string;
+    subscriptionId?: string;
+    confirmationUrl?: string;
+    cappedAmount?: number;
+    balanceUsed?: number;
+    currency?: string;
+    currentPeriodEnd?: string;
+    currentPeriodStart?: string;
+  } | null> {
+    try {
+      const activeSubscription = await this.fetchActiveShopifySubscription(admin);
+
+      if (activeSubscription) {
+        // Sync with database
+        const dbSubscription = await prisma.shop_subscriptions.findFirst({
+          where: {
+            shop_id: shopId,
+            is_active: true,
+          },
+          orderBy: { created_at: "desc" },
+        });
+
+        if (dbSubscription) {
+          try {
+            await prisma.shop_subscriptions.update({
+              where: { id: dbSubscription.id },
+              data: {
+                shopify_subscription_id: activeSubscription.subscriptionId,
+                shopify_status: activeSubscription.status,
+                subscription_type: "PAID",
+                status:
+                  activeSubscription.status === "ACTIVE" ||
+                  activeSubscription.status === "PENDING"
+                    ? "ACTIVE"
+                    : dbSubscription.status,
+                updated_at: new Date(),
+              },
+            });
+          } catch (error) {
+            logger.error(
+              { error },
+              "Failed to update subscription with Shopify ID",
+            );
+          }
+        }
+
+        return activeSubscription;
       }
 
       // No active subscriptions found
