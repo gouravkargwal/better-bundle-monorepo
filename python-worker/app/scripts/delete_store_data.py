@@ -19,20 +19,46 @@ Usage:
 """
 
 import asyncio
+from datetime import datetime
+import logging
 import os
+from pathlib import Path
 import sys
 from typing import Dict, Any, List
-from datetime import datetime
 
+import httpx
+import requests
 
 python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, python_worker_dir)
 
-import httpx
-import requests
-from app.core.logging import get_logger
+# Use app logger if available, otherwise fall back to standard logging without
+# dragging in the full app config/database stack
+try:
+    from app.core.logging import get_logger  # noqa: E402
+    logger = get_logger(__name__)
+except Exception:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    logger = logging.getLogger(__name__)
 
-logger = get_logger(__name__)
+# Load environment variables from .env.local or .env if dotenv is installed
+try:
+    from dotenv import load_dotenv
+
+    _pw_path = Path(python_worker_dir)
+    for _env_file in [
+        _pw_path / ".env.local",
+        _pw_path / ".env",
+        _pw_path.parent / ".env.local",
+        _pw_path.parent / ".env",
+    ]:
+        if _env_file.exists():
+            load_dotenv(_env_file, override=False)
+except Exception:
+    pass
 
 
 class ShopifyStoreDeleter:
@@ -223,12 +249,6 @@ class ShopifyStoreDeleter:
         import subprocess
         import json
 
-        headers = {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": self.access_token,
-            "User-Agent": "BetterBundle-StoreDeleter/1.0",
-        }
-
         payload = {"query": mutation, "variables": variables}
 
         # Build curl command
@@ -237,11 +257,11 @@ class ShopifyStoreDeleter:
             "-X",
             "POST",
             "-H",
-            f"Content-Type: application/json",
+            "Content-Type: application/json",
             "-H",
             f"X-Shopify-Access-Token: {self.access_token}",
             "-H",
-            f"User-Agent: BetterBundle-StoreDeleter/1.0",
+            "User-Agent: BetterBundle-StoreDeleter/1.0",
             "--data",
             json.dumps(payload),
             "--insecure",  # Disable SSL verification
@@ -1139,18 +1159,53 @@ class ShopifyStoreDeleter:
 
 async def main():
     """Main function to run the deletion script"""
-    shop_domain = os.environ.get("SHOP_DOMAIN") or os.environ.get("SHOPIFY_SHOP_DOMAIN")
-    access_token = os.environ.get("ACCESS_TOKEN") or os.environ.get("SHOPIFY_ACCESS_TOKEN")
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Shopify Store Data Deletion Script (deletes products, orders, customers on Shopify)"
+    )
+    parser.add_argument(
+        "--shop",
+        default=os.environ.get("SHOP_DOMAIN") or os.environ.get("SHOPIFY_SHOP_DOMAIN"),
+        help="Shop domain (or set SHOP_DOMAIN env var)",
+    )
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("ACCESS_TOKEN") or os.environ.get("SHOPIFY_ACCESS_TOKEN"),
+        help="Shopify Admin API token (or set ACCESS_TOKEN env var)",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip the 'DELETE ALL' confirmation prompt",
+    )
+    args = parser.parse_args()
+
+    shop_domain = args.shop
+    access_token = args.token
 
     if not shop_domain or not access_token:
         logger.error(
-            "Missing required environment variables: SHOP_DOMAIN and ACCESS_TOKEN"
+            "Missing required credentials: provide --shop and --token flags, or set SHOP_DOMAIN and ACCESS_TOKEN env vars"
         )
-        return
+        return 1
+
+    if not args.yes:
+        print("=" * 60)
+        print("⚠️  DANGER: PERMANENT SHOPIFY STORE DATA DELETION")
+        print(f"Store: {shop_domain}")
+        print("This will delete all products, collections, orders, customers, and media on Shopify.")
+        print("=" * 60)
+        confirm = input("Type 'DELETE ALL' to confirm: ")
+        if confirm != "DELETE ALL":
+            print("Aborted.")
+            return 0
 
     async with ShopifyStoreDeleter(shop_domain, access_token) as deleter:
         await deleter.delete_all_data()
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

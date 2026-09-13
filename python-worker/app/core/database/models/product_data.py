@@ -4,8 +4,9 @@ Product data model for SQLAlchemy
 Represents product information from Shopify.
 """
 
+from typing import Optional
 from sqlalchemy import Column, String, Float, Boolean, Text, Integer
-from sqlalchemy.dialects.postgresql import JSON, TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 from .base import BaseModel, ShopMixin
 
@@ -60,6 +61,30 @@ class ProductData(BaseModel, ShopMixin):
     is_active = Column(Boolean, default=True, nullable=False, index=True)
 
     shop = relationship("Shop", back_populates="product_data")
+
+    @property
+    def image_url(self) -> Optional[str]:
+        """First product image URL from images or media JSON fields."""
+        if self.images and isinstance(self.images, list) and len(self.images) > 0:
+            first = self.images[0]
+            if isinstance(first, dict):
+                url = first.get("url") or first.get("src")
+                if url:
+                    return str(url)
+            elif isinstance(first, str) and first.strip():
+                return first.strip()
+
+        if self.media and isinstance(self.media, list) and len(self.media) > 0:
+            first = self.media[0]
+            if isinstance(first, dict):
+                if "image" in first and isinstance(first["image"], dict):
+                    url = first["image"].get("url") or first["image"].get("src")
+                    if url:
+                        return str(url)
+                url = first.get("url") or first.get("src")
+                if url:
+                    return str(url)
+        return None
 
     def __repr__(self) -> str:
         return f"<ProductData(product_id={self.product_id}, title={self.title})>"

@@ -40,7 +40,9 @@ export function getBillingNotifications(
     suspensionStatus.reason &&
     suspensionStatus.reason !== "payment_failure" &&
     suspensionStatus.reason !== "trial_completed_awaiting_setup" &&
-    suspensionStatus.reason !== "subscription_pending_approval"
+    suspensionStatus.reason !== "subscription_pending_approval" &&
+    suspensionStatus.reason !== "shop_not_found" &&
+    suspensionStatus.reason !== "not_onboarded"
   ) {
     notifications.push({
       id: "subscription_suspended",

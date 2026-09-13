@@ -20,8 +20,9 @@ Two rules here are not tuning knobs:
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import text
+from sqlalchemy import text, select
 
+from app.core.database.models.product_vector import ProductVector
 from app.core.database.session import get_transaction_context
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,65 @@ def prefer_refills(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     rank = {"refill": 0, "accessory": 1, "complement": 2}
     return sorted(candidates, key=lambda c: rank.get(c.get("edge_type"), 3))
+
+
+async def get_visually_similar(
+    session: Any = None,
+    shop_id: str = "",
+    target_product_id: str = "",
+    limit: int = 5,
+) -> List[str]:
+    """Find closest visually/multimodally similar products using pgvector HNSW."""
+    if session is None:
+        async with get_transaction_context() as sess:
+            return await get_visually_similar(sess, shop_id, target_product_id, limit)
+
+    # 1. Get the 1408-D vector for the target product
+    target_vector = (
+        await session.execute(
+            select(ProductVector.vector).where(
+                ProductVector.shop_id == shop_id,
+                ProductVector.product_id == target_product_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if target_vector is None:
+        return []
+
+    # 2. Find closest matches using pgvector HNSW
+    query = text(
+        """
+        SELECT pv.product_id 
+        FROM product_vectors pv
+        JOIN product_data pd
+          ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
+        WHERE pv.shop_id = :shop_id 
+          AND pv.product_id != :target_id
+          AND pd.is_active = true
+        ORDER BY pv.vector <=> CAST(:vec AS vector)
+        LIMIT :limit
+        """
+    )
+
+    vec_str = (
+        "[" + ",".join(str(float(v)) for v in target_vector) + "]"
+        if not isinstance(target_vector, str)
+        else target_vector
+    )
+
+    rows = (
+        await session.execute(
+            query,
+            {
+                "shop_id": shop_id,
+                "target_id": target_product_id,
+                "vec": vec_str,
+                "limit": limit,
+            },
+        )
+    ).all()
+    return [row.product_id for row in rows]
 
 
 class EdgeRecommender:

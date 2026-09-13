@@ -52,7 +52,6 @@ for env_file in [
 ]:
     if env_file.exists():
         load_dotenv(env_file, override=False)
-        break
 
 from sqlalchemy import text  # noqa: E402
 

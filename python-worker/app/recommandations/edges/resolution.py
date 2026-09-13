@@ -94,22 +94,64 @@ class CategoryResolver:
         similarity_threshold: float = SIMILARITY_THRESHOLD,
         matches_per_category: int = MATCHES_PER_CATEGORY,
         model_name: str = EMBEDDING_MODEL,
+        project_id: Optional[str] = None,
+        location: str = "us-central1",
+        client: Optional[Any] = None,
     ):
         self.similarity_threshold = similarity_threshold
         self.matches_per_category = matches_per_category
         self.model_name = model_name
-        self._encoder = None
+        self.project_id = project_id
+        self.location = location
+        self._client = client
+
+    def _ensure_client(self) -> None:
+        if self._client is None:
+            import os
+            from google import genai
+            from app.core.config.settings import settings
+
+            ai = getattr(settings, "ml", settings)
+            project_id = self.project_id or getattr(ai, "VERTEX_PROJECT_ID", "") or os.environ.get("VERTEX_PROJECT_ID", "")
+            location = self.location or getattr(ai, "VERTEX_LOCATION", "us-central1") or os.environ.get("VERTEX_LOCATION", "us-central1")
+
+            self._client = genai.Client(
+                vertexai=True,
+                project=project_id or None,
+                location=location,
+            )
 
     # ---------- embedding ----------
 
     def embed(self, texts: Sequence[str]) -> List[List[float]]:
-        """Embed category strings with the same model used for products."""
-        if self._encoder is None:
-            from sentence_transformers import SentenceTransformer
+        """Embed category strings with the same multimodal model (text-only input)."""
+        texts_list = list(texts)
+        if not texts_list:
+            return []
 
-            logger.info(f"Loading bi-encoder for category resolution: {self.model_name}")
-            self._encoder = SentenceTransformer(self.model_name)
-        return self._encoder.encode(list(texts)).tolist()
+        self._ensure_client()
+        # We pass only text. The model maps it into the same 1408-D space as the images!
+        result = self._client.models.embed_content(
+            model=self.model_name,
+            contents=texts_list,
+        )
+        return [e.values for e in result.embeddings]
+
+    async def async_embed(self, texts: Sequence[str]) -> List[List[float]]:
+        """Embed category strings asynchronously without blocking the event loop."""
+        if type(self).embed != CategoryResolver.embed:
+            return self.embed(texts)
+
+        texts_list = list(texts)
+        if not texts_list:
+            return []
+
+        self._ensure_client()
+        result = await self._client.aio.models.embed_content(
+            model=self.model_name,
+            contents=texts_list,
+        )
+        return [e.values for e in result.embeddings]
 
     # ---------- edge construction ----------
 
@@ -205,7 +247,7 @@ class CategoryResolver:
         if not categories:
             return {}
 
-        vectors = self.embed(categories)
+        vectors = await self.async_embed(categories)
         out: Dict[str, List[Tuple[str, float]]] = {}
 
         async with get_transaction_context() as session:
@@ -283,7 +325,7 @@ class CategoryResolver:
             return 0
 
         vectors = np.asarray(
-            self.embed([e.style_descriptor for e in usable]), dtype="float32"
+            await self.async_embed([e.style_descriptor for e in usable]), dtype="float32"
         )
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         # An all-zero vector would divide to NaN and then match nothing in a way

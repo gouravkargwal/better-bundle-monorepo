@@ -61,6 +61,7 @@ export default function App() {
   }, []);
 
   const isOnboardingPage = location.pathname === "/app/onboarding";
+  const isBillingPage = location.pathname.startsWith("/app/billing");
   const showNavigation = !isOnboardingPage;
   const isNavigating = navigation.state === "loading";
 
@@ -85,8 +86,8 @@ export default function App() {
             Polaris every time Shopify retunes it. */}
         {isNavigating && <Loading />}
 
-        {/* In-app notification banners */}
-        {notifications.length > 0 && (
+        {/* In-app notification banners - only shown on billing page */}
+        {isBillingPage && notifications.length > 0 && (
           <div
             style={{
               paddingBlock: "var(--p-space-2, 8px) 0",

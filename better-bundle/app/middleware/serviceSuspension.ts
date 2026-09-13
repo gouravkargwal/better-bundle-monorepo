@@ -94,6 +94,7 @@ export async function checkServiceSuspension(
               is_active: true,
               suspended_at: true,
               suspension_reason: true,
+              onboarding_completed: true,
             },
           }),
           prisma.shop_subscriptions.findFirst({
@@ -105,6 +106,17 @@ export async function checkServiceSuspension(
         ]);
 
         if (!shop || !shopSubscription) {
+          // If the shop exists but is not fully onboarded yet, it is not suspended
+          if (shop && !shop.onboarding_completed) {
+            return {
+              isSuspended: false,
+              reason: "not_onboarded",
+              requiresBillingSetup: false,
+              trialCompleted: false,
+              subscriptionActive: false,
+            };
+          }
+
           return {
             isSuspended: true,
             reason: "shop_not_found",
@@ -202,6 +214,7 @@ export async function checkServiceSuspension(
           is_active: true,
           suspended_at: true,
           suspension_reason: true,
+          onboarding_completed: true,
         },
       });
 
@@ -220,6 +233,16 @@ export async function checkServiceSuspension(
       });
 
       if (!shopSubscription) {
+        if (!shop.onboarding_completed) {
+          return {
+            isSuspended: false,
+            reason: "not_onboarded",
+            requiresBillingSetup: false,
+            trialCompleted: false,
+            subscriptionActive: false,
+          };
+        }
+
         return {
           isSuspended: true,
           reason: "shop_not_found",
