@@ -12,13 +12,11 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, useRevalidator } from "@remix-run/react";
 import { routeErrorBoundary } from "../components/UI/RouteError";
-import { useCallback } from "react";
 import { authenticate } from "../shopify.server";
 import { Card, Page, Text, BlockStack } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { getHomeData } from "../features/overview/services/home.service";
 import { HomePage } from "../features/overview/components/HomePage";
-import { AnalysisModal } from "../features/overview/components/AnalysisModal";
 import logger from "../utils/logger";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -49,12 +47,6 @@ export default function Home() {
   const loaderData = useLoaderData<typeof loader>();
   const { revalidate } = useRevalidator();
 
-  const handleComplete = useCallback(() => {
-    // Analysis finished (or was skipped) — re-run the loader so the
-    // dashboard renders with live data.
-    revalidate();
-  }, [revalidate]);
-
   if (!loaderData.ok) {
     return (
       <Page>
@@ -67,35 +59,6 @@ export default function Home() {
           </div>
         </Card>
       </Page>
-    );
-  }
-
-  const { edges } = loaderData;
-  const ready = edges.reachable && edges.servable;
-
-  if (!ready) {
-    return (
-      <>
-        <Page>
-          <TitleBar title="Home" />
-          <BlockStack gap="300">
-            <Card>
-              <BlockStack gap="200" inlineAlign="center">
-                <Text as="h2" variant="headingLg" fontWeight="bold" tone="subdued">
-                  Analysing your catalogue
-                </Text>
-                <Text as="p" variant="bodyMd" tone="subdued">
-                  We're reading your products and past orders to work out which
-                  items sell together. This usually takes a few minutes — you
-                  can leave this page and come back.
-                </Text>
-              </BlockStack>
-            </Card>
-          </BlockStack>
-        </Page>
-
-        <AnalysisModal initiallyReady={false} onComplete={handleComplete} />
-      </>
     );
   }
 

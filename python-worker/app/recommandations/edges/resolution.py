@@ -18,9 +18,13 @@ This is the piece that makes install-day recommendations possible, and it is the
 same code path as the pre-install bundle report.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from google.cloud import aiplatform_v1
+from google.protobuf import json_format
+from google.protobuf.struct_pb2 import Value
 import numpy as np
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -97,6 +101,7 @@ class CategoryResolver:
         project_id: Optional[str] = None,
         location: str = "us-central1",
         client: Optional[Any] = None,
+        async_client: Optional[Any] = None,
     ):
         self.similarity_threshold = similarity_threshold
         self.matches_per_category = matches_per_category
@@ -104,22 +109,60 @@ class CategoryResolver:
         self.project_id = project_id
         self.location = location
         self._client = client
+        self._async_client = async_client
 
-    def _ensure_client(self) -> None:
-        if self._client is None:
+    def _resolve_config(self) -> Tuple[str, str]:
+        if not self.project_id:
             import os
-            from google import genai
             from app.core.config.settings import settings
 
             ai = getattr(settings, "ml", settings)
-            project_id = self.project_id or getattr(ai, "VERTEX_PROJECT_ID", "") or os.environ.get("VERTEX_PROJECT_ID", "")
-            location = self.location or getattr(ai, "VERTEX_LOCATION", "us-central1") or os.environ.get("VERTEX_LOCATION", "us-central1")
-
-            self._client = genai.Client(
-                vertexai=True,
-                project=project_id or None,
-                location=location,
+            self.project_id = getattr(ai, "VERTEX_PROJECT_ID", "") or os.environ.get(
+                "VERTEX_PROJECT_ID", ""
             )
+            if not self.project_id:
+                try:
+                    import google.auth
+
+                    _, default_proj = google.auth.default()
+                    self.project_id = default_proj or ""
+                except Exception:
+                    pass
+
+        if self.location == "us-central1":
+            import os
+            from app.core.config.settings import settings
+
+            ai = getattr(settings, "ml", settings)
+            self.location = getattr(
+                ai, "VERTEX_LOCATION", "us-central1"
+            ) or os.environ.get("VERTEX_LOCATION", "us-central1")
+
+        endpoint = (
+            f"projects/{self.project_id}/locations/{self.location}/publishers/google/models/{self.model_name}"
+            if self.project_id
+            else ""
+        )
+        return self.location, endpoint
+
+    def _ensure_client(self) -> None:
+        if self._client is None:
+            location, _ = self._resolve_config()
+            api_endpoint = f"{location}-aiplatform.googleapis.com"
+            self._client = aiplatform_v1.PredictionServiceClient(
+                client_options={"api_endpoint": api_endpoint}
+            )
+
+    def _ensure_async_client(self) -> None:
+        if self._async_client is None:
+            if self._client is not None and hasattr(self._client, "predict"):
+                self._async_client = self._client
+            else:
+                location, _ = self._resolve_config()
+                api_endpoint = f"{location}-aiplatform.googleapis.com"
+                self._async_client = aiplatform_v1.PredictionServiceAsyncClient(
+                    client_options={"api_endpoint": api_endpoint}
+                )
 
     # ---------- embedding ----------
 
@@ -130,12 +173,18 @@ class CategoryResolver:
             return []
 
         self._ensure_client()
-        # We pass only text. The model maps it into the same 1408-D space as the images!
-        result = self._client.models.embed_content(
-            model=self.model_name,
-            contents=texts_list,
-        )
-        return [e.values for e in result.embeddings]
+        _, endpoint = self._resolve_config()
+        embeddings = []
+        for text in texts_list:
+            instance = Value()
+            json_format.ParseDict({"text": text}, instance)
+            response = self._client.predict(
+                endpoint=endpoint,
+                instances=[instance],
+            )
+            pred = dict(response.predictions[0])
+            embeddings.append(list(pred["textEmbedding"]))
+        return embeddings
 
     async def async_embed(self, texts: Sequence[str]) -> List[List[float]]:
         """Embed category strings asynchronously without blocking the event loop."""
@@ -146,12 +195,22 @@ class CategoryResolver:
         if not texts_list:
             return []
 
-        self._ensure_client()
-        result = await self._client.aio.models.embed_content(
-            model=self.model_name,
-            contents=texts_list,
-        )
-        return [e.values for e in result.embeddings]
+        self._ensure_async_client()
+        _, endpoint = self._resolve_config()
+
+        async def _embed_one(text: str) -> List[float]:
+            instance = Value()
+            json_format.ParseDict({"text": text}, instance)
+            response = self._async_client.predict(
+                endpoint=endpoint,
+                instances=[instance],
+            )
+            if asyncio.iscoroutine(response):
+                response = await response
+            pred = dict(response.predictions[0])
+            return list(pred["textEmbedding"])
+
+        return await asyncio.gather(*(_embed_one(t) for t in texts_list))
 
     # ---------- edge construction ----------
 

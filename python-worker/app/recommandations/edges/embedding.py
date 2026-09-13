@@ -12,6 +12,7 @@ Idempotent: a product whose image and text have not changed is skipped, so this
 is safe to run on every `products/update` webhook.
 """
 
+import base64
 import hashlib
 import logging
 import os
@@ -19,12 +20,9 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import httpx
-# Use the Vertex AI SDK specifically for the multimodal embedding model.
-# The unified `google.genai` SDK's embed_content() does not yet properly format
-# the payload for the `multimodalembedding` predict endpoint.
-import vertexai
-from vertexai.vision_models import MultiModalEmbeddingModel, Image
-
+from google.cloud import aiplatform_v1
+from google.protobuf import json_format
+from google.protobuf.struct_pb2 import Value
 from sqlalchemy import select, and_
 
 from app.core.database.models.product_data import ProductData
@@ -65,32 +63,52 @@ def text_hash(text: str) -> str:
 
 
 class ProductEmbedder:
-    """Computes and stores multimodal product vectors via Google GenAI / Vertex AI."""
+    """Computes and stores multimodal product vectors via Google Vertex AI."""
 
     def __init__(
         self,
         project_id: Optional[str] = None,
         location: str = "us-central1",
         model_name: str = EMBEDDING_MODEL,
+        client: Optional[Any] = None,
     ):
         self.model_name = model_name
         self.location = location
-        if project_id is None:
+        if not project_id:
             from app.core.config.settings import settings
 
             ai = getattr(settings, "ml", settings)
             project_id = getattr(ai, "VERTEX_PROJECT_ID", "") or os.environ.get(
                 "VERTEX_PROJECT_ID", ""
             )
+            if not project_id:
+                try:
+                    import google.auth
+
+                    _, default_proj = google.auth.default()
+                    project_id = default_proj or ""
+                except Exception:
+                    pass
+
             if location == "us-central1":
                 self.location = getattr(
                     ai, "VERTEX_LOCATION", "us-central1"
                 ) or os.environ.get("VERTEX_LOCATION", "us-central1")
         self.project_id = project_id
 
-        # Initialize the Vertex AI legacy SDK for multimodal models
-        vertexai.init(project=self.project_id or None, location=self.location)
-        self.model = MultiModalEmbeddingModel.from_pretrained(self.model_name)
+        self.endpoint = (
+            f"projects/{self.project_id}/locations/{self.location}/publishers/google/models/{self.model_name}"
+            if self.project_id
+            else ""
+        )
+
+        if client is not None:
+            self.client = client
+        else:
+            api_endpoint = f"{self.location}-aiplatform.googleapis.com"
+            self.client = aiplatform_v1.PredictionServiceAsyncClient(
+                client_options={"api_endpoint": api_endpoint}
+            )
 
     async def _encode_multimodal(
         self, products: Sequence[ProductData]
@@ -118,26 +136,27 @@ class ProductEmbedder:
                 # 2. Build the context text (Title + Type)
                 context_text = f"{product.title} | {product.product_type}"
 
-                # 3. Call Vertex AI Vision Models SDK
-                # The Vertex SDK is synchronous, so we run it in a thread to not block the event loop
-                import asyncio
-                
-                def get_embedding():
-                    img = None
-                    if image_bytes:
-                        img = Image(image_bytes)
-                    
-                    return self.model.get_embeddings(
-                        image=img,
-                        contextual_text=context_text,
-                    )
+                # 3. Call Vertex AI Prediction Service
+                instance_dict: Dict[str, Any] = {"text": context_text}
+                if image_bytes:
+                    instance_dict["image"] = {
+                        "bytesBase64Encoded": base64.b64encode(image_bytes).decode(
+                            "utf-8"
+                        )
+                    }
 
-                result = await asyncio.to_thread(get_embedding)
-                
-                if image_bytes and result.image_embedding:
-                    embeddings.append(result.image_embedding)
+                instance = Value()
+                json_format.ParseDict(instance_dict, instance)
+
+                response = await self.client.predict(
+                    endpoint=self.endpoint,
+                    instances=[instance],
+                )
+                pred = dict(response.predictions[0])
+                if image_bytes and "imageEmbedding" in pred:
+                    embeddings.append(list(pred["imageEmbedding"]))
                 else:
-                    embeddings.append(result.text_embedding)
+                    embeddings.append(list(pred.get("textEmbedding", [])))
 
         return embeddings
 

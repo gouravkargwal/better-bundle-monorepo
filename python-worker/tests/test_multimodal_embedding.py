@@ -114,19 +114,28 @@ def test_build_multimodal_hash():
     assert build_multimodal_hash(p1_new_title) != h1
 
 
+def _make_predict_response(vector):
+    response = MagicMock()
+    prediction = MagicMock()
+    prediction.__getitem__ = lambda self, key: (
+        vector if key in ("imageEmbedding", "textEmbedding") else None
+    )
+    prediction.get = lambda key, default=None: vector if key in ("imageEmbedding", "textEmbedding") else default
+    prediction.keys = lambda: ["imageEmbedding", "textEmbedding"]
+    response.predictions = [prediction]
+    return response
+
+
 @pytest.mark.asyncio
 async def test_product_embedder_encode_multimodal():
-    mock_client = MagicMock()
-    mock_response = MagicMock()
     fake_vector = [0.1] * VECTOR_DIM
-    mock_embedding = MagicMock(values=fake_vector)
-    mock_response.embeddings = [mock_embedding]
-
-    mock_client.aio.models.embed_content = AsyncMock(return_value=mock_response)
+    mock_client = MagicMock()
+    mock_client.predict = AsyncMock(return_value=_make_predict_response(fake_vector))
 
     embedder = ProductEmbedder(
         project_id="test-proj",
         location="us-central1",
+        model_name=EMBEDDING_MODEL,
         client=mock_client,
     )
 
@@ -152,59 +161,74 @@ async def test_product_embedder_encode_multimodal():
     assert len(vectors) == 1
     assert len(vectors[0]) == VECTOR_DIM
     assert vectors[0] == fake_vector
-    mock_client.aio.models.embed_content.assert_called_once()
-    call_kwargs = mock_client.aio.models.embed_content.call_args.kwargs
-    assert call_kwargs["model"] == EMBEDDING_MODEL
-    assert len(call_kwargs["contents"]) == 2  # image part + text part
+    mock_client.predict.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_product_embedder_encode_multimodal_no_image():
+    fake_vector = [0.2] * VECTOR_DIM
+    mock_client = MagicMock()
+    mock_client.predict = AsyncMock(return_value=_make_predict_response(fake_vector))
+
+    embedder = ProductEmbedder(
+        project_id="test-proj",
+        location="us-central1",
+        model_name=EMBEDDING_MODEL,
+        client=mock_client,
+    )
+
+    product = ProductData(
+        shop_id="shop1",
+        product_id="p1",
+        title="Running Shoes",
+        product_type="Footwear",
+        handle="shoes",
+        images=[],
+    )
+
+    vectors = await embedder._encode_multimodal([product])
+
+    assert len(vectors) == 1
+    assert len(vectors[0]) == VECTOR_DIM
+    assert vectors[0] == fake_vector
+    mock_client.predict.assert_called_once()
 
 
 def test_category_resolver_embed():
-    mock_client = MagicMock()
-    mock_response = MagicMock()
     fake_vector = [0.2] * VECTOR_DIM
-    mock_embedding = MagicMock(values=fake_vector)
-    mock_response.embeddings = [mock_embedding]
-
-    mock_client.models.embed_content = MagicMock(return_value=mock_response)
+    mock_client = MagicMock()
+    mock_client.predict = MagicMock(return_value=_make_predict_response(fake_vector))
 
     resolver = CategoryResolver(
         project_id="test-proj",
         location="us-central1",
+        model_name=EMBEDDING_MODEL,
         client=mock_client,
     )
 
     vectors = resolver.embed(["leather boots"])
     assert len(vectors) == 1
     assert vectors[0] == fake_vector
-    mock_client.models.embed_content.assert_called_once_with(
-        model=EMBEDDING_MODEL,
-        contents=["leather boots"],
-    )
+    assert mock_client.predict.call_count == 1
 
 
 @pytest.mark.asyncio
 async def test_category_resolver_async_embed():
-    mock_client = MagicMock()
-    mock_response = MagicMock()
     fake_vector = [0.3] * VECTOR_DIM
-    mock_embedding = MagicMock(values=fake_vector)
-    mock_response.embeddings = [mock_embedding]
-
-    mock_client.aio.models.embed_content = AsyncMock(return_value=mock_response)
+    mock_client = MagicMock()
+    mock_client.predict = AsyncMock(return_value=_make_predict_response(fake_vector))
 
     resolver = CategoryResolver(
         project_id="test-proj",
         location="us-central1",
-        client=mock_client,
+        model_name=EMBEDDING_MODEL,
+        async_client=mock_client,
     )
 
     vectors = await resolver.async_embed(["leather boots"])
     assert len(vectors) == 1
     assert vectors[0] == fake_vector
-    mock_client.aio.models.embed_content.assert_called_once_with(
-        model=EMBEDDING_MODEL,
-        contents=["leather boots"],
-    )
+    assert mock_client.predict.call_count == 1
 
 
 @pytest.mark.asyncio

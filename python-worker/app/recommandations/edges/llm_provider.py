@@ -43,11 +43,20 @@ class GeminiProvider:
         retries: int = 2,
         timeout: int = 120,
         budget: Optional[LLMBudget] = None,
+        ai_provider: str = "gemini",
+        vertex_project: str = "",
+        vertex_location: str = "us-central1",
     ):
-        if not api_key:
+        self.ai_provider = ai_provider
+        if self.ai_provider == "gemini" and not api_key:
             raise ValueError("GEMINI_API_KEY is not set")
+        if self.ai_provider == "vertex" and not vertex_project:
+            raise ValueError("VERTEX_PROJECT_ID is not set")
+        
         self.api_key = api_key
         self.model = model
+        self.vertex_project = vertex_project
+        self.vertex_location = vertex_location
         self.retries = retries
         self.timeout = timeout
         # Circuit breaker + daily ceiling + error classification. Shared across
@@ -60,7 +69,14 @@ class GeminiProvider:
         if self._client is None:
             from google import genai
 
-            self._client = genai.Client(api_key=self.api_key)
+            if self.ai_provider == "vertex":
+                self._client = genai.Client(
+                    vertexai=True,
+                    project=self.vertex_project,
+                    location=self.vertex_location,
+                )
+            else:
+                self._client = genai.Client(api_key=self.api_key)
         return self._client
 
     def _record_usage(self, response) -> None:
@@ -187,4 +203,7 @@ def build_provider(settings) -> LLMProvider:
     return GeminiProvider(
         api_key=getattr(ai, "GEMINI_API_KEY", "") or "",
         model=getattr(ai, "AI_CHAT_MODEL", "gemini-2.5-flash-lite"),
+        ai_provider=getattr(ai, "AI_PROVIDER", "gemini"),
+        vertex_project=getattr(ai, "VERTEX_PROJECT_ID", ""),
+        vertex_location=getattr(ai, "VERTEX_LOCATION", "us-central1"),
     )
