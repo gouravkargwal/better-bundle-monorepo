@@ -17,6 +17,7 @@ from app.recommandations.edges.serving import (
     expected_value,
     prefer_refills,
     price_ceiling,
+    relevance_score,
 )
 
 
@@ -95,14 +96,30 @@ def test_unknown_surface_falls_back_to_the_conservative_ceiling():
 # ---------------------------------------------------------------------------
 
 
-def test_ranking_is_expected_revenue_not_similarity():
-    """A weaker match on a pricier item can be worth more, and should win.
+def test_ranking_is_relevance_first_price_tiebreaker():
+    """A stronger match should win even if the alternative is more expensive.
 
-    This is what aligns the engine with revenue-share billing.
+    Relevance is the primary signal; price is only a tiebreaker. This prevents
+    a weakly-related expensive item from outranking a cheaper, better match.
     """
     strong_cheap = {"blended_score": 0.9, "price": 5.0}
     weak_pricey = {"blended_score": 0.4, "price": 40.0}
-    assert expected_value(weak_pricey) > expected_value(strong_cheap)
+    assert relevance_score(strong_cheap) > relevance_score(weak_pricey)
+
+
+def test_price_is_tiebreaker_when_relevance_is_equal():
+    """When two items have the same relevance score, the pricier one wins."""
+    same_relevance = [
+        {"blended_score": 0.8, "price": 10.0},
+        {"blended_score": 0.8, "price": 20.0},
+    ]
+    ranked = sorted(
+        same_relevance,
+        key=lambda c: (relevance_score(c), float(c.get("price") or 0.0)),
+        reverse=True,
+    )
+    assert ranked[0]["price"] == 20.0
+    assert ranked[1]["price"] == 10.0
 
 
 def test_margin_is_applied_when_available_and_ignored_when_not():

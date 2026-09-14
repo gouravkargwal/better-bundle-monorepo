@@ -54,7 +54,10 @@ def build_product_text(product: ProductData) -> str:
 
 def build_multimodal_hash(product: ProductData) -> str:
     """Hash both the image URL and the text so any change triggers a re-embed."""
-    content = f"{product.image_url}|{product.title}|{product.product_type}"
+    content = (
+        f"{product.image_url}|{product.title}|{product.product_type}"
+        f"|{product.description}|{product.tags}"
+    )
     return hashlib.md5(content.encode()).hexdigest()
 
 
@@ -133,8 +136,8 @@ class ProductEmbedder:
                             f"from {product.image_url}: {e}"
                         )
 
-                # 2. Build the context text (Title + Type)
-                context_text = f"{product.title} | {product.product_type}"
+                # 2. Build the context text (Title + Type + Description + Tags)
+                context_text = build_product_text(product)
 
                 # 3. Call Vertex AI Prediction Service
                 instance_dict: Dict[str, Any] = {"text": context_text}

@@ -132,27 +132,33 @@ def price_ceiling(surface: str, context_value: float) -> Optional[float]:
     return context_value * fraction
 
 
-def expected_value(candidate: Dict[str, Any], margin: Optional[float] = None) -> float:
-    """Rank score: how much revenue this offer is likely to produce.
+def relevance_score(candidate: Dict[str, Any]) -> float:
+    """How relevant this candidate is to the context product.
 
-    `blended_score` stands in for P(add), price for the revenue if added. This
-    is the objective that matches revenue-share billing — ranking on similarity
-    alone optimises for looking relevant, which is not the same thing.
-
-    If blended_score is 0 but observed_count > 0 (sub-threshold observations),
-    we assign a small positive probability proxy based on observed count.
+    Used as the primary ranking signal. Price is intentionally excluded so
+    expensive but weakly-related items do not outrank cheaper, better matches.
     """
     score = float(candidate.get("blended_score") or 0.0)
     if score <= 0.0:
         obs = int(candidate.get("observed_count") or 0)
         prior = float(candidate.get("prior_score") or 0.0)
         if obs > 0:
-            # Proxy score: 0.1 to 0.4 for 1 to 4 observations
             score = min(0.4, 0.1 * obs)
         elif prior > 0:
             score = prior
         elif candidate.get("source") == "vector":
             score = float(candidate.get("similarity") or 0.2)
+    return score
+
+
+def expected_value(candidate: Dict[str, Any], margin: Optional[float] = None) -> float:
+    """Revenue-weighted score: relevance × price × margin.
+
+    Kept for tiebreaking and billing estimates. The serve path no longer sorts
+    on this alone, because revenue-weighting can push a weakly-related expensive
+    item above a cheaper, better-matched one.
+    """
+    score = relevance_score(candidate)
     price = float(candidate.get("price") or 0.0)
     return score * price * (margin if margin is not None else 1.0)
 
@@ -286,7 +292,10 @@ class EdgeRecommender:
 
         margins = margins or {}
         candidates.sort(
-            key=lambda c: expected_value(c, margins.get(c["product_id"])),
+            key=lambda c: (
+                relevance_score(c),
+                float(c.get("price") or 0.0),
+            ),
             reverse=True,
         )
 
@@ -332,7 +341,10 @@ class EdgeRecommender:
 
         margins = margins or {}
         candidates.sort(
-            key=lambda c: expected_value(c, margins.get(c["product_id"])),
+            key=lambda c: (
+                relevance_score(c),
+                float(c.get("price") or 0.0),
+            ),
             reverse=True,
         )
 
