@@ -23,20 +23,32 @@ import { getBillingNotifications } from "../services/notification.service";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, redirect } = await authenticate.admin(request);
 
   const isOnboarded = await getShopOnboardingCompleted(session.shop);
 
   // Check suspension status – if the shop is suspended and this is not a billing
   // route, redirect to the billing page so the merchant can reactivate.
-  const { shouldRedirect, redirectUrl, suspensionStatus } =
+  const { shouldRedirect: shouldSuspensionRedirect, redirectUrl: suspensionRedirectUrl, suspensionStatus } =
     await checkServiceSuspensionMiddleware(request, session.shop);
 
   const url = new URL(request.url);
-  const isBillingRoute = url.pathname.startsWith("/app/billing");
+  const pathname = url.pathname;
+  const isBillingRoute = pathname.startsWith("/app/billing");
 
-  if (shouldRedirect && redirectUrl && !isBillingRoute) {
-    return redirect(redirectUrl);
+  if (shouldSuspensionRedirect && suspensionRedirectUrl && !isBillingRoute) {
+    return redirect(suspensionRedirectUrl);
+  }
+
+  // ✅ NEW: Redirect non-onboarded shops to onboarding
+  // Allow access to onboarding and billing pages even if not onboarded
+  const publicAppRoutes = ["/app/onboarding", "/app/billing"];
+  const isPublicRoute = publicAppRoutes.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
+
+  if (!isOnboarded && !isPublicRoute) {
+    return redirect("/app/onboarding");
   }
 
   // Generate in-app notification banners from suspension status
