@@ -20,8 +20,10 @@ Two rules here are not tuning knobs:
 import logging
 from typing import Any, Dict, List, Optional, Sequence
 
-from sqlalchemy import text, select
+from sqlalchemy import and_, or_, exists, func, select, text
 
+from app.core.database.models.product_edge import ProductEdge
+from app.core.database.models.product_data import ProductData
 from app.core.database.models.product_vector import ProductVector
 from app.core.database.session import get_transaction_context
 
@@ -56,67 +58,172 @@ DEFAULT_RETURN_LIMIT = 3
 
 RECOMMENDABLE = ("complement", "accessory", "refill")
 
+# Surfaces that render inside checkout have no variant selector, so only
+# single-option products can be recommended without asking the shopper to
+# pick a variant they cannot see.
+CHECKOUT_SURFACES = {"mercury"}
 
-# One query: edges -> product rows -> stock/active filter -> substitute veto.
-# The NOT EXISTS clause is the substitute exclusion, and it is checked against
-# every product in the shopper's context, not just the edge's own source.
-_CANDIDATES_SQL = text(
-    """
-    SELECT DISTINCT ON (pe.target_product_id)
-           pe.target_product_id AS product_id,
-           pe.edge_type,
-           pe.blended_score,
-           pe.observed_count,
-           pe.prior_score,
-           pd.title,
-           pd.price,
-           pd.product_type,
-           pd.total_inventory
-    FROM product_edges pe
-    JOIN product_data pd
-      ON pd.shop_id = pe.shop_id AND pd.product_id = pe.target_product_id
-    WHERE pe.shop_id = :shop_id
-      AND pe.source_product_id = ANY(:context_ids)
-      AND pe.edge_type = ANY(:edge_types)
-      AND (pe.blended_score > 0 OR pe.observed_count > 0 OR pe.prior_score > 0)
-      AND pd.is_active = true
-      AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
-      AND NOT (pe.target_product_id = ANY(:exclude_ids))
-      AND NOT EXISTS (
-            SELECT 1 FROM product_edges sub
-            WHERE sub.shop_id = pe.shop_id
-              AND sub.edge_type = 'substitute'
-              AND sub.target_product_id = pe.target_product_id
-              AND sub.source_product_id = ANY(:context_ids)
-      )
-    ORDER BY pe.target_product_id, pe.blended_score DESC, pe.observed_count DESC, pe.prior_score DESC
-    LIMIT :candidate_limit
-    """
-)
+# Table aliases for the candidates query self-join (product_edges appears twice:
+# once as the main source, once in the NOT EXISTS substitute veto).
+_pe = ProductEdge.__table__.alias("pe")
+_pd = ProductData.__table__.alias("pd")
+_pe_sub = ProductEdge.__table__.alias("sub")
 
-_BASELINE_SQL = text(
+
+# ---------------------------------------------------------------------------
+# SQLAlchemy Core query builders (replace the old raw text constants)
+# ---------------------------------------------------------------------------
+
+
+def _build_candidates_query(
+    shop_id: str,
+    context_ids: List[str],
+    edge_types: Sequence[str],
+    exclude_ids: List[str],
+    candidate_limit: int,
+) -> Any:
+    """Edges → product rows → stock/active filter → substitute veto.
+
+    The NOT EXISTS clause excludes any candidate that has a substitute edge
+    pointing at it from any of the context products.
+
+    Uses a ``row_number()`` window function to keep one row per target product
+    (the best-scored one), which is the portable equivalent of PostgreSQL's
+    ``DISTINCT ON``.
     """
-    SELECT pd.product_id,
-           MAX(pe.edge_type) AS edge_type,
-           MAX(pe.blended_score) AS blended_score,
-           SUM(pe.observed_count) AS observed_count,
-           pd.title,
-           pd.price,
-           pd.product_type,
-           pd.total_inventory
-    FROM product_edges pe
-    JOIN product_data pd
-      ON pd.shop_id = pe.shop_id AND pd.product_id = pe.target_product_id
-    WHERE pe.shop_id = :shop_id
-      AND pe.edge_type = ANY(:edge_types)
-      AND pd.is_active = true
-      AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
-      AND NOT (pe.target_product_id = ANY(:exclude_ids))
-    GROUP BY pd.product_id, pd.title, pd.price, pd.product_type, pd.total_inventory
-    ORDER BY SUM(pe.blended_score) DESC
-    LIMIT :candidate_limit
-    """
-)
+    rn_col = func.row_number().over(
+        partition_by=_pe.c.target_product_id,
+        order_by=[
+            _pe.c.blended_score.desc(),
+            _pe.c.observed_count.desc(),
+            _pe.c.prior_score.desc(),
+        ],
+    ).label("rn")
+
+    inner = (
+        select(
+            _pe.c.target_product_id.label("product_id"),
+            _pe.c.edge_type,
+            _pe.c.blended_score,
+            _pe.c.observed_count,
+            _pe.c.prior_score,
+            _pd.c.title,
+            _pd.c.price,
+            _pd.c.product_type,
+            _pd.c.total_inventory,
+            _pd.c.options,
+            rn_col,
+        )
+        .join(
+            _pd,
+            and_(
+                _pd.c.shop_id == _pe.c.shop_id,
+                _pd.c.product_id == _pe.c.target_product_id,
+            ),
+        )
+        .where(
+            _pe.c.shop_id == shop_id,
+            _pe.c.source_product_id.in_(context_ids),
+            _pe.c.edge_type.in_(edge_types),
+            or_(
+                _pe.c.blended_score > 0,
+                _pe.c.observed_count > 0,
+                _pe.c.prior_score > 0,
+            ),
+            _pd.c.is_active == True,  # noqa: E712
+            or_(
+                _pd.c.total_inventory.is_(None),
+                _pd.c.total_inventory > 0,
+            ),
+            _pe.c.target_product_id.notin_(exclude_ids),
+            ~exists(
+                select(1)
+                .select_from(_pe_sub)
+                .where(
+                    and_(
+                        _pe_sub.c.shop_id == _pe.c.shop_id,
+                        _pe_sub.c.edge_type == "substitute",
+                        _pe_sub.c.target_product_id == _pe.c.target_product_id,
+                        _pe_sub.c.source_product_id.in_(context_ids),
+                    )
+                )
+            ),
+        )
+    ).subquery()
+
+    return (
+        select(
+            inner.c.product_id,
+            inner.c.edge_type,
+            inner.c.blended_score,
+            inner.c.observed_count,
+            inner.c.prior_score,
+            inner.c.title,
+            inner.c.price,
+            inner.c.product_type,
+            inner.c.total_inventory,
+            inner.c.options,
+        )
+        .where(inner.c.rn == 1)
+        .order_by(
+            inner.c.blended_score.desc(),
+            inner.c.observed_count.desc(),
+            inner.c.prior_score.desc(),
+        )
+        .limit(candidate_limit)
+    )
+
+
+def _build_baseline_query(
+    shop_id: str,
+    edge_types: Sequence[str],
+    exclude_ids: List[str],
+    candidate_limit: int,
+) -> Any:
+    """Popular products across all edge types — used when no context is available."""
+    return (
+        select(
+            ProductData.product_id,
+            func.max(ProductEdge.edge_type).label("edge_type"),
+            func.max(ProductEdge.blended_score).label("blended_score"),
+            func.sum(ProductEdge.observed_count).label("observed_count"),
+            ProductData.title,
+            ProductData.price,
+            ProductData.product_type,
+            ProductData.total_inventory,
+        )
+        .join(
+            ProductData,
+            and_(
+                ProductData.shop_id == ProductEdge.shop_id,
+                ProductData.product_id == ProductEdge.target_product_id,
+            ),
+        )
+        .where(
+            ProductEdge.shop_id == shop_id,
+            ProductEdge.edge_type.in_(edge_types),
+            ProductData.is_active == True,  # noqa: E712
+            or_(
+                ProductData.total_inventory.is_(None),
+                ProductData.total_inventory > 0,
+            ),
+            ProductEdge.target_product_id.notin_(exclude_ids),
+        )
+        .group_by(
+            ProductData.product_id,
+            ProductData.title,
+            ProductData.price,
+            ProductData.product_type,
+            ProductData.total_inventory,
+        )
+        .order_by(func.sum(ProductEdge.blended_score).desc())
+        .limit(candidate_limit)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
 
 
 def price_ceiling(surface: str, context_value: float) -> Optional[float]:
@@ -173,6 +280,65 @@ def prefer_refills(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(candidates, key=lambda c: rank.get(c.get("edge_type"), 3))
 
 
+def _is_single_option(candidate: Dict[str, Any]) -> bool:
+    """True when the product has zero or one option (no variant picker needed).
+
+    Products with multiple options require a variant selector, which checkout
+    and other constrained surfaces cannot render.
+    """
+    options = candidate.get("options")
+    if not options:
+        return True
+    return len(options) <= 1
+
+
+# ---------------------------------------------------------------------------
+# Vector similarity (kept as raw SQL — pgvector operators and CTE + CROSS JOIN
+# are not expressible in SQLAlchemy Core/ORM without losing the HNSW index).
+# ---------------------------------------------------------------------------
+
+_VECTOR_NEAREST_SQL = text(
+    """
+    SELECT pv.product_id
+    FROM product_vectors pv
+    JOIN product_data pd
+      ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
+    WHERE pv.shop_id = :shop_id
+      AND pv.product_id != :target_id
+      AND pd.is_active = true
+    ORDER BY pv.vector <=> CAST(:vec AS vector)
+    LIMIT :limit
+    """
+)
+
+_VECTOR_FALLBACK_SQL = text(
+    """
+    WITH context_vecs AS (
+        SELECT vector
+        FROM product_vectors
+        WHERE shop_id = :shop_id
+          AND product_id = ANY(:context_ids)
+    )
+    SELECT pv.product_id,
+           pd.title,
+           pd.price,
+           pd.product_type,
+           pd.options,
+           (1.0 - (pv.vector <=> cv.vector)) AS similarity
+    FROM context_vecs cv
+    CROSS JOIN product_vectors pv
+    JOIN product_data pd
+      ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
+    WHERE pv.shop_id = :shop_id
+      AND NOT (pv.product_id = ANY(:exclude_ids))
+      AND pd.is_active = true
+      AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
+    ORDER BY similarity DESC
+    LIMIT :limit
+    """
+)
+
+
 async def get_visually_similar(
     session: Any = None,
     shop_id: str = "",
@@ -197,21 +363,6 @@ async def get_visually_similar(
     if target_vector is None:
         return []
 
-    # 2. Find closest matches using pgvector HNSW
-    query = text(
-        """
-        SELECT pv.product_id 
-        FROM product_vectors pv
-        JOIN product_data pd
-          ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
-        WHERE pv.shop_id = :shop_id 
-          AND pv.product_id != :target_id
-          AND pd.is_active = true
-        ORDER BY pv.vector <=> CAST(:vec AS vector)
-        LIMIT :limit
-        """
-    )
-
     vec_str = (
         "[" + ",".join(str(float(v)) for v in target_vector) + "]"
         if not isinstance(target_vector, str)
@@ -220,7 +371,7 @@ async def get_visually_similar(
 
     rows = (
         await session.execute(
-            query,
+            _VECTOR_NEAREST_SQL,
             {
                 "shop_id": shop_id,
                 "target_id": target_product_id,
@@ -230,6 +381,11 @@ async def get_visually_similar(
         )
     ).all()
     return [row.product_id for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# EdgeRecommender
+# ---------------------------------------------------------------------------
 
 
 class EdgeRecommender:
@@ -288,6 +444,18 @@ class EdgeRecommender:
                 logger.info(
                     f"Shop {shop_id}: price ceiling {ceiling:.2f} excluded every "
                     f"candidate on {surface}; falling back to cheapest"
+                )
+
+        # Checkout surfaces have no variant selector — only single-option
+        # products can be added to cart without asking the shopper to choose.
+        if surface in CHECKOUT_SURFACES:
+            single = [c for c in candidates if _is_single_option(c)]
+            if single:
+                candidates = single
+            else:
+                logger.info(
+                    f"Shop {shop_id}: single-option filter excluded every "
+                    f"candidate on {surface}; showing multi-option products"
                 )
 
         margins = margins or {}
@@ -354,35 +522,10 @@ class EdgeRecommender:
         self, shop_id: str, context_ids: List[str], exclude_ids: List[str], limit: int = CANDIDATE_LIMIT
     ) -> List[Dict[str, Any]]:
         """Find candidates using multimodal vector similarity when graph edges are absent."""
-        query = text(
-            """
-            WITH context_vecs AS (
-                SELECT vector
-                FROM product_vectors
-                WHERE shop_id = :shop_id
-                  AND product_id = ANY(:context_ids)
-            )
-            SELECT pv.product_id,
-                   pd.title,
-                   pd.price,
-                   pd.product_type,
-                   (1.0 - (pv.vector <=> cv.vector)) AS similarity
-            FROM context_vecs cv
-            CROSS JOIN product_vectors pv
-            JOIN product_data pd
-              ON pd.shop_id = pv.shop_id AND pd.product_id = pv.product_id
-            WHERE pv.shop_id = :shop_id
-              AND NOT (pv.product_id = ANY(:exclude_ids))
-              AND pd.is_active = true
-              AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
-            ORDER BY similarity DESC
-            LIMIT :limit
-            """
-        )
         async with get_transaction_context() as session:
             rows = (
                 await session.execute(
-                    query,
+                    _VECTOR_FALLBACK_SQL,
                     {
                         "shop_id": shop_id,
                         "context_ids": context_ids,
@@ -409,6 +552,7 @@ class EdgeRecommender:
                     "title": r.title,
                     "price": float(r.price or 0.0),
                     "product_type": r.product_type,
+                    "options": r.options or [],
                     "similarity": sim,
                     "source": "vector",
                 }
@@ -418,18 +562,11 @@ class EdgeRecommender:
     async def _fetch_baseline_candidates(
         self, shop_id: str, exclude_ids: List[str]
     ) -> List[Dict[str, Any]]:
+        query = _build_baseline_query(
+            shop_id, list(RECOMMENDABLE), exclude_ids, CANDIDATE_LIMIT
+        )
         async with get_transaction_context() as session:
-            rows = (
-                await session.execute(
-                    _BASELINE_SQL,
-                    {
-                        "shop_id": shop_id,
-                        "edge_types": list(RECOMMENDABLE),
-                        "exclude_ids": exclude_ids or [""],
-                        "candidate_limit": CANDIDATE_LIMIT,
-                    },
-                )
-            ).all()
+            rows = (await session.execute(query)).all()
 
         return [
             {
@@ -448,19 +585,11 @@ class EdgeRecommender:
     async def _fetch_candidates(
         self, shop_id: str, context_ids: List[str], exclude_ids: List[str]
     ) -> List[Dict[str, Any]]:
+        query = _build_candidates_query(
+            shop_id, context_ids, list(RECOMMENDABLE), exclude_ids, CANDIDATE_LIMIT
+        )
         async with get_transaction_context() as session:
-            rows = (
-                await session.execute(
-                    _CANDIDATES_SQL,
-                    {
-                        "shop_id": shop_id,
-                        "context_ids": context_ids,
-                        "edge_types": list(RECOMMENDABLE),
-                        "exclude_ids": exclude_ids or [""],
-                        "candidate_limit": CANDIDATE_LIMIT,
-                    },
-                )
-            ).all()
+            rows = (await session.execute(query)).all()
 
         return [
             {
@@ -472,6 +601,7 @@ class EdgeRecommender:
                 "title": r.title,
                 "price": float(r.price or 0.0),
                 "product_type": r.product_type,
+                "options": r.options or [],
                 # Where the score came from, so a merchant asking "why this
                 # product?" gets an answer instead of a shrug.
                 "source": (

@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.exc import DisconnectionError, OperationalError
 
 from app.core.config.settings import settings
@@ -185,17 +185,19 @@ async def get_engine() -> AsyncEngine:
     if _engine:
         try:
             # Quick health check with shorter timeout
-            await asyncio.wait_for(
+            healthy = await asyncio.wait_for(
                 _health_check_engine(_engine),
                 timeout=5,  # Short timeout for health check
             )
-            _last_health_check = current_time
-            _connection_attempts = 0  # Reset on successful connection
-            return _engine
+            if healthy:
+                _last_health_check = current_time
+                _connection_attempts = 0  # Reset on successful connection
+                return _engine
         except (asyncio.TimeoutError, Exception) as e:
             logger.warning(f"Database engine health check failed: {e}")
-            await _cleanup_engine()
-            return await get_engine()  # Retry with new engine
+
+        await _cleanup_engine()
+        return await get_engine()  # Retry with new engine
 
     return _engine
 
@@ -214,13 +216,14 @@ async def _create_engine():
             _engine = create_engine()
 
             # Test connection immediately
-            await asyncio.wait_for(
+            healthy = await asyncio.wait_for(
                 _health_check_engine(_engine),
                 timeout=settings.DATABASE_CONNECT_TIMEOUT,
             )
 
-            _connection_attempts = 0
-            return
+            if healthy:
+                _connection_attempts = 0
+                return
 
         except asyncio.TimeoutError:
             logger.error(f"Database engine creation timeout (attempt {attempt + 1})")
@@ -252,7 +255,7 @@ async def _health_check_engine(engine: AsyncEngine) -> bool:
     """Perform a health check on the engine"""
     try:
         async with engine.begin() as conn:
-            await conn.execute("SELECT 1")
+            await conn.execute(text("SELECT 1"))
         return True
     except Exception as e:
         logger.debug(f"Engine health check failed: {e}")
@@ -289,10 +292,10 @@ async def check_engine_health() -> bool:
             return False
 
         # Quick health check with short timeout
-        await asyncio.wait_for(
+        healthy = await asyncio.wait_for(
             _health_check_engine(engine), timeout=5  # Short timeout for health check
         )
-        return True
+        return healthy
     except Exception as e:
         logger.warning(f"Database engine health check failed: {e}")
         return False

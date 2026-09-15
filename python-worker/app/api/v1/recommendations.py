@@ -629,7 +629,8 @@ async def get_recommendations(
     except (Exception, RecommendationLogicError) as e:
         logger.error(
             f"💥 Recommendation request failed | shop={request.shop_domain} "
-            f"| context={request.context} | error={e}"
+            f"| context={request.context} | error={e}",
+            exc_info=True,
         )
         recommendation_duration.record(
             time.time() - start,

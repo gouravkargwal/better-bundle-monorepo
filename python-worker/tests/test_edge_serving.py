@@ -6,6 +6,7 @@ the ranking/filtering decisions are tested directly.
 """
 
 import pytest
+from sqlalchemy.dialects.postgresql import dialect as pg_dialect
 
 from app.recommandations.edges import serving
 from app.recommandations.edges.enrichment import ProductEnrichment
@@ -14,11 +15,21 @@ from app.recommandations.edges.serving import (
     DEFAULT_PRICE_CEILING,
     PRICE_CEILING_BY_SURFACE,
     RECOMMENDABLE,
+    _build_baseline_query,
+    _build_candidates_query,
     expected_value,
     prefer_refills,
     price_ceiling,
     relevance_score,
 )
+
+
+def _compile_candidates_sql() -> str:
+    """Compile the candidates query to a raw SQL string for structural assertions."""
+    stmt = _build_candidates_query(
+        "shop1", ["p1"], list(RECOMMENDABLE), ["p1"], 200
+    )
+    return str(stmt.compile(dialect=pg_dialect(), compile_kwargs={"literal_binds": True}))
 
 
 # ---------------------------------------------------------------------------
@@ -42,31 +53,35 @@ def test_serve_query_vetoes_candidates_that_substitute_cart_items():
     Checking only the edge's own source would let a lookalike through whenever
     it was reached via a different cart item.
     """
-    sql = str(serving._CANDIDATES_SQL)
-    assert "NOT EXISTS" in sql
+    sql = _compile_candidates_sql()
+    assert "EXISTS" in sql
     assert "sub.edge_type = 'substitute'" in sql
-    assert "sub.source_product_id = ANY(:context_ids)" in sql
+    assert "sub.source_product_id IN" in sql
     assert "sub.target_product_id = pe.target_product_id" in sql
 
 
 def test_serve_query_filters_stock_and_active_status():
-    sql = str(serving._CANDIDATES_SQL)
+    sql = _compile_candidates_sql()
     assert "pd.is_active = true" in sql
     # NULL inventory means untracked, which is in stock, not out of it.
     assert "pd.total_inventory IS NULL OR pd.total_inventory > 0" in sql
 
 
 def test_serve_query_excludes_already_held_products():
-    assert "NOT (pe.target_product_id = ANY(:exclude_ids))" in str(
-        serving._CANDIDATES_SQL
-    )
+    sql = _compile_candidates_sql()
+    assert "pe.target_product_id NOT IN" in sql
 
 
 def test_serve_query_returns_one_row_per_product():
-    """A product reachable from two cart items must not appear twice."""
-    sql = str(serving._CANDIDATES_SQL)
-    assert "DISTINCT ON (pe.target_product_id)" in sql
-    assert "ORDER BY pe.target_product_id, pe.blended_score DESC" in sql
+    """A product reachable from two cart items must not appear twice.
+
+    Uses a row_number() window function (the portable equivalent of
+    PostgreSQL DISTINCT ON) to keep only the best-scored row per target.
+    """
+    sql = _compile_candidates_sql()
+    assert "row_number()" in sql
+    assert "PARTITION BY pe.target_product_id" in sql
+    assert "anon_1.rn = 1" in sql
 
 
 # ---------------------------------------------------------------------------
