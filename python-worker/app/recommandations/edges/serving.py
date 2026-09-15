@@ -333,6 +333,7 @@ _VECTOR_FALLBACK_SQL = text(
       AND NOT (pv.product_id = ANY(:exclude_ids))
       AND pd.is_active = true
       AND (pd.total_inventory IS NULL OR pd.total_inventory > 0)
+      AND pd.product_type = ANY(:product_types)
     ORDER BY similarity DESC
     LIMIT :limit
     """
@@ -521,19 +522,45 @@ class EdgeRecommender:
     async def _fetch_vector_candidates(
         self, shop_id: str, context_ids: List[str], exclude_ids: List[str], limit: int = CANDIDATE_LIMIT
     ) -> List[Dict[str, Any]]:
-        """Find candidates using multimodal vector similarity when graph edges are absent."""
+        """Find candidates using multimodal vector similarity when graph edges are absent.
+
+        Filters by the context products' ``product_type`` so the fallback stays
+        within the same category (e.g. shoes → shoes, not shoes → bags).
+        """
         async with get_transaction_context() as session:
-            rows = (
+            # Look up the product_type(s) of the context products so the
+            # vector search stays within the same category.
+            type_rows = (
                 await session.execute(
-                    _VECTOR_FALLBACK_SQL,
-                    {
-                        "shop_id": shop_id,
-                        "context_ids": context_ids,
-                        "exclude_ids": exclude_ids or [""],
-                        "limit": limit,
-                    },
+                    select(ProductData.product_type).where(
+                        ProductData.shop_id == shop_id,
+                        ProductData.product_id.in_(context_ids),
+                        ProductData.product_type.isnot(None),
+                        ProductData.product_type != "",
+                    ).distinct()
                 )
             ).all()
+            product_types = [r[0] for r in type_rows]
+
+            params: Dict[str, Any] = {
+                "shop_id": shop_id,
+                "context_ids": context_ids,
+                "exclude_ids": exclude_ids or [""],
+                "limit": limit,
+            }
+            if product_types:
+                params["product_types"] = product_types
+                query = _VECTOR_FALLBACK_SQL
+            else:
+                # No product_type on context products — fall back to an
+                # unfiltered vector search so the widget isn't empty.
+                query = text(
+                    str(_VECTOR_FALLBACK_SQL).replace(
+                        "AND pd.product_type = ANY(:product_types)", ""
+                    )
+                )
+
+            rows = (await session.execute(query, params)).all()
 
         seen = set()
         candidates = []
