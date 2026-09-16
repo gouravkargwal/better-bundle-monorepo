@@ -336,6 +336,13 @@ Priority: **Founder / Owner / CEO → E-commerce Manager → Head of Digital / M
 **HARD RULE:** never use "Founding Team" or "The Team" as contact_name. Must be a
 real person. No person found → skip.
 
+**contact_name is a NAME, never a title.** "Founder", "Owner", "CEO", "Team",
+"Support", "Store" and the like are what you searched for, not what you found.
+Writing one into the column produces `Hi Founder,` in the merchant's inbox, which
+reads as a merge field that failed — it shipped 5 times. `format_email` now
+rewrites those to `Hi there,`, but that is a net, not a licence: a row with no
+real name fails the person gate above and should have been skipped.
+
 ### Step 5 — FIND EMAIL (waterfall, EXHAUST each level)
 
 ROLE_PREFIXES = [hello, info, contact, support, sales, press, office, team, help,
@@ -392,6 +399,21 @@ quantity — 7 great prospects beat 10 mediocre ones. NEVER invent an email.
 Include: product count, vendor count, top product types, the volume signal you
 found, and any recommendation app detected. No invented numbers.
 
+**MINIMUM: 15 words AND at least two specifics, one of which is a number.** A
+specific is a product count, a vendor count, a review count, a named collection,
+a named product, or a detected app — something you can point at on a page.
+
+Paid for in production: the median `website_info` across the first 79 rows was
+**five words**. "Rare historical artifacts, autographs". "Hand-dyed yarn, high
+repeat purchase". Those are category labels, not research. A category label gives
+the drafting step nothing to hook on, so it reaches for the house template — which
+is exactly what happened, in 64 of 79 rows. **The sameness of the copy was caused
+here, at Step 6, not at Step 7.** If you cannot get to two specifics, the prospect
+is not researched; skip it rather than hand Step 7 a label.
+
+Also record the two product names you will use for the pairing (Step 7's concrete-
+pairing test), so the claim traces back to this column.
+
 ### Step 7 — DRAFT email → subject + body (COPY RULES below)
 
 **These two columns ship verbatim.** `import_prospects` loads them into
@@ -415,6 +437,46 @@ number, it has failed* — rewrite it, do not append it.
 Paid for in production: the first nine sent emails shared "no monthly fee, no card"
 9/9 and "if it finds nothing, it costs nothing" 9/9, and three were structurally
 identical. Two of those landing in one inbox reads as a mail merge.
+
+**MANDATORY LAST — run the checker. The row does not get appended until it says OK.**
+
+```bash
+echo '{"company":"...","subject":"...","body":"...","website_info":"..."}' \
+  | python outreach/engine.py check-draft
+```
+
+JSON on stdin, so apostrophes and em-dashes in the copy cannot break quoting.
+Exit 0 prints `OK`. Exit 1 prints one `FAIL:` line per problem — fix the copy and
+re-run until it passes. It checks, deterministically:
+
+- every phrase in `engine.BANNED_PHRASES` (surfaces we do not have, claims about
+  their pages, "checkout history", "verified orders")
+- numbers in the body that appear in neither `website_info` nor the subject
+- a subject that is only the company name with the stopwords removed
+- sentence count (must be 3 or 4) and the 110-word ceiling
+- **hook echo** — any six-word run your FIRST SENTENCE (beat 1) shares with a
+  first email already in the database
+
+**The hook-echo check is the one that matters.** Reading the last 8 sent emails by
+eye did not stop the drift: 64 of the first 79 bodies shared this 25-word spine,
+and every one of them was written after reading the previous ones.
+
+> …is already forming in your verified orders, but collections can't see it.
+> BetterBundle reads your actual checkout history to find those add-ons, then
+> shows them at checkout and after purchase with no monthly fee.
+
+The offer terms are *supposed* to repeat — "no monthly fee, no card, billed only
+on revenue it can attribute" is the offer, not a template. The checker compares
+**beat 1 only, your first sentence.** Beats 2 and 3 (the mechanism, the surfaces,
+the billing terms, the opt-out) are near-identical every time by design, and
+checking them would make the gate unsatisfiable. **Only beat 1 must be new.**
+
+If the checker reports an echo, do not reword around it; go back to
+`website_info` and hook on a different fact.
+
+The same checks run again in `generate_email` at send time, so a row that slips
+through is held back rather than sent — but it is held back *silently, in a batch
+you thought was queued*. Run it here.
 
 ### Step 8 — APPEND row to prospects.csv
 
@@ -550,8 +612,17 @@ word count in the log line for the row.
   surface exists for any of them. Product page (`phoenix`) and order status
   (`venus`) ARE shipped and are the two you should normally name — see the surface
   table at the top.
-- **NEVER name checkout as the surface.** Plus-only; our ICP is not Plus.
+- **NEVER name checkout as the surface.** Plus-only; our ICP is not Plus. This
+  shipped in **77 of the first 95 emails** — it is the single most-repeated false
+  claim in the campaign, and it promises a block the merchant cannot switch on.
 - **NEVER claim anything about their checkout or thank-you page.** Unverifiable.
+- **It is ORDER history, never "checkout history".** There is no such thing.
+  "reads your actual checkout history" went to 54 merchants — in the one sentence
+  whose entire job is to prove we read their data carefully. Getting the name of
+  the data wrong discredits the only claim the email is making.
+- **NEVER write "your verified orders" or any phrasing that implies we have
+  already seen their data.** We have seen nothing until they install; their orders
+  are what the install unlocks. Say what the app *would* read, not what we have read.
 - subject: lowercase, 4–7 words, **MUST contain ONE specific fact from their store**
   (product count, brand count, a product type, the app they run). Generic subjects
   like "boost your AOV" are BANNED.
@@ -592,8 +663,20 @@ offer into one "line" and is why bodies drifted to 110 words.
    **The opt-out is first for a reason.** It is the CTA on the only email in the
    previous campaign that got a reply (see Production Learnings), and it was
    missing from this list while follow-up #2 used it. It asks the prospect to do
-   nothing, which is the lowest-friction ask available. Rotate the others in for
-   variety; do not let a batch go out without it appearing.
+   nothing, which is the lowest-friction ask available.
+
+   **Use it on at least half the batch.** The last batch inverted this — "worth a
+   look?" 65 times against 6 opt-outs, on a list where the opt-out is the only
+   CTA with evidence behind it. Before appending a row, check the running split:
+
+   ```bash
+   sqlite3 outreach/outreach.db "SELECT
+     SUM(body LIKE '%no thanks%') opt_out, SUM(body LIKE '%worth a look%') worth,
+     COUNT(*) total FROM emails WHERE seq=1;"
+   ```
+
+   If `opt_out` is under half of `total`, the next row uses the opt-out. Rotate
+   the other three in for variety, never to replace it.
 
 **Never promise a pre-install report or "what it finds."** See The offer above.
 
@@ -658,6 +741,16 @@ someone who looked.
 ---
 
 ## Quality gates (ENFORCED)
+
+**Everything in this list that can be checked by a command now is.** Run
+`python outreach/engine.py check-draft` (Step 7) on every row before appending it.
+
+The gates below were already written, in this file, when the first 95 emails went
+out. They did not hold: **77 of 95 carried a phrase the engine already banned**,
+because the prose list was self-assessed and `generate_email` shipped the CSV
+verbatim with no check. A gate nobody runs is a comment. Treat the ones the
+checker cannot verify — the sourcing rules, the pairing test — as the ones that
+still need your judgement, and spend it there.
 
 - **100% of rows email_type=personal.** No role fallback. Report personal/skipped split.
 - **Every inferred address shows `verdict=VERIFIED`.** A `CATCHALL` is a skip.

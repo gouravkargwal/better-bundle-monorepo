@@ -25,8 +25,8 @@ class BaseGenerator:
             "collection_3_id": f"gid://shopify/Collection/{self.base_id + 3003}",
         }
 
-        # Products (50 total for more variety and better recommendations)
-        for i in range(1, 51):
+        # Products (up to 1100 for full CSV catalog)
+        for i in range(1, 1101):
             ids[f"product_{i}_id"] = f"gid://shopify/Product/{self.base_id + i}"
             ids[f"variant_{i}_id"] = (
                 f"gid://shopify/ProductVariant/{self.base_id + 1000 + i}"
@@ -38,12 +38,12 @@ class BaseGenerator:
                 f"gid://shopify/Customer/{self.base_id + 5000 + i}"
             )
 
-        # Orders (40 total for more purchase patterns and feedback)
-        for i in range(1, 41):
+        # Orders (up to 200 for realistic co-purchase data)
+        for i in range(1, 201):
             ids[f"order_{i}_id"] = f"gid://shopify/Order/{self.base_id + 7000 + i}"
 
-        # Line items (multiple per order - increased for more feedback)
-        for i in range(1, 100):  # Up to 2-3 per order, more line items
+        # Line items (up to 500)
+        for i in range(1, 501):
             ids[f"line_item_{i}_id"] = (
                 f"gid://shopify/LineItem/{self.base_id + 8000 + i}"
             )

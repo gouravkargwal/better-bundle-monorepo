@@ -10,6 +10,7 @@ describe("SyncStatusCard helpers", () => {
     productsTotal: 100,
     productsActive: 90,
     productsEmbedded: 90,
+    productsInStore: 100,
     collectionsTotal: 10,
     ordersTotal: 500,
     edgesTotal: 200,
@@ -38,6 +39,26 @@ describe("SyncStatusCard helpers", () => {
       });
       expect(badge.label).toBe("Indexing in progress");
       expect(badge.tone).toBe("attention");
+    });
+
+    it("flags an incomplete catalog even when everything imported is embedded", () => {
+      // The regression this guards: 251 of 997 products imported, all of them
+      // embedded, and every figure on the card read 100% because the
+      // denominator was our own import count.
+      const badge = getSyncStatusBadge({
+        ...baseSync,
+        productsTotal: 251,
+        productsActive: 251,
+        productsEmbedded: 251,
+        productsInStore: 997,
+      });
+      expect(badge.label).toBe("Catalog sync incomplete");
+      expect(badge.tone).toBe("attention");
+    });
+
+    it("returns 'Up to date' when the store count is not yet known", () => {
+      const badge = getSyncStatusBadge({ ...baseSync, productsInStore: null });
+      expect(badge.label).toBe("Up to date");
     });
 
     it("returns 'Up to date' when active products are fully embedded", () => {

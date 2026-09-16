@@ -23,6 +23,13 @@ class DataCollectionKafkaConsumer:
         self._initialized = False
         self.dlq_service = DLQService()
 
+        # How many messages to work on at once. Kept modest: each one makes
+        # Shopify calls, and max_poll_interval_ms still has to cover the
+        # slowest message in a batch.
+        self.MAX_CONCURRENT_MESSAGES = 10
+        # Longest a partially filled batch waits before being processed.
+        self.BATCH_WAIT_SECONDS = 2.0
+
     async def initialize(self):
         """Initialize consumer"""
         try:
@@ -43,20 +50,110 @@ class DataCollectionKafkaConsumer:
             raise
 
     async def start_consuming(self):
-        """Start consuming messages"""
+        """Consume in small concurrent batches.
+
+        One-message-at-a-time was the shape of the problem: each webhook takes
+        seconds (a Shopify fetch, a write, a publish), so a single serial
+        consumer topped out near 0.2 messages/second while a bulk catalog
+        change produced them four times faster. The lag grew without bound and
+        never drained.
+
+        Messages are taken in batches, run concurrently, and the batch is
+        committed only once every message in it has finished. Committing at the
+        batch boundary keeps the usual Kafka guarantee — a committed offset
+        means everything before it is done — so a crash mid-batch replays the
+        whole batch rather than losing the slow messages in it. Replay is safe
+        because storage is an upsert.
+        """
         if not self._initialized:
             await self.initialize()
+
+        # A reader task feeds a queue, and the batcher waits on the queue.
+        #
+        # The batcher needs a timeout so a partial batch still gets processed
+        # when traffic is thin. Applying that timeout directly to the consumer
+        # iterator is what it must not do: asyncio.wait_for cancels whatever it
+        # is waiting on, so every idle window tore down an in-flight Kafka
+        # fetch. Throughput collapsed to a trickle even though each message
+        # only takes about a second. Cancelling a queue get is harmless.
+        queue: asyncio.Queue = asyncio.Queue(
+            maxsize=self.MAX_CONCURRENT_MESSAGES * 2
+        )
+        reader = asyncio.create_task(self._fill_queue(queue))
+
+        batch: list = []
         try:
-            async for message in self.consumer.consume():
+            while True:
                 try:
-                    await self._handle_message(message)
-                    await self.consumer.commit(message)
-                except Exception as e:
-                    logger.error(f"Error processing data collection message: {e}")
+                    message = await asyncio.wait_for(
+                        queue.get(), timeout=self.BATCH_WAIT_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    if batch:
+                        await self._process_batch(batch)
+                        batch = []
+                    if reader.done():
+                        break
                     continue
+
+                if message is None:  # reader finished
+                    break
+
+                batch.append(message)
+                if len(batch) >= self.MAX_CONCURRENT_MESSAGES:
+                    await self._process_batch(batch)
+                    batch = []
         except Exception as e:
             logger.exception(f"❌ Error in data collection consumer: {e}")
             raise
+        finally:
+            if batch:
+                await self._process_batch(batch)
+            reader.cancel()
+            try:
+                await reader
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def _fill_queue(self, queue: asyncio.Queue) -> None:
+        """Read the consumer into `queue`, blocking when the batcher is busy.
+
+        The queue is bounded, so this backs off naturally instead of reading
+        the whole backlog into memory.
+        """
+        try:
+            async for message in self.consumer.consume():
+                await queue.put(message)
+        finally:
+            await queue.put(None)
+
+    async def _process_batch(self, batch: list) -> None:
+        """Run a batch concurrently, then commit up to its last message."""
+        results = await asyncio.gather(
+            *(self._handle_message(m) for m in batch), return_exceptions=True
+        )
+
+        for message, result in zip(batch, results):
+            if isinstance(result, BaseException):
+                logger.error(
+                    f"Error processing data collection message at offset "
+                    f"{message.get('offset')}: {result}"
+                )
+
+        # Commit the batch's furthest offset per partition. Messages that
+        # failed are logged above and not retried here; the collection path
+        # does its own retry and DLQs what it cannot complete.
+        furthest = {}
+        for message in batch:
+            key = (message.get("topic"), message.get("partition"))
+            if message.get("offset", -1) >= furthest.get(key, (None, -1))[1]:
+                furthest[key] = (message, message.get("offset", -1))
+
+        for message, _ in furthest.values():
+            try:
+                await self.consumer.commit(message)
+            except Exception as e:
+                logger.error(f"Failed to commit offset: {e}")
 
     async def close(self):
         """Close consumer"""

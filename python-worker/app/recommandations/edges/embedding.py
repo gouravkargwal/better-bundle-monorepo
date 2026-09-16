@@ -13,7 +13,9 @@ is safe to run on every `products/update` webhook.
 """
 
 import base64
+import asyncio
 import hashlib
+import math
 import logging
 import os
 from datetime import datetime
@@ -52,11 +54,36 @@ def build_product_text(product: ProductData) -> str:
     return " | ".join(p for p in parts if p)
 
 
+# Bump when the meaning of a stored vector changes, so existing rows are
+# recomputed instead of being silently compared against vectors built a
+# different way. v2: image and text embeddings are combined rather than the
+# text being discarded whenever an image exists.
+VECTOR_RECIPE_VERSION = "v2"
+
+
+def _combine(image_vec: List[float], text_vec: List[float]) -> List[float]:
+    """Merge the image and text embeddings into one unit vector.
+
+    Vertex returns both in a shared space, so the mean of the two is a valid
+    point in it. Re-normalising keeps every stored vector unit length, which
+    is what the cosine index assumes.
+    """
+    if image_vec and text_vec and len(image_vec) == len(text_vec):
+        merged = [(a + b) / 2.0 for a, b in zip(image_vec, text_vec)]
+    else:
+        merged = image_vec or text_vec
+
+    norm = math.sqrt(sum(v * v for v in merged))
+    if norm == 0:
+        return merged
+    return [v / norm for v in merged]
+
+
 def build_multimodal_hash(product: ProductData) -> str:
     """Hash both the image URL and the text so any change triggers a re-embed."""
     content = (
-        f"{product.image_url}|{product.title}|{product.product_type}"
-        f"|{product.description}|{product.tags}"
+        f"{VECTOR_RECIPE_VERSION}|{product.image_url}|{product.title}"
+        f"|{product.product_type}|{product.description}|{product.tags}"
     )
     return hashlib.md5(content.encode()).hexdigest()
 
@@ -76,6 +103,16 @@ class ProductEmbedder:
         client: Optional[Any] = None,
     ):
         self.model_name = model_name
+        # Products encoded at once. Each is an image fetch plus a Vertex
+        # predict, so this is the difference between minutes and hours on a
+        # large catalog; kept modest to stay inside Vertex quota and because
+        # each one holds a product image in memory while it is encoded.
+        self.encode_concurrency = 4
+        # Largest product image to embed. Shopify serves originals, which can
+        # be tens of megabytes; several of those decoded at once is enough to
+        # take down a container on a small host. Anything larger falls back to
+        # the text embedding rather than being fetched into memory.
+        self.max_image_bytes = 8 * 1024 * 1024
         self.location = location
         if not project_id:
             from app.core.config.settings import settings
@@ -115,53 +152,93 @@ class ProductEmbedder:
 
     async def _encode_multimodal(
         self, products: Sequence[ProductData]
-    ) -> List[List[float]]:
-        embeddings = []
+    ) -> List[Optional[List[float]]]:
+        """Embed each product, combining its image and text signals.
 
-        # Async HTTP client to fetch Shopify images
+        Products are encoded concurrently. One-at-a-time meant a catalog of a
+        thousand products was a thousand serial round trips (image fetch, then
+        Vertex predict), which is hours rather than minutes.
+
+        Returns one entry per product, in order; None where the product could
+        not be embedded, so the caller can skip it rather than store junk.
+        """
+        semaphore = asyncio.Semaphore(self.encode_concurrency)
+
         async with httpx.AsyncClient() as http_client:
-            for product in products:
-                # 1. Fetch the image bytes from Shopify URL (HTTPS only)
-                image_bytes = None
-                if product.image_url and product.image_url.startswith("https://"):
-                    try:
-                        image_response = await http_client.get(
-                            product.image_url, timeout=15.0
-                        )
-                        if image_response.status_code == 200:
-                            image_bytes = image_response.content
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to fetch image for product {product.product_id} "
-                            f"from {product.image_url}: {e}"
-                        )
 
-                # 2. Build the context text (Title + Type + Description + Tags)
-                context_text = build_product_text(product)
+            async def encode(product: ProductData) -> Optional[List[float]]:
+                async with semaphore:
+                    return await self._encode_one(product, http_client)
 
-                # 3. Call Vertex AI Prediction Service
-                instance_dict: Dict[str, Any] = {"text": context_text}
-                if image_bytes:
-                    instance_dict["image"] = {
-                        "bytesBase64Encoded": base64.b64encode(image_bytes).decode(
-                            "utf-8"
-                        )
-                    }
+            return list(
+                await asyncio.gather(*(encode(p) for p in products))
+            )
 
-                instance = Value()
-                json_format.ParseDict(instance_dict, instance)
-
-                response = await self.client.predict(
-                    endpoint=self.endpoint,
-                    instances=[instance],
+    async def _encode_one(
+        self, product: ProductData, http_client: "httpx.AsyncClient"
+    ) -> Optional[List[float]]:
+        # 1. Fetch the image bytes from Shopify URL (HTTPS only)
+        image_bytes = None
+        if product.image_url and product.image_url.startswith("https://"):
+            try:
+                image_response = await http_client.get(
+                    product.image_url, timeout=15.0
                 )
-                pred = dict(response.predictions[0])
-                if image_bytes and "imageEmbedding" in pred:
-                    embeddings.append(list(pred["imageEmbedding"]))
-                else:
-                    embeddings.append(list(pred.get("textEmbedding", [])))
+                if image_response.status_code == 200:
+                    content = image_response.content
+                    if len(content) > self.max_image_bytes:
+                        logger.warning(
+                            f"Image for product {product.product_id} is "
+                            f"{len(content) // 1048576}MB, over the "
+                            f"{self.max_image_bytes // 1048576}MB limit; "
+                            f"embedding text only"
+                        )
+                    else:
+                        image_bytes = content
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch image for product {product.product_id} "
+                    f"from {product.image_url}: {e}"
+                )
 
-        return embeddings
+        # 2. Build the context text (Title + Type + Description + Tags)
+        context_text = build_product_text(product)
+
+        # 3. Call Vertex AI Prediction Service
+        instance_dict: Dict[str, Any] = {"text": context_text}
+        if image_bytes:
+            instance_dict["image"] = {
+                "bytesBase64Encoded": base64.b64encode(image_bytes).decode("utf-8")
+            }
+
+        instance = Value()
+        json_format.ParseDict(instance_dict, instance)
+
+        try:
+            response = await self.client.predict(
+                endpoint=self.endpoint,
+                instances=[instance],
+            )
+            pred = dict(response.predictions[0])
+        except Exception as e:
+            logger.warning(f"Embedding call failed for {product.product_id}: {e}")
+            return None
+
+        image_vec = list(pred.get("imageEmbedding") or [])
+        text_vec = list(pred.get("textEmbedding") or [])
+
+        # Use both signals. Taking only the image threw away the title, type
+        # and tags that were computed and paid for in the same call, and left
+        # image-only and text-only products sitting in one index describing
+        # different things.
+        vector = _combine(image_vec, text_vec)
+        if len(vector) != VECTOR_DIM:
+            logger.warning(
+                f"Product {product.product_id}: expected {VECTOR_DIM} dimensions, "
+                f"got {len(vector)}; skipping rather than storing a bad vector"
+            )
+            return None
+        return vector
 
     async def embed_shop(
         self, shop_id: str, product_ids: Optional[List[str]] = None
@@ -176,6 +253,7 @@ class ProductEmbedder:
 
             existing = await self._existing_hashes(shop_id)
 
+            processed = len(products)
             pending: List[Tuple[ProductData, str]] = []  # (product, digest)
             skipped = 0
             for product in products:
@@ -186,9 +264,23 @@ class ProductEmbedder:
                     continue
                 pending.append((product, digest))
 
+            # Stop holding the products that are already up to date, and the
+            # hash map, before any image bytes are fetched.
+            products.clear()
+            existing.clear()
+
+            # Consume `pending` from the front so each product is released once
+            # its chunk is stored. Slicing it instead would leave every product
+            # referenced by `pending` for the whole run: a thousand
+            # ProductData rows, each carrying its variants, images, media and
+            # metafields JSON, alongside the image bytes being downloaded — in
+            # a container sharing a small VM with Postgres, Kafka and Redis.
             embedded = 0
-            for chunk in _chunk(pending, ENCODE_BATCH_SIZE):
+            while pending:
+                chunk = pending[:ENCODE_BATCH_SIZE]
+                del pending[:ENCODE_BATCH_SIZE]
                 embedded += await self._store_chunk(shop_id, chunk)
+                chunk.clear()
 
             duration = (datetime.now() - start).total_seconds()
             logger.info(
@@ -197,7 +289,7 @@ class ProductEmbedder:
             )
             return {
                 "success": True,
-                "processed": len(products),
+                "processed": processed,
                 "embedded": embedded,
                 "skipped": skipped,
                 "duration_seconds": round(duration, 2),
@@ -250,8 +342,16 @@ class ProductEmbedder:
         chunk_products = [prod for prod, _ in chunk]
         vectors = await self._encode_multimodal(chunk_products)
 
+        stored = 0
         async with get_transaction_context() as session:
             for (product, digest), vector in zip(chunk, vectors):
+                # A product that could not be embedded is left alone: writing
+                # the hash anyway would mark it done and it would never be
+                # retried, and returning it in the count would report work
+                # that did not happen.
+                if not vector:
+                    continue
+                stored += 1
                 existing = (
                     await session.execute(
                         select(ProductVector).where(
@@ -277,7 +377,7 @@ class ProductEmbedder:
                             model_version=self.model_name,
                         )
                     )
-        return len(chunk)
+        return stored
 
 
 def _chunk(items: List[Any], size: int) -> Iterable[List[Any]]:

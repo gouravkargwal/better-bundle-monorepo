@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import select
 from app.core.database.models import Shop
@@ -14,6 +15,30 @@ class ShopRepository:
         Repository handles its own session management.
         """
         self.session_factory = session_factory or get_session_context
+
+    async def update_catalog_totals(self, shop_id: str, counts: dict) -> None:
+        """Record Shopify's own catalog totals on the shop.
+
+        Stored in `settings` so sync progress can be measured against what the
+        store actually has. Comparing our ingested rows against our own
+        ingested rows always reads 100%, which is how a three-quarters-missing
+        catalog showed as fully synced.
+        """
+        async with self.session_factory() as session:
+            shop = (
+                await session.execute(select(Shop).where(Shop.id == shop_id))
+            ).scalar_one_or_none()
+            if not shop:
+                return
+
+            # JSON columns need a new object to be seen as dirty.
+            settings = dict(shop.settings or {})
+            settings["catalog_totals"] = {
+                **counts,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            shop.settings = settings
+            await session.commit()
 
     async def get_active_by_id(self, shop_id: str) -> Optional[Shop]:
         """

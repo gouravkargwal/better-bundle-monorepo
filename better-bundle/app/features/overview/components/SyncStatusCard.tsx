@@ -17,6 +17,13 @@ export function getSyncStatusBadge(sync: SyncStatus): {
   if (sync.productsTotal === 0 && sync.ordersTotal === 0) {
     return { tone: "attention", label: "Awaiting initial sync" };
   }
+  // A catalog we have only partly ingested is the one thing this badge most
+  // needs to surface, and it used to be invisible: every figure here was
+  // measured against our own imported rows, so the card read "up to date"
+  // with most of the store missing.
+  if (isCatalogIncomplete(sync)) {
+    return { tone: "attention", label: "Catalog sync incomplete" };
+  }
   if (
     sync.productsActive > 0 &&
     sync.productsEmbedded < sync.productsActive
@@ -24,6 +31,13 @@ export function getSyncStatusBadge(sync: SyncStatus): {
     return { tone: "attention", label: "Indexing in progress" };
   }
   return { tone: "success", label: "Up to date" };
+}
+
+/** True when Shopify reports more products than we have imported. */
+export function isCatalogIncomplete(sync: SyncStatus): boolean {
+  return (
+    sync.productsInStore != null && sync.productsTotal < sync.productsInStore
+  );
 }
 
 export function formatLastSynced(
@@ -57,6 +71,18 @@ export function formatLastSynced(
 
 export interface SyncStatusCardProps {
   sync: SyncStatus;
+}
+
+function productsSubtitle(sync: SyncStatus): string {
+  if (sync.productsTotal === 0) return "No products synced yet";
+  if (sync.productsInStore == null) {
+    return `${sync.productsActive.toLocaleString()} active`;
+  }
+  const missing = sync.productsInStore - sync.productsTotal;
+  if (missing > 0) {
+    return `${missing.toLocaleString()} not yet imported from Shopify`;
+  }
+  return `${sync.productsActive.toLocaleString()} active — full catalog imported`;
 }
 
 export function SyncStatusCard({ sync }: SyncStatusCardProps) {
@@ -98,13 +124,19 @@ export function SyncStatusCard({ sync }: SyncStatusCardProps) {
         <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
           <MetricTile
             label="Products synced"
-            value={sync.productsTotal.toLocaleString()}
-            sub={
-              sync.productsTotal > 0
-                ? `${sync.productsActive.toLocaleString()} active in store`
-                : "No products synced yet"
+            value={
+              sync.productsInStore != null
+                ? `${sync.productsTotal.toLocaleString()} / ${sync.productsInStore.toLocaleString()}`
+                : sync.productsTotal.toLocaleString()
             }
-            tooltip="Total products imported from Shopify into BetterBundle database."
+            sub={productsSubtitle(sync)}
+            progress={
+              sync.productsInStore != null && sync.productsInStore > 0
+                ? { value: sync.productsTotal, max: sync.productsInStore }
+                : undefined
+            }
+            tone={isCatalogIncomplete(sync) ? "caution" : undefined}
+            tooltip="Products imported from Shopify, against the number your store actually has."
           />
 
           <MetricTile

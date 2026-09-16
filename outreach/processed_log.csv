@@ -375,3 +375,54 @@ Traisto,traisto.gr,hi@traisto.gr,skipped,2026-09-15 10:12:30,verify_queued,mx_un
 Barrita Orchids,barritaorchids.com,scott@barritaorchids.com,skipped,2026-09-15 10:12:30,verify_queued,mx_unreachable — could not verify
 Mila's Apothecary,milasapothecary.co.uk,info@milasapothecary.co.uk,skipped,2026-09-15 10:12:30,verify_queued,mx_unreachable — could not verify
 Miggy's Toronto,miggystoronto.com,orders@miggystoronto.com,skipped,2026-09-15 10:12:30,verify_queued,mx_unreachable — could not verify
+Garden Goods Direct,gardengoodsdirect.com,rich@gardengoodsdirect.com,batch2,new,,2026-09-16 10:47:34
+Pet Life,shop.petlife.com,,batch2,skipped,mx_unreachable,2026-09-16 10:47:57
+Happy Houseplants,happyhouseplants.co.uk,,batch2,skipped,catalog_too_small,2026-09-16 10:47:57
+Meow Meow Tweet,meowmeowtweet.com,,batch2,skipped,catchall,2026-09-16 10:47:57
+Green Supply,greensupply.com,,batch2,skipped,catchall,2026-09-16 10:47:57
+ARMRA,armra.com,,batch2,skipped,catchall,2026-09-16 10:47:57
+Wild One,wildone.com,,batch2,skipped,no_personal_email,2026-09-16 10:47:57
+Ethique,ethique.com,,batch2,skipped,no_personal_email,2026-09-16 10:47:57
+Chomps,chomps.com,,batch2,skipped,catalog_too_small,2026-09-16 10:47:57
+Jeffers Pet,jefferspet.com,,batch2,skipped,unreachable,2026-09-16 10:47:57
+Jones Bar,jonesbar.com,,batch2,skipped,catalog_too_small,2026-09-16 10:47:57
+The Public Pet,thepublicpet.com,,batch2,skipped,no_volume_signal,2026-09-16 10:49:38
+Lizeo,shoplizeo.com,michelle@shoplizeo.com,batch2,new,,2026-09-16 10:58:58
+Mr. Larkin,mrlarkin.com,,batch2,skipped,no_volume_signal,2026-09-16 11:00:16
+SYLK,sylk-store.com,,batch2,skipped,no_volume_signal,2026-09-16 11:00:16
+Passion Lilie Beatrix Bell,plbbcollective.myshopify.com,,batch2,skipped,mx_unreachable,2026-09-16 11:00:16
+East Fork,eastfork.com,alex@eastfork.com,batch2,new,,2026-09-16 11:03:33
+Skincare By Alana,skincarebyalana.com,alana@skincarebyalana.com,batch3,new,,2026-09-16 14:53:30
+milk + honey,milkandhoney.com,,batch3,skipped,too_large,2026-09-16 15:19:02
+Roolee,roolee.com,kylee@roolee.com,batch4,new,,2026-09-16 15:35:05
+Medley Home,medleyhome.com,travis@medleyhome.com,batch5,new,,2026-09-16 15:55:48
+SOBER(ISH),soberish.com,kim@soberish.com,batch6,new,,2026-09-16 16:09:08
+Ancestral Supplements,ancestralsupplements.com,chris@ancestralsupplements.com,batch10,new,,2026-09-16 16:42:52
+Heart & Soil,heartandsoil.co,dean@heartandsoil.co,batch10,new,,2026-09-16 16:42:52
+Amy Myers MD,amymyersmd.com,amy@amymyersmd.com,batch10,new,,2026-09-16 16:42:52
+Heirloom Coffee Roasters,heirloomcoffeeroasters.com,,batch10,skipped,no_personal_email,2026-09-16 16:42:52
+Pet Honesty,pethonesty.com,,batch10,skipped,no_personal_email,2026-09-16 16:42:52
+Further Food,furtherfood.com,,batch10,skipped,no_volume_signal,2026-09-16 16:42:52
+Black Oak Coffee Roasters,blackoakcoffee.com,,batch10,skipped,catchall,2026-09-16 16:42:52
+Ruby Coffee Roasters,rubycoffeeroasters.com,,batch10,skipped,catchall,2026-09-16 16:42:52
+Dayglow Coffee,dayglow.coffee,,batch10,skipped,catchall,2026-09-16 16:42:52
+Dr. Jennifer Walden Skincare,shop.drjenniferwalden.com,,batch10,skipped,mx_unreachable,2026-09-16 16:42:52
+Open Farm,openfarmpet.com,,batch10,skipped,bad_icp,2026-09-16 16:42:52
+Chomps,chomps.com,,batch10,skipped,too_large,2026-09-16 16:42:52
+cocokind,cocokind.com,priscilla@cocokind.com,batch10,new,,2026-09-16 16:58:45
+Vahdam Teas,vahdamteas.com,bala@vahdamteas.com,batch10,new,,2026-09-16 16:58:45
+Glossier,glossier.com,,batch10,skipped,too_large,2026-09-16 16:58:45
+Lodge Cast Iron,lodgecastiron.com,,batch10,skipped,too_large,2026-09-16 16:58:45
+Roman,roman.com,,batch10,skipped,too_large,2026-09-16 16:58:45
+Death Wish Coffee,deathwishcoffee.com,,batch10,skipped,catchall,2026-09-16 16:58:45
+Harney & Sons,harney.com,,batch10,skipped,mx_unreachable,2026-09-16 16:58:45
+Tower 28 Beauty,tower28beauty.com,amy@tower28beauty.com,batch10,new,,2026-09-16 17:22:36
+Klymit,klymit.com,,batch10,skipped,bad_icp,2026-09-16 17:22:36
+Cotopaxi,cotopaxi.com,,batch10,skipped,too_large,2026-09-16 17:22:36
+Snow Peak,snowpeak.com,,batch10,skipped,too_large,2026-09-16 17:22:36
+NuGO Nutrition,nugo.com,,batch10,skipped,no_personal_email,2026-09-16 17:22:36
+BrainMD,brainmd.com,,batch10,skipped,no_personal_email,2026-09-16 17:22:36
+Natural Vitality,naturalvitality.com,,batch10,skipped,bad_icp,2026-09-16 17:22:36
+Jarrow Formulas,jarrow.com,,batch10,skipped,bad_icp,2026-09-16 17:22:36
+MUD WTR,mudwtr.com,,batch10,skipped,catchall,2026-09-16 17:22:36
+Milk Bar,milkbarstore.com,,batch10,skipped,catchall,2026-09-16 17:22:36

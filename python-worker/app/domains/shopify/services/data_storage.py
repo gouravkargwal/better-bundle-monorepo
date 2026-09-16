@@ -41,6 +41,10 @@ class ShopifyDataStorageService:
     def __init__(self, source: str = SOURCE_BACKFILL):
         self.batch_size = 100  # Essential batching
         self.chunk_size = 50  # Chunked queries to avoid timeouts
+        # Batches in flight at once. Each holds a database connection, and the
+        # pool is 10 with 10 overflow for the entire process — shared by every
+        # shop being collected concurrently.
+        self.max_concurrent_batches = 4
         self._source = source
 
     def with_source(self, source: str) -> "ShopifyDataStorageService":
@@ -53,6 +57,7 @@ class ShopifyDataStorageService:
         clone = ShopifyDataStorageService(source=source)
         clone.batch_size = self.batch_size
         clone.chunk_size = self.chunk_size
+        clone.max_concurrent_batches = self.max_concurrent_batches
         return clone
 
     async def store_products_data(
@@ -98,21 +103,32 @@ class ShopifyDataStorageService:
             # Process in batches for performance
             batches = self._create_batches(items, self.batch_size)
 
-            # Process batches in parallel for speed
-            batch_tasks = [
-                self._process_batch_generic(data_type, batch, shop_id, incremental)
-                for batch in batches
-            ]
+            # Bound how many batches are in flight. Each one takes a database
+            # connection, and the pool is 10 + 10 overflow for the whole
+            # process. Firing every batch of every data type of every shop at
+            # once exhausts the pool, and the callers then fail on a pool
+            # timeout rather than on anything to do with their own data.
+            semaphore = asyncio.Semaphore(self.max_concurrent_batches)
 
-            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+            async def run(batch):
+                async with semaphore:
+                    return await self._process_batch_generic(
+                        data_type, batch, shop_id, incremental
+                    )
+
+            batch_results = await asyncio.gather(
+                *(run(b) for b in batches), return_exceptions=True
+            )
 
             # Simple aggregation
             total_new = 0
             total_updated = 0
+            failures = []
 
             for result in batch_results:
-                if isinstance(result, Exception):
+                if isinstance(result, BaseException):
                     logger.error(f"Batch processing failed for {data_type}: {result}")
+                    failures.append(result)
                     continue
 
                 if isinstance(result, dict):
@@ -120,6 +136,16 @@ class ShopifyDataStorageService:
                     total_updated += result.get("updated", 0)
                 else:
                     logger.warning(f"Unexpected batch result type: {type(result)}")
+
+            # A dropped batch is silently missing data. Swallowing it here
+            # reported a partial write as a complete one, which is how a gap
+            # in the catalog survives all the way to the dashboard looking
+            # like a healthy sync.
+            if failures:
+                raise RuntimeError(
+                    f"{len(failures)} of {len(batches)} {data_type} batches failed "
+                    f"to store; first error: {failures[0]}"
+                )
 
             return {"new": total_new, "updated": total_updated}
 

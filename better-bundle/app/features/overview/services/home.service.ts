@@ -60,6 +60,7 @@ interface SyncStatusRow {
   products_total: number;
   products_active: number;
   products_embedded: number;
+  products_in_store: number | null;
   collections_total: number;
   orders_total: number;
   edges_total: number;
@@ -72,6 +73,7 @@ export async function getSyncStatus(shopId: string): Promise<SyncStatus> {
     productsTotal: 0,
     productsActive: 0,
     productsEmbedded: 0,
+    productsInStore: null,
     collectionsTotal: 0,
     ordersTotal: 0,
     edgesTotal: 0,
@@ -85,6 +87,7 @@ export async function getSyncStatus(shopId: string): Promise<SyncStatus> {
         (SELECT COUNT(*)::int FROM product_data WHERE shop_id = ${shopId}) AS products_total,
         (SELECT COUNT(*)::int FROM product_data WHERE shop_id = ${shopId} AND is_active = true) AS products_active,
         (SELECT COUNT(*)::int FROM product_vectors WHERE shop_id = ${shopId}) AS products_embedded,
+        (SELECT (settings -> 'catalog_totals' ->> 'products')::int FROM shops WHERE id = ${shopId}) AS products_in_store,
         (SELECT COUNT(*)::int FROM collection_data WHERE shop_id = ${shopId}) AS collections_total,
         (SELECT COUNT(*)::int FROM order_data WHERE shop_id = ${shopId}) AS orders_total,
         (SELECT COUNT(*)::int FROM product_edges WHERE shop_id = ${shopId}) AS edges_total,
@@ -113,6 +116,8 @@ export async function getSyncStatus(shopId: string): Promise<SyncStatus> {
       productsTotal: Number(row.products_total) || 0,
       productsActive: Number(row.products_active) || 0,
       productsEmbedded: Number(row.products_embedded) || 0,
+      productsInStore:
+        row.products_in_store == null ? null : Number(row.products_in_store),
       collectionsTotal: Number(row.collections_total) || 0,
       ordersTotal: Number(row.orders_total) || 0,
       edgesTotal: Number(row.edges_total) || 0,

@@ -121,6 +121,18 @@ store-delete:  ## Delete ALL products/orders/customers/media from a Shopify stor
 
 store-reseed: store-delete store-seed  ## Wipe the store, then seed it fresh
 
+store-delete-imageless-dry:  ## List products without images (no deletion)
+	$(require_shop)
+	$(COMPOSE) exec $(STORE_ENV) \
+	  python-worker python -m app.scripts.delete_products_without_images --dry-run
+
+store-delete-imageless:  ## Delete products without images from a Shopify store (irreversible)
+	$(require_shop)
+	@printf 'This deletes products without images from %s and cannot be undone.\nType DELETE ALL to continue: ' '$(SHOP)'
+	@read -r reply; [ "$$reply" = "DELETE ALL" ] || { echo "Aborted."; exit 1; }
+	$(COMPOSE) exec $(STORE_ENV) \
+	  python-worker python -m app.scripts.delete_products_without_images -y
+
 # ==================== our data for one shop ====================
 # These touch BetterBundle's own database only — never the Shopify store.
 # Use them to re-run onboarding from scratch: purge, then press Start Free.

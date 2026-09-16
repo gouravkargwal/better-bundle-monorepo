@@ -599,6 +599,7 @@ def verify_queued(prospect_ids=None, force: bool = False, progress=None) -> dict
         "CATCHALL": "catchall — 250 for any address, cannot confirm",
         "DEAD": "smtp_550 — address rejected",
         "ERROR": "mx_unreachable — could not verify",
+        "ROLE": "role inbox — reaches a queue, not the owner",
     }
     log_path = os.path.join(os.path.dirname(DB_PATH), "processed_log.csv")
     cache, kept, held, details = {}, 0, 0, []
@@ -607,17 +608,31 @@ def verify_queued(prospect_ids=None, force: bool = False, progress=None) -> dict
         if progress:
             progress(i, len(rows), r["company"])
 
-        # SMTP call happens OUTSIDE any transaction. Holding one open across the
-        # network locked the database for the whole run and broke the UI.
-        addr, code, ca, verdict = verify_email.verify([r["email"]], catchall=cache)[0]
+        # A role inbox is a real, deliverable address, so SMTP will happily
+        # confirm it — which is exactly why SMTP cannot be the gate here. The
+        # skill hard-rules info@/hello@/support@/orders@ out as dead inboxes,
+        # but email_type was self-reported in the CSV and 6 rows came through
+        # labelled 'personal'. 3 of them were mailed. Role addresses in this
+        # campaign are 0-for-5 on opens. Check the address, not the label.
+        if is_role_address(r["email"]):
+            addr, verdict = r["email"], "ROLE"
+            con.execute("UPDATE prospects SET email_type = 'role' WHERE id = ?",
+                        (r["id"],))
+        else:
+            # SMTP call happens OUTSIDE any transaction. Holding one open across
+            # the network locked the database for the whole run and broke the UI.
+            addr, code, ca, verdict = verify_email.verify(
+                [r["email"]], catchall=cache)[0]
 
-        # An address printed on the company's own site is evidenced by publication,
-        # not by SMTP. On a catch-all domain the probe proves nothing either way, so
-        # it must not overturn that evidence. A hard 550 still does — that is a real
-        # contradiction, not an absence of signal.
-        published = (r["email_method"] or "").startswith("published")
-        if published and verdict == "CATCHALL":
-            verdict = "PUBLISHED"
+            # An address printed on the company's own site is evidenced by
+            # publication, not by SMTP. On a catch-all domain the probe proves
+            # nothing either way, so it must not overturn that evidence. A hard
+            # 550 still does — that is a real contradiction, not an absence of
+            # signal. A ROLE verdict is never overturned: publication is not the
+            # question, who reads it is.
+            published = (r["email_method"] or "").startswith("published")
+            if published and verdict == "CATCHALL":
+                verdict = "PUBLISHED"
 
         details.append({"company": r["company"], "email": addr, "verdict": verdict})
 
@@ -931,6 +946,11 @@ def format_email(body: str, contact_name: str = "") -> str:
     out = "\n\n".join(paras)
     if not already_greeted:
         first = (contact_name or "").strip().split(" ")[0]
+        # "Founder" and friends are placeholders the research left behind, not
+        # names. "Hi Founder," reads worse than "Hi there," because it looks
+        # like a merge field that failed.
+        if first.lower().strip(".,") in _PLACEHOLDER_NAMES:
+            first = ""
         out = f"Hi {first},\n\n{out}" if first else f"Hi there,\n\n{out}"
     return ensure_signature(out)
 
@@ -953,13 +973,177 @@ def _demo_format_email():
     print("format_email demo OK")
 
 
+# ---------- FIRST-EMAIL GATES ----------
+# The follow-up path has run banned_phrases() and invented_numbers() since
+# batch9. generate_email shipped CSV copy with no gate at all, and that
+# asymmetry is the whole bug: 77 of the first 95 sends carried a phrase this
+# module already bans, and 64 of 79 bodies shared one 25-word spine. The copy
+# rules were never wrong, nothing was checking them. Same guards, same loud
+# MissingCopy skip, now applied before the first touch too.
+
+_SUBJECT_STOP = {"the", "a", "an", "and", "or", "of", "on", "in", "for", "to",
+                 "with", "at", "by", "your", "you", "co", "inc", "llc", "ltd"}
+
+# Names that are not names. They reach format_email as contact_name and become
+# "Hi Founder," — which announces that nobody looked up who runs the store.
+_PLACEHOLDER_NAMES = {"founder", "owner", "team", "there", "support", "info",
+                      "contact", "admin", "sales", "ceo", "manager", "customer",
+                      "unknown", "none", "n/a", "store", "shop"}
+
+
+# Local parts that reach a shared queue rather than the owner. Same list the
+# discovery skill screens on, enforced here because email_type is self-reported.
+ROLE_PREFIXES = {
+    "hello", "info", "contact", "support", "sales", "press", "office", "team",
+    "help", "service", "services", "careers", "jobs", "billing", "accounts",
+    "admin", "noreply", "no-reply", "donotreply", "marketing", "partnerships",
+    "media", "pr", "hr", "orders", "order", "shop", "store", "wholesale",
+    "customerservice", "customercare", "enquiries", "inquiries", "general",
+    "mail", "email", "webmaster", "postmaster", "abuse", "privacy", "legal",
+}
+
+
+def is_role_address(email: str) -> bool:
+    """True for a shared inbox. Exact local-part match, so a real person named
+    'Pratt' at pratt@ is never caught by a prefix test against 'pr'."""
+    local = (email or "").strip().lower().split("@")[0]
+    return local in ROLE_PREFIXES
+
+
+def _words(text: str) -> list:
+    return re.findall(r"[a-z0-9']+", (text or "").lower())
+
+
+def strip_furniture(body: str) -> str:
+    """Body without the greeting and sign-off that format_email adds.
+
+    CSV copy carries neither, sent copy carries both; the gates compare the two,
+    so both have to be reduced to the same thing first.
+    """
+    text = re.sub(r"^(hi|hey|hello)\b[^,\n]*,\s*", "", (body or "").strip(), flags=re.I)
+    return text.split("Thanks,")[0].strip()
+
+
+def subject_is_generic(subject: str, company: str) -> bool:
+    """True when the subject is just the company name handed back to them.
+
+    The rule is one specific fact per subject — a product count, a brand count,
+    a product type. 33 of the first 79 subjects were the company name and
+    nothing else, which tells the reader nothing they do not already know.
+    """
+    company_words = set(_words(company))
+    return not [w for w in _words(subject)
+                if w not in company_words and w not in _SUBJECT_STOP]
+
+
+def shape_errors(body: str) -> list:
+    """The length rules from the copy skill, checked rather than trusted."""
+    text = strip_furniture(body)
+    sentences = [s for s in _SENTENCE.split(text) if s.strip()]
+    errs = []
+    if not 3 <= len(sentences) <= 4:
+        errs.append(f"{len(sentences)} sentences (must be 3 or 4)")
+    words = len(text.split())
+    if words > 110:
+        errs.append(f"{words} words (max 110)")
+    return errs
+
+
+def recent_first_emails(limit: int = 40, exclude_prospect_id=None) -> list:
+    """Bodies of the most recent first touches, for the echo check.
+
+    `exclude_prospect_id` keeps an already-sent email from being compared
+    against itself, which otherwise reports a 100% echo when auditing sent copy.
+    """
+    return [r[0] for r in get_db().execute(
+        "SELECT body FROM emails WHERE seq = 1 AND prospect_id IS NOT ? "
+        "ORDER BY id DESC LIMIT ?", (exclude_prospect_id, limit)).fetchall()]
+
+
+# Beat 1 only. The copy is three beats: 1 hook+wedge, 2 mechanism+risk reversal,
+# 3 CTA. Beats 2 and 3 are the OFFER — "on the product page and the order-status
+# page", "billed only on revenue it can attribute", 'reply "no thanks"' — and
+# they are supposed to be near-identical every time. Only beat 1 must be new.
+#
+# Widening this to two sentences swallowed beat 2 and made the gate unsatisfiable:
+# every re-roll failed on "and the order status page with", which is precisely the
+# wording the prompt mandates. One sentence still flags 66 of 85 sent bodies, so
+# nothing is lost by narrowing it.
+_HOOK_SENTENCES = 1
+
+
+def hook_echo(body: str, priors, n: int = 6) -> list:
+    """Word runs this hook shares with copy already sent.
+
+    Compares beat 1 only — see _HOOK_SENTENCES. Checking the whole body, or even
+    the first two sentences, rejects every correct email, because the offer is
+    meant to repeat verbatim and the hook is not.
+    """
+    def grams(text):
+        head = [s for s in _SENTENCE.split(strip_furniture(text))
+                if s.strip()][:_HOOK_SENTENCES]
+        w = _words(" ".join(head))
+        return {" ".join(w[i:i + n]) for i in range(len(w) - n + 1)}
+
+    mine = grams(body)
+    if not mine:
+        return []
+    seen = set()
+    for prior in priors:
+        seen |= grams(prior)
+    return sorted(mine & seen)
+
+
+def copy_problems(p, subject: str, body: str, priors=None) -> list:
+    """Every reason this researched copy must not ship, in one pass.
+
+    All of it is deterministic. A gate that depends on an LLM's mood is a gate
+    that lets the next batch through.
+    """
+    problems = []
+    if bad := banned_phrases(body):
+        problems.append("banned phrase: " + ", ".join(bad))
+    # website_info is the research column, so it is the only thing a number may
+    # be sourced from. Deliberately NOT the full followup_context: that would
+    # let the re-roll path accept numbers the send path then rejects, and a
+    # draft that looks approved in the UI but silently never sends is worse
+    # than one that fails loudly at the point you clicked the button.
+    sourced = p["website_info"] or ""
+    if bad := invented_numbers(body, f"{sourced} {subject}"):
+        problems.append("unsourced number: " + ", ".join(bad))
+    if bad := invented_numbers(subject, sourced):
+        problems.append("unsourced number in subject: " + ", ".join(bad))
+    if subject_is_generic(subject, p["company"] or ""):
+        problems.append(f"subject {subject!r} is only the company name — "
+                        f"needs one specific fact from their store")
+    problems += shape_errors(body)
+    if priors is None:
+        priors = recent_first_emails(exclude_prospect_id=p["id"] if "id" in p.keys()
+                                     else None)
+    if echo := hook_echo(body, priors):
+        problems.append(f"hook repeats copy already sent: {echo[0]!r}")
+    return problems
+
+
+def check_draft(company: str, subject: str, body: str, website_info: str = "") -> list:
+    """Gate a candidate row BEFORE it is appended to prospects.csv.
+
+    Same checks generate_email runs at send time, reachable from the drafting
+    step so a bad row never reaches the CSV. See the __main__ block for the CLI
+    the discovery skill calls.
+    """
+    return copy_problems({"company": company, "website_info": website_info},
+                         (subject or "").strip(), (body or "").strip())
+
+
 def generate_email(p) -> tuple:
     """Return the researched subject/body for a prospect.
 
     Deliberately does NOT call an LLM. The discovery skill writes subject/body
     into prospects.csv and those ship verbatim; Gemini is for follow-ups only.
-    Raising here is the point: a prospect with no copy must be skipped loudly,
-    never papered over with a template.
+    Raising here is the point: a prospect with no copy — or with copy that
+    breaks the rules the copy was written under — must be skipped loudly, never
+    papered over with a template.
     """
     subject = (p["first_subject"] or "").strip()
     body = (p["body"] or "").strip()
@@ -968,6 +1152,13 @@ def generate_email(p) -> tuple:
             f"{p['company']}: no researched copy. Run Import CSV, or write "
             f"subject/body for this row in prospects.csv."
         )
+
+    if problems := copy_problems(p, subject, body):
+        raise MissingCopy(
+            f"{p['company']}: " + "; ".join(problems) +
+            ". Rewrite this row in prospects.csv and re-import."
+        )
+
     return subject, format_email(body, p["contact_name"])
 
 
@@ -1152,6 +1343,13 @@ BANNED_PHRASES = (
     # entry on the prospect rather than deleting it.
     "in the cart", "in their cart", "on the cart", "cart page",
     "at checkout", "at the checkout", "in checkout", "during checkout",
+    # We read the ORDER history. "checkout history" is not a thing that exists,
+    # and it shipped in 54 of the first 79 emails — in the one sentence whose
+    # whole job is to prove we read their data carefully.
+    "checkout history",
+    # "your verified orders" asserts we have seen their orders. We have not seen
+    # anything until they install; the orders are the thing the install unlocks.
+    "verified orders",
 )
 
 
@@ -1194,7 +1392,71 @@ def _demo_followup_review():
                        "Tony Sambell")
     assert out.startswith("Hi Tony,\n\n"), out[:30]
     assert out.count("Founder, BetterBundle") == 1
+    # A placeholder in contact_name is not a name. This shipped 5 times.
+    assert format_email("One. Two. Three.", "Founder").startswith("Hi there,"), \
+        format_email("One. Two. Three.", "Founder")[:30]
     print("followup_review demo OK")
+
+
+def _demo_first_email_gates():
+    """Self-check: the first email now fails the checks the follow-up already did.
+
+    Every case below is real copy from the first 95 sends.
+    """
+    shipped = ("The rare historical autograph someone adds to a premium display "
+               "case — that pairing is already forming in your verified orders, "
+               "but collections can't see it. BetterBundle reads your actual "
+               "checkout history to find those add-ons, then shows them at "
+               "checkout and after purchase with no monthly fee. If it finds "
+               "nothing that genuinely pairs, it costs nothing. Worth a look?")
+    assert banned_phrases(shipped) == ["at checkout", "checkout history",
+                                       "verified orders"], banned_phrases(shipped)
+
+    # Subject rules: the company name back at them is not a fact about them.
+    assert subject_is_generic("paul fraser collectibles", "Paul Fraser Collectibles")
+    assert subject_is_generic("blissful spirit candles", "Blissful Spirit Candles")
+    assert not subject_is_generic("74 products on big island coffee",
+                                  "Big Island Coffee Roasters")
+    assert not subject_is_generic("topeca coffee roasters 1850 heritage",
+                                  "Topeca Coffee Roasters")
+
+    # Shape: exactly 3 or 4 sentences, 110 words hard cap.
+    assert shape_errors("One thing. Two things. Three things.") == []
+    assert shape_errors("One. Two. Three. Four. Five.") == ["5 sentences (must be 3 or 4)"]
+    assert "words (max 110)" in " ".join(
+        shape_errors("Word " * 120 + ". Two. Three."))
+
+    # The echo gate compares beat 1 only. Beat 2 is the offer and repeats.
+    #
+    # THE REGRESSION: these are real sends, ids 99 and 100. Their beat 2 is
+    # near-identical by design — the prompt mandates that wording — and an
+    # earlier two-sentence window failed every re-roll on it with
+    # "hook repeats copy already sent: 'and the order status page with'".
+    # Different hooks, same offer, must PASS.
+    beat2 = ("BetterBundle parses your order history to display these natural "
+             "matches on the product page and the order-status page, with no "
+             "upfront charges or subscriptions. Reply \"no thanks\" and I'll stop.")
+    prints_ = ("With various climbing art prints listed, your customers are "
+               "frequently pairing them with small decals in ways your current "
+               "navigation cannot capture. " + beat2)
+    yarn = ("Hand-dyed yarn sells in repeat cycles, so the second skein someone "
+            "reaches for is already decided before they browse. " + beat2)
+    assert hook_echo(yarn, [prints_]) == [], hook_echo(yarn, [prints_])
+
+    # Same hook, swapped numbers — the template drift. Must FAIL.
+    clone = ("With various climbing art prints listed, your customers are "
+             "frequently pairing them with large decals in ways your current "
+             "navigation cannot capture. " + beat2)
+    assert hook_echo(clone, [prints_]), "near-identical hook must be caught"
+    # Role inboxes. The three that were mailed, and the near-misses that must not
+    # be caught: a person's name is not a role because it starts with one.
+    assert is_role_address("info@janvirt.com")
+    assert is_role_address("hello@geeklywhimsical.com")
+    assert is_role_address("Info@DianaHDesigns.com"), "must be case-insensitive"
+    assert not is_role_address("pr att@x.com".replace(" ", ""))  # pratt@, not pr@
+    assert not is_role_address("teamer@x.com")
+    assert not is_role_address("gourav@betterbundle.online")
+    print("first_email_gates demo OK")
 
 
 def invented_numbers(body: str, ctx: str) -> list:
@@ -1678,8 +1940,13 @@ def regenerate_draft(prospect_id: int) -> dict:
     previous = (p["body"] or "").strip()
     sent = _recent_sent_bodies()
 
+    # Same gates the send path enforces. Checking only numbers and banned words
+    # here let re-rolls through that generate_email would later refuse — the
+    # draft looked approved in the UI and then silently never sent.
+    priors = recent_first_emails()
+
     retry = None
-    for attempt in range(2):
+    for attempt in range(3):
         prompt = _first_touch_prompt(ctx, niche, previous=previous, sent=sent)
         if retry:
             prompt = prompt + f"\n\n{retry}"
@@ -1689,10 +1956,8 @@ def regenerate_draft(prospect_id: int) -> dict:
             # Model didn't follow the Subject:/body format — build a fact-based
             # subject instead of reusing the old one, so the re-roll still shows.
             subject = _fallback_subject(p, ctx)
-        bad_nums = invented_numbers(body, ctx)
-        bad_subj = invented_numbers(subject, ctx)
-        bad_words = banned_phrases(body) + banned_phrases(subject)
-        if not bad_nums and not bad_subj and not bad_words:
+        problems = copy_problems(p, subject, body, priors=priors)
+        if not problems:
             subject = subject[:60]
             con.execute(
                 "UPDATE prospects SET first_subject = ?, body = ? WHERE id = ?",
@@ -1708,26 +1973,19 @@ def regenerate_draft(prospect_id: int) -> dict:
                 "subject": subject,
                 "body": format_email(body, p["contact_name"]),
             }
-        if bad_subj:
-            retry = (
-                f"Your subject asserted {', '.join(bad_subj)}, which appears nowhere "
-                "in the context. Use only numbers found in the context, written "
-                "exactly as they appear (e.g. '32k', not '32,000')."
-            )
-        elif bad_nums:
-            retry = (
-                f"Your previous draft asserted {', '.join(bad_nums)}, which appears "
-                "nowhere in the context. Rewrite using no numbers beyond those in "
-                "the context, written exactly as they appear (e.g. '32k', not "
-                "'32,000')."
-            )
-        else:
-            retry = (
-                f"Your previous draft used banned phrase(s) {', '.join(bad_words)}. "
-                "Rewrite in plain, direct language."
-            )
+        # Hand the model the exact failures. A generic "try again" re-rolls the
+        # same mistake; naming the offending string is what makes it converge.
+        retry = (
+            "Your previous draft was REJECTED for these reasons:\n- "
+            + "\n- ".join(problems)
+            + "\nRewrite it fixing every one. Any number you use must appear in "
+            "the context exactly as written there (e.g. '32k', not '32,000'). "
+            "If the rejection mentions repeating sent copy, do not reword around "
+            "it — open on a different fact from the context entirely."
+        )
 
-    return {"success": False, "error": "Draft failed fact review after 2 attempts"}
+    return {"success": False,
+            "error": "Draft failed review after 3 attempts: " + "; ".join(problems)}
 
 
 def _parse_draft(text: str) -> tuple:
@@ -1815,7 +2073,13 @@ def _first_touch_prompt(
         )
     return f"""Write the first cold email for BetterBundle, a Shopify app that reads a
 store's own order history to find which products genuinely sell together, then
-shows those pairings at checkout and after purchase.
+shows those pairings on the product page and the customer's order-status page.
+
+Never write "at checkout" or "in the cart". No cart surface exists, and the
+checkout block is Shopify Plus only — these prospects are not Plus, so both are
+claims the merchant could never see come true. Never write "checkout history":
+it is ORDER history. Never write "your verified orders" or anything implying we
+have already seen their data — we have seen nothing until they install.
 
 The offer: install is the free trial. No monthly fee, no card — the app bills
 only on revenue it can attribute to its own recommendations, so if it finds
@@ -1831,12 +2095,15 @@ sentences into their own paragraphs, so never write a run-on:
    "With 109 products, your buyers are forming pairs collections can't see."
    Two separate sentences waste the reader's best attention on a fact they
    already know about themselves.
-2. MECHANISM + RISK REVERSAL. Reads their own orders, shows pairings at
-   checkout and after purchase; no monthly fee, no card, billed only on
-   attributed revenue. Never state a commission rate, percentage, cap or
+2. MECHANISM + RISK REVERSAL. Reads their own orders, shows pairings on the
+   product page and the order-status page; no monthly fee, no card, billed only
+   on attributed revenue. Never state a commission rate, percentage, cap or
    dollar figure.
-3. CTA — one short question ("worth a look?", "open to trying it on one
-   collection?"). Not a paragraph.
+3. CTA — one short question, not a paragraph. Prefer the negative opt-out:
+   'Reply "no thanks" and I'll stop.' It is the CTA on the only email in this
+   campaign that ever drew a reply, and it asks the prospect to do nothing,
+   which is the lowest-friction ask available. Alternatives, used sparingly:
+   "worth a look?", "open to trying it on one collection?"
 
 Name ONE real pairing from their catalog in their own product vocabulary,
 structured as one primary/expensive item plus one cheap accessory or
@@ -1865,9 +2132,13 @@ Copy rules:
 - Do NOT write a greeting or sign-off — those are added at send time.
 {vary}
 
-Return ONLY the subject line on its own (one specific true fact from the
-context, lowercase, 4-7 words, no greeting or sign-off), then a blank line,
-then the body text. Format:
+Return ONLY the subject line on its own, then a blank line, then the body text.
+
+The subject is lowercase, 4-7 words, and MUST carry one specific fact from the
+context — a product count, a brand count, a product type, an app they run. The
+company name alone is NOT a fact about them: "paul fraser collectibles" is a
+rejected subject, "autographs and display cases, one order" is not. No greeting,
+no sign-off. Format:
 Subject: <subject>
 
 <body>"""
@@ -2178,3 +2449,30 @@ def smoke_test(to_email: str, wait_secs: int = 90):
             "not in inbox yet — check spam, or re-run in a minute"
     except Exception as e:
         yield False, "Inbox delivery (IMAP)", str(e)
+
+
+# ---------- DRAFT CHECKER CLI ----------
+# Called by the discovery skill at Step 7, before a row is written. JSON on
+# stdin so no amount of apostrophes or em-dashes in the copy can break quoting.
+#
+#   echo '{"company":"X","subject":"...","body":"...","website_info":"..."}' \
+#     | python engine.py check-draft
+#
+# Exits 0 and prints OK, or exits 1 and prints one problem per line.
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "check-draft":
+        row = json.load(sys.stdin)
+        found = check_draft(row.get("company", ""), row.get("subject", ""),
+                            row.get("body", ""), row.get("website_info", ""))
+        print("\n".join(f"FAIL: {x}" for x in found) if found else "OK")
+        sys.exit(1 if found else 0)
+
+    if len(sys.argv) > 1 and sys.argv[1] == "self-check":
+        _demo_followup_review()
+        _demo_first_email_gates()
+        sys.exit(0)
+
+    print(__doc__ or "usage: python engine.py [check-draft|self-check]")
+    sys.exit(2)

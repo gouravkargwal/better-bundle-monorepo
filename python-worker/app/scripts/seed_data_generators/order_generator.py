@@ -12,34 +12,37 @@ class OrderGenerator(BaseGenerator):
 
     # Baskets by title, not index.
     #
-    # `generate_orders` below carries the original index-based configs, whose
-    # comments drifted out of sync with the catalog: index 10 was documented as
-    # "Earbuds" but the clothing section grew to 8 items and pushed it onto
-    # "Silk Scarf". Titles are stable under catalog changes, and a title that
-    # disappears is reported by the caller instead of silently pairing the
-    # wrong products.
-    #
     # These pairings are what makes the co-purchase half of an edge score
     # meaningful: an LLR computed over random baskets is arithmetically correct
     # and completely uninformative.
     REALISTIC_BASKETS = [
-        # Clothing outfits
-        ["Premium Cotton Hoodie", "Classic V-Neck T-Shirt", "Slim Fit Jeans"],
-        ["Classic V-Neck T-Shirt", "Slim Fit Jeans"],
-        ["Denim Jacket", "Slim Fit Jeans"],
-        ["Athletic Shorts", "Classic V-Neck T-Shirt"],
-        ["Wool Blend Sweater", "Cargo Pants"],
-        # Accessories that go with an outfit
-        ["Designer Sunglasses", "Leather Crossbody Bag"],
-        ["Silk Scarf", "Leather Belt"],
-        ["Baseball Cap", "Athletic Shorts"],
-        ["Maxi Dress", "Leather Crossbody Bag"],
-        # Electronics and their accessories — the clearest complement signal
-        ["Wireless Earbuds Pro", "Phone Case"],
-        ["Wireless Earbuds Pro", "Portable Charger"],
-        ["Smart Watch", "Phone Case", "Portable Charger"],
-        ["Bluetooth Speaker", "Portable Charger"],
-        ["Smart Watch", "Wireless Earbuds Pro"],
+        # Men's shirt + trouser outfits
+        ["Paul Shirt in Grey Flannel", "Slim Chino"],
+        ["Floral Button-Up in Blue", "Lemy Blazer in Grey"],
+        ["Lio Shirt in Grey", "Lemy Blazer in Grey"],
+        ["Overprint T-Shirt in Navy", "Overprint T-Shirt in Green"],
+        ["Button Up Shirt in Navy", "Peone Jacket in Khaki"],
+        # Women's dresses + accessories
+        ["Iranta Leather Dress in Black", "Bracelet 41 in Silver"],
+        ["Layered Contrast Dress in Cream/Black", "Golf Shoe in Black"],
+        ["Asymmetric Dress in Black", "Wingtip Loafer in Blue"],
+        ["Asymmetric Dress in Cream/Black", "Wingtip Loafer in Yellow"],
+        # Shoes co-purchases
+        ["Golf Shoe in Black", "Golf Shoe in White"],
+        ["Wingtip Loafer in Orange", "Wingtip Loafer in Lime"],
+        ["Leather Loafer in Rose", "Leather Loafer in Lime"],
+        ["Suede Loafers - Black/Blue", "Stiro Oxford in Slate"],
+        # Bags + outfits
+        ["Vertical Tote", "Lio Shirt in Grey"],
+        ["Circle Bag in Black", "Iranta Leather Dress in Black"],
+        # Jewelry co-purchases
+        ["Bracelet 41 in Silver", "Bracelet 3 in Silver"],
+        ["Bracelet 84 in Silver", "Ring 56 in Silver"],
+        # Knitwear combos
+        ["Grizzly Pullover in Greenfinch", "Pill Zip Sweater in Black"],
+        ["Argon Sweater", "Men's Chino in Black"],
+        # Men's outerwear + layers
+        ["Goof Jacket in Tar", "Jeth Sweatshirt in Grey/Rust"],
     ]
 
     def realistic_baskets(self) -> List[List[str]]:

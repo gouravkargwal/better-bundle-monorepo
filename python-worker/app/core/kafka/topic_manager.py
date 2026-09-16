@@ -5,7 +5,7 @@ Kafka topic management utilities
 import asyncio
 import logging
 from typing import Dict, Any, List
-from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+from aiokafka.admin import AIOKafkaAdminClient, NewTopic, NewPartitions
 from app.core.config.kafka_settings import kafka_settings
 from app.core.logging import get_logger
 
@@ -44,24 +44,43 @@ class KafkaTopicManager:
             # Get existing topics
             existing_topics = await self.admin_client.list_topics()
 
-            # Create new topics
+            # Replication factor cannot exceed the number of brokers. Asking
+            # for more fails the create, and Kafka then auto-creates the topic
+            # on first produce using broker defaults — one partition — with
+            # the configured partition count silently discarded. A
+            # single-partition topic admits exactly one consumer, so no amount
+            # of extra workers can drain a backlog on it.
+            broker_count = await self._broker_count()
+
             new_topics = []
             for topic_name, topic_config in kafka_settings.topics.items():
-                if topic_name not in existing_topics:
-                    new_topic = NewTopic(
-                        name=topic_name,
-                        num_partitions=topic_config.get("partitions", 1),
-                        replication_factor=topic_config.get("replication_factor", 1),
-                        topic_configs={
-                            "retention.ms": str(
-                                topic_config.get("retention_ms", 604800000)
-                            ),
-                            "cleanup.policy": topic_config.get(
-                                "cleanup_policy", "delete"
-                            ),
-                        },
+                if topic_name in existing_topics:
+                    continue
+
+                wanted_rf = min(
+                    topic_config.get("replication_factor", 1), max(broker_count, 1)
+                )
+                if wanted_rf != topic_config.get("replication_factor", 1):
+                    logger.warning(
+                        f"Topic '{topic_name}': replication_factor "
+                        f"{topic_config.get('replication_factor')} exceeds "
+                        f"{broker_count} broker(s); creating with {wanted_rf}"
                     )
-                    new_topics.append(new_topic)
+
+                new_topic = NewTopic(
+                    name=topic_name,
+                    num_partitions=topic_config.get("partitions", 1),
+                    replication_factor=wanted_rf,
+                    topic_configs={
+                        "retention.ms": str(
+                            topic_config.get("retention_ms", 604800000)
+                        ),
+                        "cleanup.policy": topic_config.get(
+                            "cleanup_policy", "delete"
+                        ),
+                    },
+                )
+                new_topics.append(new_topic)
 
             if new_topics:
                 # Create topics
@@ -74,11 +93,60 @@ class KafkaTopicManager:
                     logger.error(f"Failed to create topics: {e}")
                     # Continue anyway - topics might already exist
 
+            # Topics that already exist may still be too narrow — either
+            # auto-created at one partition by a failed create above, or
+            # created before the configured count was raised.
+            await self._widen_existing_topics()
+
             self.topics_created = True
 
         except Exception as e:
             logger.error(f"Failed to create topics: {e}")
             raise
+
+    async def _broker_count(self) -> int:
+        """Number of brokers in the cluster, for capping replication factor."""
+        try:
+            cluster = await self.admin_client.describe_cluster()
+            return max(len(cluster.get("brokers") or []), 1)
+        except Exception as e:
+            logger.warning(f"Could not describe cluster, assuming 1 broker: {e}")
+            return 1
+
+    async def _widen_existing_topics(self) -> None:
+        """Grow any existing topic that has fewer partitions than configured.
+
+        Partitions can be added but never removed. Adding them changes which
+        partition a given key hashes to, so per-key ordering holds only from
+        here on — acceptable here, where the key is the shop and ordering is
+        best effort.
+        """
+        try:
+            metadata = await self.admin_client.describe_topics()
+        except Exception as e:
+            logger.warning(f"Could not read topic metadata: {e}")
+            return
+
+        current = {
+            t["topic"]: len(t.get("partitions") or []) for t in metadata
+        }
+
+        for topic_name, topic_config in kafka_settings.topics.items():
+            wanted = topic_config.get("partitions", 1)
+            have = current.get(topic_name)
+            if have is None or have >= wanted:
+                continue
+            try:
+                await self.admin_client.create_partitions(
+                    {topic_name: NewPartitions(total_count=wanted)}
+                )
+                logger.warning(
+                    f"Grew topic '{topic_name}' from {have} to {wanted} partitions"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Could not grow topic '{topic_name}' to {wanted} partitions: {e}"
+                )
 
     async def close(self):
         """Close the admin client"""

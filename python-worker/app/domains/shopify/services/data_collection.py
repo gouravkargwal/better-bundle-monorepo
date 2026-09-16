@@ -10,10 +10,12 @@ from app.core.logging import get_logger
 from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 from ..interfaces.data_collector import IShopifyDataCollector
 from ..interfaces.api_client import IShopifyAPIClient
+from .api.base_client import page_info_of
 from ..interfaces.permission_service import IShopifyPermissionService
 from .data_storage import ShopifyDataStorageService
 
 from app.repository.RawDataRepository import RawDataRepository
+from app.repository.ShopRepository import ShopRepository
 
 logger = get_logger(__name__)
 
@@ -33,12 +35,26 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         # Inject storage service or create default
         self.data_storage = data_storage or ShopifyDataStorageService()
         self.raw_data_repository = RawDataRepository()
+        self.shop_repository = ShopRepository()
+
+        # One long-lived Kafka publisher for the life of the service. Building
+        # and tearing one down per job meant a TCP connect, metadata fetch and
+        # close for every webhook — seconds of the ~5.7s each event was taking,
+        # which is why the consumer fell behind its own producer.
+        self._publisher = None
 
         # Collection settings - Industry standard constants
         self.BATCH_SIZE = 250
         self.TIMEOUT_SECONDS = 300
         self.RATE_LIMIT_DELAY = 0.1
         self.MAX_DAYS_BACK = 90
+
+        # Full catalog sweeps running at once, across all shops. A sweep is
+        # long and heavy — every page of every data type — so several shops
+        # installing at the same time would otherwise multiply straight through
+        # to the database pool and the API budget. Webhooks are not gated by
+        # this; they are single objects and must stay responsive.
+        self._backfill_slots = asyncio.Semaphore(2)
 
         # Simplified data type mapping
         self.DATA_TYPES = {
@@ -83,10 +99,12 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         limit: Optional[int] = None,
         since_id: Optional[str] = None,
         specific_ids: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Unified data collection - no complex mode switching
-        Just collect data chunks like a proper Kafka system
+        on_page=None,
+    ):
+        """Collect one data type.
+
+        Returns a list of items for a webhook (a handful of objects), or — for
+        a full sweep with `on_page` — the number of items streamed to storage.
         """
         # Step 1: Get data type configuration
         config = self._get_data_type_config(data_type)
@@ -100,7 +118,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         else:
             # Full collection for all data
             return await self._execute_full_collection(
-                data_type, shop_domain, config, limit, since_id
+                data_type, shop_domain, config, limit, since_id, on_page=on_page
             )
 
     def _get_data_type_config(self, data_type: str) -> Dict[str, str]:
@@ -125,7 +143,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         config: Dict[str, str],
         limit: Optional[int],
         since_id: Optional[str],
-    ) -> List[Dict[str, Any]]:
+        on_page=None,
+    ):
         """Execute full collection for a data type."""
 
         return await self._collect_data_generic(
@@ -136,6 +155,7 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             query=None,
             limit=limit,
             since_id=since_id,
+            on_page=on_page,
         )
 
     async def _has_any_raw_data(self, shop_id: str, data_type: str) -> bool:
@@ -194,17 +214,51 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             if not collectable_data:
                 return self._create_no_permissions_response()
 
-            # Step 4: Collect and store the data
-            collection_results = await self._collect_and_store_data(
-                shop_domain, access_token, shop_id, collectable_data, collection_payload
-            )
+            # Step 4: Collect and store the data. A full sweep queues behind
+            # the backfill slots so several shops syncing at once cannot
+            # multiply into the database pool; a webhook is one object and
+            # goes straight through.
+            is_backfill = not collection_payload.get("specific_ids")
+            if is_backfill:
+                async with self._backfill_slots:
+                    collection_results = await self._collect_and_store_data(
+                        shop_domain, access_token, shop_id,
+                        collectable_data, collection_payload,
+                    )
+            else:
+                collection_results = await self._collect_and_store_data(
+                    shop_domain, access_token, shop_id,
+                    collectable_data, collection_payload,
+                )
 
-            # Step 5: Trigger normalization for the collected data
+            # Step 5: Trigger normalization for whatever did land. Partial
+            # progress is still worth normalising, and storage is an upsert,
+            # so the retry below re-collects safely.
             await self._trigger_normalization_for_results(
                 shop_id, collection_results, session_info["start_time"]
             )
 
-            # Step 6: Create success response
+            # Step 6: Record how much of the catalog actually exists upstream,
+            # so progress can be measured against the shop rather than against
+            # our own table. Only on a full sweep — a webhook fetches one
+            # object, and billing a whole extra API round-trip to every webhook
+            # is exactly the per-event cost that put the consumer behind its
+            # own producer.
+            if not collection_payload.get("specific_ids"):
+                await self._record_catalog_totals(shop_domain, shop_id)
+
+            # Step 7: A data type that failed means an incomplete catalog.
+            # Reporting success here is what let a 997-product shop sit at 251
+            # rows while every status surface said the sync was fine.
+            failures = collection_results.get("failures") or {}
+            if failures:
+                raise RuntimeError(
+                    "Incomplete collection for "
+                    f"{shop_domain}: " + "; ".join(
+                        f"{dt}: {err}" for dt, err in failures.items()
+                    )
+                )
+
             return self._create_success_response(
                 session_info, collection_results, collection_payload
             )
@@ -212,6 +266,18 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         except Exception as e:
             logger.error(f"Collection failed for {shop_domain}: {e}")
             raise
+
+    async def _record_catalog_totals(self, shop_domain: str, shop_id: str) -> None:
+        """Save Shopify's own product/collection counts onto the shop record.
+
+        Best effort — never fail a collection because the counter query did.
+        """
+        try:
+            counts = await self.api_client.get_catalog_counts(shop_domain)
+            if counts:
+                await self.shop_repository.update_catalog_totals(shop_id, counts)
+        except Exception as e:
+            logger.warning(f"Could not record catalog totals for {shop_domain}: {e}")
 
     def _initialize_collection_session(self, shop_id: str) -> Dict[str, Any]:
         """Initialize a new collection session with metadata."""
@@ -269,13 +335,8 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         self, session_info: Dict, collection_results: Dict, collection_payload: Dict
     ) -> Dict[str, Any]:
         """Create a success response with collection metadata."""
-        total_items = sum(
-            len(data)
-            for data in collection_results.get("collected_data", {}).values()
-            if data
-        )
-
-        collected_data = collection_results.get("collected_data", {})
+        counts = collection_results.get("counts", {})
+        total_items = sum(counts.values())
 
         return {
             "success": True,
@@ -283,11 +344,11 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             "session_id": session_info["session_id"],
             "session_start_time": session_info["start_time"].isoformat(),
             "total_items": total_items,
-            "orders_collected": len(collected_data.get("orders", [])),
-            "products_collected": len(collected_data.get("products", [])),
-            "customers_collected": len(collected_data.get("customers", [])),
-            "collections_collected": len(collected_data.get("collections", [])),
-            "collected_types": list(collected_data.keys()),
+            "orders_collected": counts.get("orders", 0),
+            "products_collected": counts.get("products", 0),
+            "customers_collected": counts.get("customers", 0),
+            "collections_collected": counts.get("collections", 0),
+            "collected_types": list(counts.keys()),
             "collection_payload": collection_payload,
         }
 
@@ -371,31 +432,25 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             data_types, shop_domain, shop_id, access_token, collection_payload
         )
 
-        # Step 2: Execute all collection tasks in parallel
-        collection_results = await self._execute_collection_tasks(
+        # Step 2: Execute all collection tasks in parallel. Each stores its
+        # own data page by page and reports how many items it wrote, so
+        # nothing accumulates the whole catalog in memory.
+        counts, failures = await self._execute_collection_tasks(
             collection_tasks, data_types
         )
 
-        # Step 3: Store the collected data
-        # The trigger travels on the collection payload. A webhook-triggered
-        # fetch and a historical import both call this method, and only the
-        # payload knows which is which.
-        source = (
-            "webhook"
-            if (collection_payload or {}).get("trigger") == "webhook"
-            else "backfill"
-        )
-        processed_types = await self._store_collected_data(
-            collection_results, shop_id, source
-        )
+        processed_types = [
+            dt for dt, n in counts.items() if n and dt not in failures
+        ]
 
-        # Step 4: Extract specific IDs for webhook events
+        # Step 3: Extract specific IDs for webhook events
         specific_ids = self._extract_specific_ids_from_payload(collection_payload)
 
         return {
-            "collected_data": collection_results,
+            "counts": counts,
             "processed_types": processed_types,
             "specific_ids": specific_ids,
+            "failures": failures,
         }
 
     def _prepare_collection_tasks(
@@ -409,18 +464,111 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         """Prepare collection tasks for each data type."""
         tasks = []
 
+        source = (
+            "webhook"
+            if (collection_payload or {}).get("trigger") == "webhook"
+            else "backfill"
+        )
+
+        # A webhook names the objects it is about. If it named any, this is a
+        # targeted fetch, and no data type in it may quietly widen into a full
+        # catalog sweep — see _collect_and_store_type.
+        targeted = bool((collection_payload or {}).get("specific_ids"))
+
         for data_type in data_types:
             # Check if this data type has specific IDs (for webhooks)
             specific_ids = self._get_specific_ids_for_data_type(
                 data_type, collection_payload
             )
 
-            task = self._collect_data_by_type(
-                data_type, shop_domain, shop_id, access_token, specific_ids=specific_ids
+            tasks.append(
+                self._collect_and_store_type(
+                    data_type, shop_domain, shop_id, access_token,
+                    specific_ids, source, targeted, collection_payload,
+                )
             )
-            tasks.append(task)
 
         return tasks
+
+    async def _collect_and_store_type(
+        self,
+        data_type: str,
+        shop_domain: str,
+        shop_id: str,
+        access_token: str,
+        specific_ids: Optional[List[str]],
+        source: str,
+        targeted: bool = False,
+        collection_payload: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        """Collect one data type, storing as it goes, and return the count.
+
+        Storage happens per page rather than once at the end so peak memory is
+        one page, not the whole catalog.
+        """
+        if targeted and not specific_ids:
+            # This data type belongs to a targeted webhook but no ids of its
+            # own came through. Inventory is the case that matters: the event
+            # carries an inventory item, and the product that owns it is what
+            # needs re-collecting.
+            specific_ids = await self._resolve_targeted_ids(
+                data_type, shop_domain, collection_payload or {}
+            )
+
+            if not specific_ids:
+                # Falling through here would run a full catalog sweep for a
+                # single webhook. Every stock change re-fetched all 997
+                # products, which is what buried the consumer and exhausted
+                # the container's memory.
+                logger.warning(
+                    f"Webhook for {data_type} carried no usable ids "
+                    f"({(collection_payload or {}).get('specific_ids')}); "
+                    f"skipping rather than sweeping the whole catalog"
+                )
+                return 0
+
+        async def store_page(items: List[Dict[str, Any]]) -> None:
+            if items:
+                await self._store_data(data_type, items, shop_id, source)
+
+        result = await self._collect_data_by_type(
+            data_type,
+            shop_domain,
+            shop_id,
+            access_token,
+            specific_ids=specific_ids,
+            on_page=None if specific_ids else store_page,
+        )
+
+        if specific_ids:
+            # Webhook path: a handful of objects, returned in full.
+            await store_page(result)
+            return len(result)
+        return result
+
+    async def _resolve_targeted_ids(
+        self, data_type: str, shop_domain: str, collection_payload: Dict[str, Any]
+    ) -> Optional[List[str]]:
+        """Translate ids a webhook carries under another key into this type's.
+
+        Only inventory needs this today: inventory_updated arrives with an
+        inventory item id, and products are what get collected.
+        """
+        ids = (collection_payload.get("specific_ids") or {})
+        inventory_item_ids = ids.get("inventory_items")
+
+        if data_type == "products" and inventory_item_ids:
+            resolved = await self.api_client.get_product_ids_for_inventory_items(
+                shop_domain, inventory_item_ids
+            )
+            if resolved:
+                logger.info(
+                    f"Resolved {len(inventory_item_ids)} inventory item(s) to "
+                    f"{len(resolved)} product(s)"
+                )
+            return resolved
+
+        return None
 
     def _get_specific_ids_for_data_type(
         self, data_type: str, collection_payload: Dict[str, Any]
@@ -433,41 +581,29 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
 
     async def _execute_collection_tasks(
         self, tasks: List, data_types: List[str]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Execute all collection tasks in parallel and handle results."""
+    ) -> tuple:
+        """Execute all collection tasks in parallel and handle results.
+
+        Returns (collected_data, failures). Failures are returned rather than
+        swallowed: a data type that raised produced an incomplete result, and
+        the caller must not report that as a successful collection.
+        """
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        collected_data = {}
+        counts: Dict[str, int] = {}
+        failures: Dict[str, str] = {}
 
         for i, result in enumerate(results):
             data_type = data_types[i]
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error(f"❌ Collection failed for {data_type}: {result}")
-                collected_data[data_type] = []
+                counts[data_type] = 0
+                failures[data_type] = str(result)
             else:
-                collected_data[data_type] = result
+                counts[data_type] = result
 
-        return collected_data
-
-    async def _store_collected_data(
-        self,
-        collected_data: Dict[str, List[Dict]],
-        shop_id: str,
-        source: str = "backfill",
-    ) -> List[str]:
-        """Store all collected data in the database."""
-        processed_types = []
-
-        for data_type, data in collected_data.items():
-            if data and len(data) > 0:
-                try:
-                    await self._store_data(data_type, data, shop_id, source)
-                    processed_types.append(data_type)
-                except Exception as e:
-                    logger.error(f"❌ Failed to store {data_type} data: {e}")
-
-        return processed_types
+        return counts, failures
 
     def _extract_specific_ids_from_payload(
         self, collection_payload: Dict[str, Any]
@@ -525,27 +661,32 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
             # Initialize Kafka publisher
             publisher = await self._initialize_normalization_publisher()
 
-            try:
-                # Process each data type
-                for data_type in data_types:
-                    await self._process_data_type_normalization(
-                        publisher, shop_id, data_type, specific_ids
-                    )
-            finally:
-                if publisher:
-                    await publisher.close()
+            # The publisher is shared and stays open; closing it here is what
+            # made every job pay for a fresh Kafka connection.
+            for data_type in data_types:
+                await self._process_data_type_normalization(
+                    publisher, shop_id, data_type, specific_ids
+                )
 
         except Exception as e:
             logger.error(f"❌ Failed to trigger normalization via Kafka: {e}")
 
     async def _initialize_normalization_publisher(self):
-        """Initialize the Kafka event publisher for normalization events."""
-        from app.core.messaging.event_publisher import EventPublisher
-        from app.core.config.kafka_settings import kafka_settings
+        """Return the shared Kafka publisher, connecting it on first use."""
+        if self._publisher is None:
+            from app.core.messaging.event_publisher import EventPublisher
+            from app.core.config.kafka_settings import kafka_settings
 
-        publisher = EventPublisher(kafka_settings.model_dump())
-        await publisher.initialize()
-        return publisher
+            publisher = EventPublisher(kafka_settings.model_dump())
+            await publisher.initialize()
+            self._publisher = publisher
+        return self._publisher
+
+    async def close(self):
+        """Release the shared publisher."""
+        if self._publisher is not None:
+            await self._publisher.close()
+            self._publisher = None
 
     async def _process_data_type_normalization(
         self,
@@ -673,20 +814,34 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
         limit: Optional[int] = None,
         since_id: Optional[str] = None,
         query: Optional[str] = None,
+        on_page=None,
         **kwargs,
-    ) -> List[Dict[str, Any]]:
-        """Generic data collection method - Industry Standard Simplified"""
+    ):
+        """Generic data collection.
+
+        With `on_page`, each page is passed to that coroutine as it arrives and
+        the total count is returned, so memory stays flat no matter how large
+        the catalog is. Without it, every item is accumulated and returned —
+        only safe for the handful of objects a webhook asks for.
+        """
 
         raw_items = []
+        collected = 0
         cursor = since_id
         batch_size = min(limit or self.BATCH_SIZE, self.BATCH_SIZE)
         start_time = now_utc()
 
         while True:
-            # Check timeout
-            if (now_utc() - start_time).seconds > self.TIMEOUT_SECONDS:
-                logger.warning(f"Timeout for {data_type} collection")
-                break
+            # A timeout mid-pagination is a truncated catalog, not a finished
+            # one. Raising makes the consumer retry and eventually DLQ it
+            # instead of storing a partial catalog and reporting success.
+            elapsed = (now_utc() - start_time).total_seconds()
+            if elapsed > self.TIMEOUT_SECONDS:
+                raise TimeoutError(
+                    f"{data_type} collection for {shop_domain} exceeded "
+                    f"{self.TIMEOUT_SECONDS}s after {len(raw_items)} items; "
+                    f"aborting rather than reporting a partial catalog"
+                )
 
             # Get batch from API
             try:
@@ -695,8 +850,10 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                     shop_domain=shop_domain, limit=batch_size, cursor=cursor, **kwargs
                 )
             except Exception as e:
+                # Same reasoning: swallowing this returns the pages collected
+                # so far and the caller cannot tell it from a complete run.
                 logger.error(f"API call failed for {data_type}: {e}")
-                break
+                raise
 
             if not result or "edges" not in result:
                 break
@@ -706,28 +863,37 @@ class ShopifyDataCollectionService(IShopifyDataCollector):
                 break
 
             # Extract items from edges
-            for edge in edges:
-                item_data = edge.get("node", {})
-                if item_data:
-                    raw_items.append(item_data)
+            page_items = [
+                edge.get("node", {}) for edge in edges if edge.get("node")
+            ]
 
-            # Check pagination
-            page_info = result.get("pageInfo", {})
-            if not page_info.get("hasNextPage", False):
-                break
+            if on_page is not None:
+                # Hand each page straight to storage. Holding the whole
+                # catalog in memory first is what took the container out: a
+                # thousand products with their variants, images, media and
+                # metafields, times four data types collected in parallel,
+                # before a single row was written.
+                await on_page(page_items)
+                collected += len(page_items)
+            else:
+                raw_items.extend(page_items)
+                collected = len(raw_items)
 
-            cursor = page_info.get("endCursor")
-            if not cursor:
+            # Check pagination. The queries alias pageInfo into snake_case,
+            # so reading "pageInfo"/"hasNextPage" here found nothing, defaulted
+            # to False and ended every collection after the first page.
+            has_next_page, cursor = page_info_of(result)
+            if not has_next_page or not cursor:
                 break
 
             # Check limit
-            if limit and len(raw_items) >= limit:
+            if limit and collected >= limit:
                 break
 
             # Rate limiting
             await asyncio.sleep(self.RATE_LIMIT_DELAY)
 
-        return raw_items
+        return raw_items if on_page is None else collected
 
     async def _collect_specific_items_by_ids(
         self, data_type: str, shop_domain: str, specific_ids: List[str]

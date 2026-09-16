@@ -14,6 +14,7 @@ import argparse
 import requests
 import time
 import random
+import json
 from typing import Dict, Any, List, Optional, Tuple
 
 # Add the python-worker directory to Python path
@@ -21,7 +22,7 @@ python_worker_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."
 sys.path.insert(0, python_worker_dir)
 
 from app.scripts.seed_data_generators.base_generator import BaseGenerator
-from app.scripts.seed_data_generators.product_generator import ProductGenerator
+from app.scripts.seed_data_generators.csv_product_generator import CsvProductGenerator
 from app.scripts.seed_data_generators.customer_generator import CustomerGenerator
 from app.scripts.seed_data_generators.order_generator import OrderGenerator
 
@@ -37,7 +38,7 @@ class ShopifyGraphQLSeeder:
 
         # Generators
         self.base_generator = BaseGenerator(shop_domain)
-        self.product_generator = ProductGenerator(shop_domain)
+        self.product_generator = CsvProductGenerator(shop_domain)
         self.customer_generator = CustomerGenerator(shop_domain)
         self.order_generator = OrderGenerator(shop_domain)
 
@@ -50,6 +51,53 @@ class ShopifyGraphQLSeeder:
         # Cache for publication ID and location ID
         self._online_store_publication_id: Optional[str] = None
         self._store_location_id: Optional[str] = None
+
+        # Checkpoint for resume capability
+        self._checkpoint_path = os.path.join(
+            os.path.dirname(__file__), f"checkpoint_{shop_domain.replace('.', '_')}.json"
+        )
+        self._checkpoint = self._load_checkpoint()
+
+    def _load_checkpoint(self) -> Dict[str, Any]:
+        """Load checkpoint from disk if it exists."""
+        if os.path.exists(self._checkpoint_path):
+            try:
+                with open(self._checkpoint_path, "r") as f:
+                    data = json.load(f)
+                print(f"  📋 Loaded checkpoint: {len(data.get('created_products', {}))} products, "
+                      f"{len(data.get('created_customers', {}))} customers, "
+                      f"{len(data.get('created_orders', {}))} orders")
+                return data
+            except Exception as e:
+                print(f"  ⚠️ Failed to load checkpoint: {e}")
+        return {
+            "created_products": {},
+            "created_customers": {},
+            "created_orders": {},
+            "created_collections": {},
+            "step": "products",
+        }
+
+    def _save_checkpoint(self) -> None:
+        """Save current progress to disk."""
+        self._checkpoint["created_products"] = self.created_products
+        self._checkpoint["created_customers"] = self.created_customers
+        self._checkpoint["created_orders"] = self.created_orders
+        self._checkpoint["created_collections"] = self.created_collections
+        try:
+            with open(self._checkpoint_path, "w") as f:
+                json.dump(self._checkpoint, f, indent=2)
+        except Exception as e:
+            print(f"  ⚠️ Failed to save checkpoint: {e}")
+
+    def _clear_checkpoint(self) -> None:
+        """Remove checkpoint file after successful completion."""
+        try:
+            if os.path.exists(self._checkpoint_path):
+                os.remove(self._checkpoint_path)
+                print("  🧹 Checkpoint cleared (seed complete)")
+        except Exception:
+            pass
 
     def _graphql_request(
         self,
@@ -103,6 +151,30 @@ class ShopifyGraphQLSeeder:
                 print(f"    🔍 Detailed error: {error_details}")
                 raise e
 
+    def _get_product_by_handle(self, handle: str) -> Optional[Dict[str, Any]]:
+        """Query Shopify for an existing product by handle."""
+        query = """
+        query productByHandle($handle: String!) {
+            productByHandle(handle: $handle) {
+                id
+                title
+                handle
+                variants(first: 50) {
+                    nodes {
+                        id
+                        title
+                        price
+                    }
+                }
+            }
+        }
+        """
+        try:
+            result = self._graphql_request(query, {"handle": handle})
+            return result.get("data", {}).get("productByHandle")
+        except Exception:
+            return None
+
     def _get_online_store_publication_id(self) -> str:
         """Fetch the Online Store publication ID for this shop."""
         if self._online_store_publication_id:
@@ -132,9 +204,6 @@ class ShopifyGraphQLSeeder:
             # Fallback to first publication if Online Store not found
             if publications:
                 self._online_store_publication_id = publications[0]["id"]
-                print(
-                    f"    ⚠️ Online Store publication not found, using: {publications[0]['name']}"
-                )
                 return self._online_store_publication_id
             else:
                 raise Exception("No publications found")
@@ -168,9 +237,6 @@ class ShopifyGraphQLSeeder:
             # Use the first available location
             if locations:
                 self._store_location_id = locations[0]["id"]
-                print(
-                    f"    📍 Using location: {locations[0]['name']} ({locations[0]['id']})"
-                )
                 return self._store_location_id
             else:
                 raise Exception("No locations found")
@@ -232,26 +298,20 @@ class ShopifyGraphQLSeeder:
     ) -> str:
         """Download image from external URL and upload to Shopify's staged target."""
         try:
-            # Download the image from external URL
-            print(f"      📥 Downloading image from: {image_url}")
             response = requests.get(image_url, timeout=30)
             response.raise_for_status()
             image_data = response.content
 
-            # Prepare form data with staging parameters
             form_data = {}
             for param in staged_target["parameters"]:
                 form_data[param["name"]] = param["value"]
 
-            # Upload the file to staged target
             files = {"file": image_data}
-            print(f"      📤 Uploading to Shopify staged storage...")
             upload_response = requests.post(
                 staged_target["url"], data=form_data, files=files, timeout=60
             )
             upload_response.raise_for_status()
 
-            print(f"      ✅ Upload successful")
             return staged_target["resourceUrl"]
 
         except requests.exceptions.RequestException as e:
@@ -293,10 +353,7 @@ class ShopifyGraphQLSeeder:
                     f"{error.get('code', 'ERROR')}: {error['message']}"
                     for error in result["data"]["productCreateMedia"]["mediaUserErrors"]
                 ]
-                print(f"    ⚠️ Media attachment errors: {', '.join(errors)}")
-            else:
-                media_count = len(result["data"]["productCreateMedia"]["media"])
-                print(f"    📸 Successfully attached {media_count} image(s)")
+                print(f"    ⚠️ Media errors: {', '.join(errors)}")
 
         except Exception as e:
             print(f"    ⚠️ Failed to attach media: {e}")
@@ -320,41 +377,33 @@ class ShopifyGraphQLSeeder:
                         image_url.split("/")[-1].split("?")[0] or f"image_{i}.jpg"
                     )
 
-                    # Download image to get file size
-                    print(f"    📸 Processing image {i}: {filename}")
                     response = requests.head(image_url, timeout=10)
                     file_size = response.headers.get("Content-Length", "0")
 
-                    # Determine MIME type
                     content_type = response.headers.get("Content-Type", "image/jpeg")
                     if not content_type.startswith("image/"):
                         content_type = "image/jpeg"
 
-                    # Step 1: Create staged upload target
-                    print(f"      🎯 Creating staged upload target...")
                     staged_target = self._create_staged_upload(
                         filename, content_type, file_size
                     )
 
-                    # Step 2: Upload image to staged target
                     resource_url = self._upload_to_staged_target(
                         staged_target, image_url
                     )
 
-                    # Step 3: Prepare media input with resourceUrl
                     media_inputs.append(
                         {
-                            "originalSource": resource_url,  # Use staged resourceUrl
+                            "originalSource": resource_url,
                             "mediaContentType": "IMAGE",
                             "alt": media_node["image"].get("altText", filename),
                         }
                     )
 
                 except Exception as e:
-                    print(f"    ⚠️ Failed to process image {i}: {e}")
+                    print(f"    ⚠️ Image {i} failed: {e}")
                     continue
 
-        # Attach all successfully processed media
         if media_inputs:
             self._attach_media_to_product(product_id, media_inputs)
 
@@ -407,7 +456,7 @@ class ShopifyGraphQLSeeder:
                 print(f"    ⚠️ Failed to publish {product_id}: {e}")
 
         print(
-            f"  ✅ Successfully published {success_count}/{len(product_ids)} products"
+            f"  ✅ Published {success_count}/{len(product_ids)} products"
         )
         return success_count > 0
 
@@ -469,15 +518,26 @@ class ShopifyGraphQLSeeder:
     async def create_products(self) -> Dict[str, Dict[str, Any]]:
         print("📦 Creating products...")
         products = self.product_generator.generate_products()
+        total = len(products)
+
+        # Resume from checkpoint — skip already-created products
+        already_created = self._checkpoint.get("created_products", {})
+        created_handles = {v["handle"] for v in already_created.values()}
+        if created_handles:
+            self.created_products.update(already_created)
+            print(f"  ⏩ Resuming: {len(created_handles)}/{total} products")
 
         # Get publication ID once at the beginning
         publication_id = self._get_online_store_publication_id()
-        print(f"  📡 Using publication: {publication_id}")
 
-        # Collect all product IDs for batch publishing
-        created_product_ids = []
+        # Collect all product IDs for batch publishing (include previously created)
+        created_product_ids = [p["id"] for p in self.created_products.values()]
 
         for i, product_data in enumerate(products, 1):
+            # Skip products that were already created in a previous run
+            if product_data["handle"] in created_handles:
+                continue
+
             try:
                 # Convert product data to GraphQL format
                 variants = []
@@ -608,7 +668,24 @@ class ShopifyGraphQLSeeder:
                         error["message"]
                         for error in result["data"]["productSet"]["userErrors"]
                     ]
-                    raise Exception(f"Product creation errors: {', '.join(errors)}")
+                    error_msg = ", ".join(errors)
+
+                    # Handle "handle already in use" — product was created in a previous run
+                    if "already in use" in error_msg:
+                        existing = self._get_product_by_handle(product_data["handle"])
+                        if existing:
+                            variant_ids = [v["id"] for v in existing["variants"]["nodes"]]
+                            self.created_products[f"product_{i}"] = {
+                                "id": existing["id"],
+                                "handle": existing["handle"],
+                                "title": existing["title"],
+                                "variants": variant_ids,
+                            }
+                            print(f"  ⏩ [{i}/{total}] {existing['title']} (already exists, skipping)")
+                            self._save_checkpoint()
+                            continue
+
+                    raise Exception(f"Product creation errors: {error_msg}")
 
                 product = result["data"]["productSet"]["product"]
 
@@ -619,7 +696,6 @@ class ShopifyGraphQLSeeder:
 
                 # Add media after product is created using staged uploads
                 if product_data.get("media", {}).get("edges"):
-                    print(f"  🖼️  Adding media to product: {product['title']}")
                     self._add_media_to_product_from_urls(
                         product["id"], product_data["media"]["edges"]
                     )
@@ -631,21 +707,37 @@ class ShopifyGraphQLSeeder:
                     "variants": variant_ids,
                 }
                 created_product_ids.append(product["id"])
-                print(f"  ✅ Product: {product['title']} ({product['id']})")
+                print(f"  ✅ [{i}/{total}] {product['title']} ({product['id']})")
+
+                # Save checkpoint after every product
+                self._save_checkpoint()
 
             except Exception as e:
-                print(f"  ❌ Product {i} failed: {e}")
+                print(f"  ❌ [{i}/{total}] {product_data['title']} failed: {e}")
 
-        # Batch publish all products to Online Store
-        if created_product_ids:
-            self._batch_publish_products(created_product_ids, publication_id)
+        # Batch publish all new products to Online Store
+        new_ids = [pid for pid in created_product_ids if pid not in [p["id"] for p in already_created.values()]]
+        if new_ids:
+            self._batch_publish_products(new_ids, publication_id)
 
         return self.created_products
 
     async def create_customers(self) -> Dict[str, Dict[str, Any]]:
         print("👥 Creating customers...")
         customers = self.customer_generator.generate_customers()
+        total = len(customers)
+
+        # Resume from checkpoint
+        already_created = self._checkpoint.get("created_customers", {})
+        if already_created:
+            self.created_customers.update(already_created)
+            print(f"  ⏩ Resuming: {len(already_created)}/{total} customers already created")
+
         for i, customer_data in enumerate(customers, 1):
+            # Skip already-created customers
+            if f"customer_{i}" in already_created:
+                continue
+
             try:
                 # Prepare addresses
                 addresses = []
@@ -706,10 +798,11 @@ class ShopifyGraphQLSeeder:
                         f"{customer_data['firstName']} {customer_data['lastName']}",
                     ),
                 }
-                print(f"  ✅ Customer: {customer['displayName']}")
+                print(f"  ✅ [{i}/{total}] {customer['displayName']}")
+                self._save_checkpoint()
 
             except Exception as e:
-                print(f"  ❌ Customer {i} failed: {e}")
+                print(f"  ❌ [{i}/{total}] Customer failed: {e}")
         return self.created_customers
 
     def _generate_collections_from_products(self) -> List[Dict[str, Any]]:
@@ -746,6 +839,13 @@ class ShopifyGraphQLSeeder:
         if not self.created_products:
             print("  ⚠️ No products available to add to collections")
             return {}
+
+        # Resume from checkpoint
+        already_created = self._checkpoint.get("created_collections", {})
+        if already_created:
+            self.created_collections.update(already_created)
+            print(f"  ⏩ Resuming: {len(already_created)} collections already created")
+            return self.created_collections
 
         collections = self._generate_collections_from_products()
         created_collection_ids = []
@@ -791,7 +891,6 @@ class ShopifyGraphQLSeeder:
                     "title": collection["title"],
                 }
                 created_collection_ids.append(collection["id"])
-                print(f"  ✅ Collection: {collection['title']} ({collection['id']})")
 
                 # Add products to collection
                 if c["productIds"]:
@@ -829,10 +928,8 @@ class ShopifyGraphQLSeeder:
                         print(
                             f"    ⚠️ Failed to add products to collection: {', '.join(errors)}"
                         )
-                    else:
-                        print(
-                            f"    ✅ Added {len(c['productIds'])} products to collection"
-                        )
+
+                self._save_checkpoint()
 
             except Exception as e:
                 print(f"  ❌ Collection '{c['title']}' failed: {e}")
@@ -850,23 +947,17 @@ class ShopifyGraphQLSeeder:
             print("  ⚠️ Need products and customers before creating orders")
             return {}
 
+        # Resume from checkpoint
+        already_created = self._checkpoint.get("created_orders", {})
+        if already_created:
+            self.created_orders.update(already_created)
+            print(f"  ⏩ Resuming: {len(already_created)} orders already created")
+
         # Get some products and customers for orders
         customer_ids = [c["id"] for c in self.created_customers.values()]
         product_list = list(self.created_products.values())
 
         # Baskets are deliberate, not random.
-        #
-        # This used to be `random.sample(product_list, 2)`, which produced
-        # pairings like "Yoga Mat + LED String Lights". The co-purchase miner
-        # then computed a perfectly correct LLR over meaningless data, so the
-        # observed half of every edge score was noise and there was no way to
-        # tell a real recommendation from a bad one.
-        #
-        # Products are named by title rather than list index. The previous
-        # curated configs in OrderGenerator used indices, and when the catalog
-        # grew past 8 clothing items every index after that shifted — the
-        # comments still said "Earbuds, Smart Watch" while pointing at
-        # "Silk Scarf, Leather Belt". A title cannot drift.
         baskets = self.order_generator.realistic_baskets()
         by_title = {p.get("title"): p for p in product_list if p.get("title")}
 
@@ -887,29 +978,16 @@ class ShopifyGraphQLSeeder:
                 for _ in range(40)
             ]
 
-        # Enough orders that every basket clears the blend's minimum.
-        #
-        # `blend()` gives observed data zero weight below
-        # BLEND_MIN_OBSERVATIONS (5) and full weight at
-        # BLEND_FULL_OBSERVATIONS (50). At the old flat 40 orders each pairing
-        # was seen 2-3 times, so the observed half of every score was gated off
-        # and only the priors were ever exercised — the co-purchase path could
-        # not be tested at all. Repeating each basket 8 times puts every pair
-        # comfortably over the minimum and part-way up the ramp.
         repeats_per_basket = 8
         order_count = len(resolved) * repeats_per_basket
-        print(
-            f"  → {order_count} orders across {len(resolved)} baskets "
-            f"({repeats_per_basket} observations per pairing)"
-        )
 
         for i in range(1, order_count + 1):
+            # Skip already-created orders
+            if f"order_{i}" in already_created:
+                continue
+
             try:
                 customer_id = random.choice(customer_ids)
-                # Cycle the baskets so each pairing is bought several times.
-                # One observation per pair would sit under the blend's minimum
-                # and contribute nothing, which is what made the seeded data
-                # untestable in the first place.
                 selected_products = resolved[(i - 1) % len(resolved)]
 
                 # Create line items using product variants
@@ -926,7 +1004,6 @@ class ShopifyGraphQLSeeder:
                         )
 
                 if not line_items:
-                    print(f"  ⚠️ Skipping order {i} - no variants available")
                     continue
 
                 # Step 1: Create draft order
@@ -963,7 +1040,7 @@ class ShopifyGraphQLSeeder:
                             "userErrors"
                         ]
                     ]
-                    print(f"  ⚠️ Draft order {i} creation errors: {', '.join(errors)}")
+                    print(f"  ⚠️ [{i}/{order_count}] Draft order errors: {', '.join(errors)}")
                     continue
 
                 draft_order = draft_result["data"]["draftOrderCreate"]["draftOrder"]
@@ -1001,7 +1078,7 @@ class ShopifyGraphQLSeeder:
                             "userErrors"
                         ]
                     ]
-                    print(f"  ⚠️ Order completion errors: {', '.join(errors)}")
+                    print(f"  ⚠️ [{i}/{order_count}] Order completion errors: {', '.join(errors)}")
                     continue
 
                 order = complete_result["data"]["draftOrderComplete"]["draftOrder"][
@@ -1014,38 +1091,33 @@ class ShopifyGraphQLSeeder:
                     "financialStatus": order["displayFinancialStatus"],
                 }
                 print(
-                    f"  ✅ Order: {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']})"
+                    f"  ✅ [{i}/{order_count}] {order['name']} - ${order['totalPrice']} ({order['displayFinancialStatus']})"
                 )
 
+                # Save checkpoint every 10 orders to avoid excessive I/O
+                if i % 10 == 0:
+                    self._save_checkpoint()
+
             except Exception as e:
-                print(f"  ❌ Order {i} failed: {e}")
+                print(f"  ❌ [{i}/{order_count}] Order failed: {e}")
+
+        # Final checkpoint save
+        self._save_checkpoint()
         return self.created_orders
 
     async def run(self) -> bool:
-        print(f"🚀 Seeding Shopify store with GraphQL: {self.shop_domain}")
+        print(f"🚀 Seeding: {self.shop_domain}")
 
         await self.create_products()
         await self.create_customers()
         await self.create_collections()
         await self.create_orders()
 
-        print("\n🎯 Seeding Summary:")
-        print(
-            f"  ✅ Products:   {len(self.created_products)} (published to Online Store)"
-        )
-        print(f"  ✅ Customers:  {len(self.created_customers)}")
-        print(
-            f"  ✅ Collections:{len(self.created_collections)} (published to Online Store)"
-        )
-        print(f"  ✅ Orders:     {len(self.created_orders)}")
-        print(f"  📦 Inventory: Tracked for all product variants")
-        print(
-            f"  🏷️  Categories: Clothing, Accessories, Electronics, Home & Garden, Sports & Fitness"
-        )
-        print(
-            f"  🌐 Storefront: Products and collections visible on {self.shop_domain}"
-        )
-        print(f"  🔗 Admin URL: https://{self.shop_domain}/admin")
+        print(f"\n✅ Done: {len(self.created_products)} products, {len(self.created_customers)} customers, {len(self.created_orders)} orders")
+        print(f"  🔗 https://{self.shop_domain}/admin")
+
+        # Clear checkpoint on successful completion
+        self._clear_checkpoint()
         return bool(self.created_products and self.created_customers)
 
 

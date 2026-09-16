@@ -66,6 +66,18 @@ class ShopifyAPIClient(IShopifyAPIClient):
         """Get shop information"""
         return await self.product_client.get_shop_info(shop_domain)
 
+    async def get_catalog_counts(self, shop_domain: str) -> Dict[str, int]:
+        """Shopify's own product/collection totals — the sync denominator."""
+        return await self.product_client.get_catalog_counts(shop_domain)
+
+    async def get_product_ids_for_inventory_items(
+        self, shop_domain: str, inventory_item_ids: List[str]
+    ) -> List[str]:
+        """Resolve inventory item ids to the products that own them."""
+        return await self.product_client.get_product_ids_for_inventory_items(
+            shop_domain, inventory_item_ids
+        )
+
     async def get_products(
         self,
         shop_domain: str,

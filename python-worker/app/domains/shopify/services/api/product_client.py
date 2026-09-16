@@ -4,7 +4,7 @@ Shopify Product API client with full data traversal support
 
 from typing import Dict, Any, Optional, List
 from app.core.logging import get_logger
-from .base_client import BaseShopifyAPIClient
+from .base_client import BaseShopifyAPIClient, page_info_of
 
 logger = get_logger(__name__)
 
@@ -283,13 +283,66 @@ class ProductAPIClient(BaseShopifyAPIClient):
 
                 processed_products.append(product)
 
-            # Return in the same format as the original query
+            # Carry the real page info through. Returning a hardcoded
+            # has_next_page: False here told the collector the catalog ended
+            # after the first page, every time.
             return {
                 "edges": [{"node": product} for product in processed_products],
-                "page_info": {"has_next_page": False},
+                "page_info": products_data.get("page_info", {}),
             }
 
         return products_data
+
+    async def get_product_ids_for_inventory_items(
+        self, shop_domain: str, inventory_item_ids: List[str]
+    ) -> List[str]:
+        """Map inventory item ids to the products that own them.
+
+        An inventory webhook only names an inventory item, but what needs
+        re-collecting is the product behind it. Without this the ids have
+        nowhere to go and the collection falls back to sweeping the entire
+        catalog for every stock change.
+        """
+        if not inventory_item_ids:
+            return []
+
+        gids = [
+            i if str(i).startswith("gid://") else f"gid://shopify/InventoryItem/{i}"
+            for i in inventory_item_ids
+        ]
+
+        query = """
+        query($ids: [ID!]!) {
+            nodes(ids: $ids) {
+                ... on InventoryItem {
+                    id
+                    variants(first: 20) {
+                        edges { node { product { id } } }
+                    }
+                }
+            }
+        }
+        """
+
+        try:
+            result = await self.execute_query(query, {"ids": gids}, shop_domain)
+        except Exception as e:
+            logger.error(f"Failed to resolve inventory items for {shop_domain}: {e}")
+            return []
+
+        product_ids = []
+        for node in result.get("nodes") or []:
+            if not node:
+                continue
+            for edge in (node.get("variants") or {}).get("edges", []):
+                product = (edge.get("node") or {}).get("product") or {}
+                gid = product.get("id")
+                if gid:
+                    numeric = str(gid).rsplit("/", 1)[-1]
+                    if numeric not in product_ids:
+                        product_ids.append(numeric)
+
+        return product_ids
 
     async def _get_products_by_ids(
         self, shop_domain: str, product_ids: List[str]
@@ -458,10 +511,9 @@ class ProductAPIClient(BaseShopifyAPIClient):
         # Reuse the same logic for fetching additional variants, images, metafields
         # Check and fetch additional variants if needed
         variants = product.get("variants", {})
-        variants_page_info = variants.get("pageInfo", {})
-        if variants_page_info.get("hasNextPage"):
+        has_more_variants, variants_cursor = page_info_of(variants)
+        if has_more_variants:
             all_variants = variants.get("edges", []).copy()
-            variants_cursor = variants_page_info.get("endCursor")
 
             while variants_cursor:
                 rate_limit_info = await self.check_rate_limit(shop_domain)
@@ -477,12 +529,8 @@ class ProductAPIClient(BaseShopifyAPIClient):
                 new_variants = variants_batch.get("edges", [])
                 all_variants.extend(new_variants)
 
-                page_info = variants_batch.get("page_info", {})
-                variants_cursor = (
-                    page_info.get("end_cursor")
-                    if page_info.get("has_next_page")
-                    else None
-                )
+                has_more, next_cursor = page_info_of(variants_batch)
+                variants_cursor = next_cursor if has_more else None
 
             product["variants"] = {
                 "edges": all_variants,
@@ -491,10 +539,9 @@ class ProductAPIClient(BaseShopifyAPIClient):
 
         # Check and fetch additional images if needed
         images = product.get("images", {})
-        images_page_info = images.get("pageInfo", {})
-        if images_page_info.get("hasNextPage"):
+        has_more_images, images_cursor = page_info_of(images)
+        if has_more_images:
             all_images = images.get("edges", []).copy()
-            images_cursor = images_page_info.get("endCursor")
 
             while images_cursor:
                 rate_limit_info = await self.check_rate_limit(shop_domain)
@@ -510,12 +557,8 @@ class ProductAPIClient(BaseShopifyAPIClient):
                 new_images = images_batch.get("edges", [])
                 all_images.extend(new_images)
 
-                page_info = images_batch.get("page_info", {})
-                images_cursor = (
-                    page_info.get("end_cursor")
-                    if page_info.get("has_next_page")
-                    else None
-                )
+                has_more, next_cursor = page_info_of(images_batch)
+                images_cursor = next_cursor if has_more else None
 
             product["images"] = {
                 "edges": all_images,
@@ -524,10 +567,9 @@ class ProductAPIClient(BaseShopifyAPIClient):
 
         # Check and fetch additional metafields if needed
         metafields = product.get("metafields", {})
-        metafields_page_info = metafields.get("pageInfo", {})
-        if metafields_page_info.get("hasNextPage"):
+        has_more_metafields, metafields_cursor = page_info_of(metafields)
+        if has_more_metafields:
             all_metafields = metafields.get("edges", []).copy()
-            metafields_cursor = metafields_page_info.get("endCursor")
 
             while metafields_cursor:
                 rate_limit_info = await self.check_rate_limit(shop_domain)
@@ -543,12 +585,8 @@ class ProductAPIClient(BaseShopifyAPIClient):
                 new_metafields = metafields_batch.get("edges", [])
                 all_metafields.extend(new_metafields)
 
-                page_info = metafields_batch.get("page_info", {})
-                metafields_cursor = (
-                    page_info.get("end_cursor")
-                    if page_info.get("has_next_page")
-                    else None
-                )
+                has_more, next_cursor = page_info_of(metafields_batch)
+                metafields_cursor = next_cursor if has_more else None
 
             product["metafields"] = {
                 "edges": all_metafields,

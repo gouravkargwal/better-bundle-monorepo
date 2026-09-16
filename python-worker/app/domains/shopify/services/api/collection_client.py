@@ -4,7 +4,7 @@ Shopify Collection API client with full data traversal support
 
 from typing import Dict, Any, Optional, List
 from app.core.logging import get_logger
-from .base_client import BaseShopifyAPIClient
+from .base_client import BaseShopifyAPIClient, page_info_of
 
 logger = get_logger(__name__)
 
@@ -127,10 +127,10 @@ class CollectionAPIClient(BaseShopifyAPIClient):
 
                 processed_collections.append(collection)
 
-            # Return in the same format as the original query
+            # Carry the real page info through — see product_client.
             return {
                 "edges": [{"node": collection} for collection in processed_collections],
-                "page_info": {"has_next_page": False},
+                "page_info": collections_data.get("page_info", {}),
             }
 
         return collections_data
@@ -211,10 +211,9 @@ class CollectionAPIClient(BaseShopifyAPIClient):
         # Reuse the same logic for fetching additional products
         # Check and fetch additional products if needed
         products = collection.get("products", {})
-        products_page_info = products.get("pageInfo", {})
-        if products_page_info.get("hasNextPage"):
+        has_more_products, products_cursor = page_info_of(products)
+        if has_more_products:
             all_products = products.get("edges", []).copy()
-            products_cursor = products_page_info.get("endCursor")
 
             while products_cursor:
                 rate_limit_info = await self.check_rate_limit(shop_domain)
@@ -230,12 +229,8 @@ class CollectionAPIClient(BaseShopifyAPIClient):
                 new_products = products_batch.get("edges", [])
                 all_products.extend(new_products)
 
-                page_info = products_batch.get("page_info", {})
-                products_cursor = (
-                    page_info.get("end_cursor")
-                    if page_info.get("has_next_page")
-                    else None
-                )
+                has_more, next_cursor = page_info_of(products_batch)
+                products_cursor = next_cursor if has_more else None
 
             collection["products"] = {
                 "edges": all_products,

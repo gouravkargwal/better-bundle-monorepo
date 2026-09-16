@@ -270,10 +270,10 @@ class OrderAPIClient(BaseShopifyAPIClient):
 
                 processed_orders.append(order)
 
-            # Return in the same format as the original query
+            # Carry the real page info through — see product_client.
             return {
                 "edges": [{"node": order} for order in processed_orders],
-                "page_info": {"has_next_page": False},
+                "page_info": orders_data.get("page_info", {}),
             }
 
         return orders_data

@@ -49,6 +49,14 @@ export interface SyncStatus {
   productsTotal: number;
   productsActive: number;
   productsEmbedded: number;
+  /**
+   * How many products the Shopify store actually has, recorded at collection
+   * time. This is the real denominator for sync progress: comparing our
+   * ingested rows against our own ingested rows reads 100% by construction,
+   * and stayed at 100% while three quarters of a catalog was missing.
+   * Null when no collection has recorded it yet.
+   */
+  productsInStore: number | null;
   collectionsTotal: number;
   ordersTotal: number;
   edgesTotal: number;

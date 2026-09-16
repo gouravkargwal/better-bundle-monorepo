@@ -35,13 +35,40 @@ class KafkaAdmin:
             raise RuntimeError("Admin client not initialized")
 
         results = {}
+        broker_count = await self._broker_count()
+        existing = await self._partition_counts()
 
         for topic_name, topic_config in topics.items():
+            wanted_partitions = topic_config.get("partitions", 1)
+
+            # Asking for more replicas than there are brokers fails the whole
+            # create. Kafka then auto-creates the topic on first produce with
+            # broker defaults — one partition — and the configured partition
+            # count is silently ignored. A single-partition topic can only ever
+            # have one consumer, so the pipeline cannot scale out no matter how
+            # many workers run.
+            wanted_rf = min(
+                topic_config.get("replication_factor", 1), max(broker_count, 1)
+            )
+            if wanted_rf != topic_config.get("replication_factor", 1):
+                logger.warning(
+                    f"Topic '{topic_name}': replication_factor "
+                    f"{topic_config.get('replication_factor')} exceeds "
+                    f"{broker_count} broker(s); using {wanted_rf}"
+                )
+
+            if topic_name in existing:
+                # Topic is already there — widen it if it is too narrow.
+                results[topic_name] = await self._ensure_partitions(
+                    topic_name, existing[topic_name], wanted_partitions
+                )
+                continue
+
             try:
                 new_topic = NewTopic(
                     name=topic_name,
-                    num_partitions=topic_config.get("partitions", 1),
-                    replication_factor=topic_config.get("replication_factor", 1),
+                    num_partitions=wanted_partitions,
+                    replication_factor=wanted_rf,
                     topic_configs=topic_config.get("config", {}),
                 )
 
@@ -58,6 +85,53 @@ class KafkaAdmin:
                     logger.exception(f"Failed to create topic '{topic_name}': {e}")
 
         return results
+
+    async def _broker_count(self) -> int:
+        """How many brokers the cluster actually has."""
+        try:
+            cluster = await self._admin.describe_cluster()
+            return max(len(cluster.get("brokers", []) or []), 1)
+        except Exception as e:
+            logger.warning(f"Could not describe cluster, assuming 1 broker: {e}")
+            return 1
+
+    async def _partition_counts(self) -> Dict[str, int]:
+        """Current partition count per existing topic."""
+        try:
+            metadata = await self._admin.describe_topics()
+            return {
+                t["topic"]: len(t.get("partitions", []) or []) for t in metadata
+            }
+        except Exception as e:
+            logger.warning(f"Could not read topic metadata: {e}")
+            return {}
+
+    async def _ensure_partitions(
+        self, topic_name: str, current: int, wanted: int
+    ) -> bool:
+        """Grow an existing topic to the configured partition count.
+
+        Partitions can only be added, never removed. Adding them changes which
+        partition a key lands on, so per-key ordering is only preserved going
+        forward — acceptable here, where ordering is per shop and best effort.
+        """
+        if current >= wanted:
+            return True
+        try:
+            from aiokafka.admin import NewPartitions
+
+            await self._admin.create_partitions(
+                {topic_name: NewPartitions(total_count=wanted)}
+            )
+            logger.warning(
+                f"Grew topic '{topic_name}' from {current} to {wanted} partitions"
+            )
+            return True
+        except Exception as e:
+            logger.error(
+                f"Could not grow topic '{topic_name}' to {wanted} partitions: {e}"
+            )
+            return False
 
     async def delete_topics(self, topic_names: List[str]) -> Dict[str, bool]:
         """Delete topics"""

@@ -121,11 +121,19 @@ async def lifespan(app: FastAPI):
     backstop_task = asyncio.create_task(ingestion_backstop.run_forever())
     logger.info("✅ Ingestion backstop started")
 
+    # Reconciles products, collections and customers against Shopify's live
+    # catalog.  Missed webhooks leave stale active rows; this deactivates them
+    # so they never appear in recommendations.
+    from app.domains.shopify.services import entity_reconciler
+
+    reconciler_entity_task = asyncio.create_task(entity_reconciler.run_forever())
+    logger.info("✅ Entity reconciler started")
+
     yield
 
     # Shutdown
 
-    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task):
+    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task, reconciler_entity_task):
         task.cancel()
         try:
             await task

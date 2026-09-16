@@ -54,7 +54,9 @@ export function MetricTile({
 
   const percent =
     progress && progress.max > 0
-      ? Math.min(100, Math.max(0, (progress.value / progress.max) * 100))
+      ? Math.round(
+          Math.min(100, Math.max(0, (progress.value / progress.max) * 100)),
+        )
       : 0;
 
   return (

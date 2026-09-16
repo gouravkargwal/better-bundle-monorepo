@@ -29,6 +29,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    # Ceiling, not a reservation — it only bites when a container misbehaves.
+    # Without limits anywhere, one runaway service exhausts the whole ~2.8GB VM
+    # and the kernel picks a victim by size, which is how a memory leak in the
+    # worker took the host down and made Postgres look unreachable from Remix.
+    # Sized for shared_buffers=256MB plus work_mem per connection.
+    mem_limit: 450m
+    memswap_limit: 450m  # equal to mem_limit: no swap to hide the overrun
     logging:
       driver: json-file
       options:

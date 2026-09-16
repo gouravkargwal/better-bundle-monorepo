@@ -96,10 +96,10 @@ class CustomerAPIClient(BaseShopifyAPIClient):
                 customer = customer_edge["node"]
                 processed_customers.append(customer)
 
-            # Return in the same format as the original query
+            # Carry the real page info through — see product_client.
             return {
                 "edges": [{"node": customer} for customer in processed_customers],
-                "page_info": {"has_next_page": False},
+                "page_info": customers_data.get("page_info", {}),
             }
 
         return customers_data
