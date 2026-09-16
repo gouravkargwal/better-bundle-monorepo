@@ -36,6 +36,7 @@ from app.domains.billing.api.billing_api import router as billing_api_router
 from app.routes.auth_routes import router as auth_router
 from app.api.v1.outcome import router as outcome_router
 from app.api.v1.attribution_backfill import router as attribution_backfill_router
+from app.routes.logs_routes import router as logs_router
 
 logger = get_logger(__name__)
 
@@ -194,6 +195,7 @@ app.include_router(outcome_router)
 # order whose webhook was never delivered is otherwise never attributed. This
 # router was written for exactly that and had never been mounted.
 app.include_router(attribution_backfill_router)
+app.include_router(logs_router)
 
 # Add CORS middleware
 app.add_middleware(

@@ -1,3 +1,33 @@
+# Memory budget for this stack.
+#
+# Every service carries a mem_limit because without them the kernel, under
+# pressure, kills whatever process is largest anywhere on the host. That is not
+# the process at fault: a runaway worker took out the host and the symptom was
+# Remix reporting Postgres unreachable, which sends you looking in the wrong
+# place entirely. With limits, an overrun is contained to the container that
+# caused it.
+#
+#   python-worker   1200m   needs real headroom: catalog sweeps, embedding runs
+#   openobserve      900m   sizes its own caches from this limit, so a tight
+#                           value does not just slow it down, it crash-loops it
+#   kafka_b          700m   512m JVM heap + non-heap overhead
+#   postgres         700m   256m shared_buffers + 8m work_mem x pool, + cache
+#   redis            160m   cache only
+#   ------------------------
+#   total           3660m   against a ~3.8GB Docker VM, leaving ~260m for the
+#                           host and the daemon
+#
+# Limits are ceilings, not reservations, so nothing is consumed until a service
+# asks for it. The point is isolation: without them the kernel, under pressure,
+# kills whatever process is largest anywhere on the host — which is not
+# necessarily the one at fault. A runaway worker took the whole VM down and the
+# visible symptom was Remix reporting Postgres unreachable, which sends you
+# looking in entirely the wrong place.
+#
+# Do not shave these to fit another service in. Set one too low and it
+# crash-loops rather than running slowly, which is worse than no limit at all.
+# memswap_limit equals mem_limit throughout so nothing swaps its way past the
+# ceiling and degrades invisibly instead of failing where you can see it.
 services:
   # ==================== DATABASE ====================
   postgres:
@@ -33,9 +63,13 @@ services:
     # Without limits anywhere, one runaway service exhausts the whole ~2.8GB VM
     # and the kernel picks a victim by size, which is how a memory leak in the
     # worker took the host down and made Postgres look unreachable from Remix.
-    # Sized for shared_buffers=256MB plus work_mem per connection.
-    mem_limit: 450m
-    memswap_limit: 450m  # equal to mem_limit: no swap to hide the overrun
+    # 256MB shared_buffers, plus 8MB work_mem per connection across a pool of
+    # 20, is already ~420MB before a single page of cache. At 450m this sat
+    # pinned against its ceiling, reclaiming page cache constantly to stay
+    # under — which does not crash, it just makes every query slower with
+    # nothing obvious to point at.
+    mem_limit: 700m
+    memswap_limit: 700m  # equal to mem_limit: no swap to hide the overrun
     logging:
       driver: json-file
       options:
@@ -88,6 +122,12 @@ services:
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
     restart: unless-stopped
+    # Heap is capped at 512m above; this leaves room for the JVM's non-heap
+    # usage (metaspace, direct buffers, thread stacks) on top of it. Set below
+    # the heap cap the JVM would die in confusing ways instead of throwing
+    # OutOfMemoryError.
+    mem_limit: 700m
+    memswap_limit: 700m
     logging:
       driver: json-file
       options:
@@ -122,6 +162,11 @@ services:
     image: redis/redis-stack:7.2.0-v18
     container_name: betterbundle-redis-dev
     restart: unless-stopped
+    # Redis is used as a cache here (permissions, shop lookups), so it holds
+    # little. The limit is what stops an unbounded key set from quietly
+    # becoming the largest process on the host.
+    mem_limit: 160m
+    memswap_limit: 160m
     ports:
       - "6379:6379"
       - "8002:8001"
@@ -170,6 +215,18 @@ services:
       kafka_b:
         condition: service_healthy
     restart: unless-stopped
+    # The largest ceiling, because this is the process that legitimately needs
+    # headroom: a catalog sweep and an embedding run both hold real data. It is
+    # also the one that has actually run away — twice — and with no limit the
+    # kernel killed by size across the whole host, so Postgres and Kafka were
+    # collateral and Remix reported the database as unreachable. With a limit
+    # the overrun stays inside this container.
+    mem_limit: 1200m
+    memswap_limit: 1200m
+    # Reap zombies. uvicorn --reload is PID 1 here, and when its child was
+    # OOM-killed the dead process was left unreaped; an init process cleans
+    # those up instead of accumulating them.
+    init: true
     logging:
       driver: json-file
       options:
@@ -199,6 +256,13 @@ services:
     volumes:
       - openobserve_data:/data
     restart: unless-stopped
+    # Observability must never be the reason the thing it observes goes down —
+    # but it must not be starved into a crash loop either. 300m put this into
+    # one: OOM-killed on ingest, restarted, killed again, taking the cost
+    # dashboard down with it. A single-node OpenObserve indexing metrics and
+    # logs needs headroom well past its idle footprint.
+    mem_limit: 900m
+    memswap_limit: 900m
 
 
   # ── OpenObserve config import ────────────────────────

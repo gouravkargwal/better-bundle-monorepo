@@ -38,9 +38,14 @@ export async function getEdgeStatus(shopId: string): Promise<EdgeStatus> {
   if (!backendUrl) return unavailable;
 
   try {
+    // 8s, raised from 4s. This is an admin page load, not a shopper-facing
+    // request, so a slow answer is far better than a warning banner claiming
+    // the engine is unreachable when it is merely busy or behind a dev tunnel.
+    // A false "can't reach the recommendation engine" sends you debugging the
+    // wrong system entirely.
     const response = await fetch(
       `${backendUrl}/api/v1/edges/status/${shopId}`,
-      { signal: AbortSignal.timeout(4_000) },
+      { signal: AbortSignal.timeout(8_000) },
     );
     if (!response.ok) return unavailable;
     const data = await response.json();

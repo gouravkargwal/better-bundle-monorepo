@@ -335,6 +335,14 @@ async def sweep_once(dry_run: bool = False) -> Dict[str, Any]:
                 for shop in shops:
                     api_budget = MAX_API_CALLS_PER_CYCLE
                     try:
+                        # The client authenticates from a per-domain token map
+                        # that starts empty. _active_shops already read the
+                        # token; without handing it over every request goes out
+                        # with an empty X-Shopify-Access-Token header and comes
+                        # back 401, so the sweep could never reconcile anything.
+                        await client.set_access_token(
+                            shop["shop_domain"], shop["access_token"]
+                        )
                         for entity in ENTITY_CONFIGS:
                             if api_budget <= 0:
                                 total_skipped += 1

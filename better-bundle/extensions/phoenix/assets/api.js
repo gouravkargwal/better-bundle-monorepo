@@ -88,11 +88,16 @@ class RecommendationAPI {
 
       // Create AbortController for timeout with retry logic
       const controller = new AbortController();
-      // 3s, not 10s: the server answers this in ~130ms, so three seconds is
-      // already 20x headroom over a slow mobile connection. Ten seconds only
-      // ever meant ten seconds of skeleton for a shopper who was never going
-      // to see a recommendation.
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      // 8s, raised from 3s. The 3s was set against a server answering in
+      // ~130ms, which was true for a warm, idle worker; it is not true for one
+      // restarting, working through a webhook backlog, or reached through a
+      // dev tunnel, which measured ~750ms of added latency on its own. At 3s
+      // those cases all abort, and the shopper sees no carousel at all rather
+      // than a slightly late one.
+      //
+      // Still a ceiling, not a target: if this regularly needs the full 8s the
+      // server is the thing to fix, not this number.
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
       // Use JWT authentication for the request
       // Pass customerId for customer-specific token generation
