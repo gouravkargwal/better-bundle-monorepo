@@ -6,7 +6,7 @@ Handles JWT token generation and validation for BetterBundle services
 from datetime import datetime
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.services.jwt_service import jwt_service, TokenValidationResult, ShopStatus
 from app.core.logging import get_logger
@@ -23,6 +23,13 @@ class ShopTokenRequest(BaseModel):
     shop_domain: Optional[str] = None
     customer_id: Optional[str] = None
     force_refresh: bool = False
+
+    @field_validator("customer_id", mode="before")
+    @classmethod
+    def coerce_customer_id(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
 
 
 class ShopTokenResponse(BaseModel):

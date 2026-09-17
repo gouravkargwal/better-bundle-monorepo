@@ -202,6 +202,7 @@ def _build_baseline_query(
         .where(
             ProductEdge.shop_id == shop_id,
             ProductEdge.edge_type.in_(edge_types),
+            ProductEdge.source_product_id != ProductEdge.target_product_id,
             ProductData.is_active == True,  # noqa: E712
             or_(
                 ProductData.total_inventory.is_(None),
@@ -281,15 +282,19 @@ def prefer_refills(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _is_single_option(candidate: Dict[str, Any]) -> bool:
-    """True when the product has zero or one option (no variant picker needed).
+    """True when the product has only one purchasable variant (no variant picker needed).
 
-    Products with multiple options require a variant selector, which checkout
+    Products with multiple variants require a variant selector, which checkout
     and other constrained surfaces cannot render.
     """
     options = candidate.get("options")
     if not options:
         return True
-    return len(options) <= 1
+    total_variants = 1
+    for opt in options:
+        values = opt.get("values", []) if isinstance(opt, dict) else []
+        total_variants *= len(values) if values else 1
+    return total_variants <= 1
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +513,16 @@ class EdgeRecommender:
                     f"baseline candidate on {surface}; falling back to cheapest"
                 )
 
+        if surface in CHECKOUT_SURFACES:
+            single = [c for c in candidates if _is_single_option(c)]
+            if single:
+                candidates = single
+            else:
+                logger.info(
+                    f"Shop {shop_id}: single-option filter excluded every "
+                    f"baseline candidate on {surface}; showing multi-option products"
+                )
+
         margins = margins or {}
         candidates.sort(
             key=lambda c: (
@@ -595,6 +610,19 @@ class EdgeRecommender:
         async with get_transaction_context() as session:
             rows = (await session.execute(query)).all()
 
+            product_ids = [r.product_id for r in rows]
+            options_map: Dict[str, Any] = {}
+            if product_ids:
+                opt_rows = (
+                    await session.execute(
+                        select(ProductData.product_id, ProductData.options).where(
+                            ProductData.shop_id == shop_id,
+                            ProductData.product_id.in_(product_ids),
+                        )
+                    )
+                ).all()
+                options_map = {r.product_id: r.options for r in opt_rows}
+
         return [
             {
                 "product_id": r.product_id,
@@ -604,6 +632,7 @@ class EdgeRecommender:
                 "title": r.title,
                 "price": float(r.price or 0.0),
                 "product_type": r.product_type,
+                "options": options_map.get(r.product_id),
                 "source": "observed" if (r.observed_count or 0) >= 5 else "prior",
             }
             for r in rows

@@ -18,13 +18,13 @@ async def _forward_to_openobserve(
 ) -> None:
     """Forward extension browser logs to OpenObserve JSON ingestion API.
 
-    OpenObserve accepts ``POST /api/{org}/v1/logs`` with an array of log
-    records.  Each record must include ``level`` and ``timestamp`` (Unix
+    OpenObserve accepts ``POST /api/{org}/{stream}/_json`` with an array of
+    log records.  Each record must include ``level`` and ``timestamp`` (Unix
     seconds).  We enrich every record with the originating extension name
-    and forward the batch.
+    and forward the batch to the ``extension_logs`` stream.
     """
     base = settings.OPENOBSERVE_ENDPOINT.rstrip("/")
-    url = f"{base}/api/{settings.OPENOBSERVE_ORG}/v1/logs"
+    url = f"{base}/api/{settings.OPENOBSERVE_ORG}/extension_logs/_json"
 
     records = []
     for entry in logs:

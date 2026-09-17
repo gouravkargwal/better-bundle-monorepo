@@ -1,11 +1,18 @@
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, field_validator
+from typing import Any, Optional
 
 
 class GenerateTokenRequest(BaseModel):
     shop_domain: str
     customer_id: Optional[str] = None
     force_refresh: bool = False
+
+    @field_validator("customer_id", mode="before")
+    @classmethod
+    def coerce_customer_id(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v)
 
 
 class GenerateTokenResponse(BaseModel):

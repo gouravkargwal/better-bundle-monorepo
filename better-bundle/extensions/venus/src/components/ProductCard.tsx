@@ -104,14 +104,24 @@ export function ProductCard({
     <Card padding>
       <Grid columns={["fill"]} rows={["auto", "2fr", "auto"]} spacing="tight">
         <View>
-          {/* Larger Auto-Sliding Image */}
-          {availableImages.length > 0 && (
-            <View>
+          {availableImages.length > 0 ? (
+            <View cornerRadius="base" overflow="hidden">
               <Image
                 source={currentImage?.url || ""}
-                fit="cover"
-                aspectRatio={1.5}
+                fit="contain"
+                aspectRatio={1}
               />
+            </View>
+          ) : (
+            <View
+              border="base"
+              cornerRadius="base"
+              padding="extraTight"
+              backgroundColor="subdued"
+            >
+              <TextBlock size="small" appearance="subdued" alignment="center">
+                No image available
+              </TextBlock>
             </View>
           )}
         </View>

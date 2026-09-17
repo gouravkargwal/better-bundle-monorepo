@@ -26,6 +26,7 @@ class OfferImpression(BaseModel, ShopMixin, CustomerMixin):
     outcome = Column(String(20), nullable=False, default='shown')  # 'shown' | 'accepted' | 'declined' | 'ignored'
     outcome_at = Column(TIMESTAMP(timezone=True), nullable=True)
     revenue_added = Column(Numeric(10, 2), nullable=True)
+    paid = Column(Boolean, nullable=False, default=False)
     # Mapped to the DB column "metadata"; the bare attribute name is reserved by
     # SQLAlchemy's Declarative API and raised InvalidRequestError on import.
     offer_metadata = Column("metadata", JSON, nullable=True)

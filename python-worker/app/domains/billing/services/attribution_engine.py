@@ -26,7 +26,7 @@ Two invariants matter for billing correctness:
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
 from sqlalchemy import select, and_, or_, update
@@ -148,7 +148,6 @@ class AttributionEngine:
     ) -> AttributionResult:
         """Calculate attribution for a purchase event."""
         try:
-            # Never bill on money that did not actually change hands.
             if await self._is_payment_failed(context):
                 logger.warning(
                     f"⚠️ Payment failed for order {context.order_id} - skipping attribution"
@@ -716,6 +715,38 @@ class AttributionEngine:
 
     # ---------- persistence (preserved) ----------
 
+    @staticmethod
+    def _by_surface(
+        breakdown: List[AttributionBreakdown],
+    ) -> Tuple[Dict[str, float], Dict[str, int]]:
+        """Revenue and interaction counts per *placement*, summed.
+
+        Two bugs lived in the dict comprehensions this replaces.
+
+        They were keyed by extension, but the merchant dashboard reads them per
+        placement — and `thank_you` maps to the MERCURY extension, so every
+        thank-you-page sale was filed under Checkout while the thank-you row
+        read "—" forever.
+
+        And a dict comprehension keeps only the last value per key: two phoenix
+        offers on one order meant one of them was silently worth nothing, so the
+        breakdown stopped summing to total_revenue — the figure the merchant is
+        actually charged on.
+
+        `metadata["surface"]` is set by _build_breakdown from the impression's
+        own surface column. The extension is the fallback for the surfaces whose
+        names already coincide with it.
+        """
+        revenue: Dict[str, float] = {}
+        interactions: Dict[str, int] = {}
+        for b in breakdown:
+            surface = (b.metadata or {}).get("surface") or b.extension_type.value
+            revenue[surface] = round(
+                revenue.get(surface, 0.0) + float(b.attributed_amount), 2
+            )
+            interactions[surface] = interactions.get(surface, 0) + 1
+        return revenue, interactions
+
     async def _store_attribution_result(
         self, result: AttributionResult
     ) -> Optional[str]:
@@ -731,16 +762,13 @@ class AttributionEngine:
                 for b in result.attribution_breakdown
             ]
             attribution_weights = {
-                b.extension_type.value: b.attribution_weight
+                (b.metadata or {}).get("surface")
+                or b.extension_type.value: b.attribution_weight
                 for b in result.attribution_breakdown
             }
-            attributed_revenue = {
-                b.extension_type.value: float(b.attributed_amount)
-                for b in result.attribution_breakdown
-            }
-            interactions_by_extension = {
-                b.extension_type.value: 1 for b in result.attribution_breakdown
-            }
+            attributed_revenue, interactions_by_extension = self._by_surface(
+                result.attribution_breakdown
+            )
 
             if self.session:
                 return await self._save_attribution(
@@ -826,6 +854,7 @@ class AttributionEngine:
             existing.purchase_at = result.calculated_at
             existing.attribution_algorithm = result.attribution_type.value
             existing.attribution_metadata = result.metadata
+            await self._mark_impressions_paid(session, result)
             await self._clear_attribution_debt(session, result)
             await session.commit()
             return str(existing.id)
@@ -846,6 +875,7 @@ class AttributionEngine:
             attribution_metadata=result.metadata,
         )
         session.add(attribution)
+        await self._mark_impressions_paid(session, result)
         await self._clear_attribution_debt(session, result)
         await session.commit()
         return str(attribution.id)
@@ -877,6 +907,37 @@ class AttributionEngine:
             )
             return None
         return str(exists)
+
+    @staticmethod
+    async def _mark_impressions_paid(
+        session: AsyncSession, result: AttributionResult
+    ) -> None:
+        """Mark accepted impressions as paid when an order is confirmed.
+
+        The extensions report `outcome='accepted'` on click. That event is the
+        right signal for real-time dashboard updates and for the learning signal,
+        but it is not proof of purchase. This stamp separates intent from actual
+        revenue, so the dashboard can show true conversions instead of button
+        presses.
+        """
+        impression_ids = [
+            str(b.interaction_id)
+            for b in result.attribution_breakdown
+            if b.interaction_id
+        ]
+        if not impression_ids:
+            return
+
+        await session.execute(
+            update(OfferImpression)
+            .where(
+                and_(
+                    OfferImpression.id.in_(impression_ids),
+                    OfferImpression.paid.is_(False),
+                )
+            )
+            .values(paid=True, outcome_at=now_utc())
+        )
 
     @staticmethod
     async def _clear_attribution_debt(

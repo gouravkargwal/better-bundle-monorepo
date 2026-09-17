@@ -142,16 +142,34 @@ interface SurfaceStatsRow {
 }
 
 async function getSurfaceStats(shopId: string): Promise<Map<string, SurfaceStatsRow>> {
-  const rows = await prisma.$queryRaw<SurfaceStatsRow[]>`
-    SELECT surface,
-      COUNT(*) FILTER (WHERE outcome IN ('shown', 'accepted')) AS impressions,
-      COUNT(*) FILTER (WHERE outcome = 'accepted') AS accepts,
-      COALESCE(SUM(revenue_added) FILTER (WHERE outcome = 'accepted'), 0)::float AS revenue
-    FROM offer_impressions
-    WHERE shop_id = ${shopId} AND is_control = false
-    GROUP BY surface
-  `;
-  return new Map(rows.map((r) => [r.surface, r]));
+  const [impressionRows, revenueRows] = await Promise.all([
+    prisma.$queryRaw<SurfaceStatsRow[]>`
+      SELECT surface,
+        COUNT(*) FILTER (WHERE outcome IN ('shown', 'accepted')) AS impressions,
+        COUNT(*) FILTER (WHERE paid IS TRUE) AS accepts,
+        0::float AS revenue
+      FROM offer_impressions
+      WHERE shop_id = ${shopId} AND is_control = false
+      GROUP BY surface
+    `,
+    prisma.$queryRaw<{ surface: string; revenue: number }[]>`
+      SELECT key AS surface,
+        COALESCE(SUM((pa.attributed_revenue::text::json->>key)::numeric), 0)::float AS revenue
+      FROM purchase_attributions pa,
+        LATERAL json_object_keys(pa.attributed_revenue::text::json) AS key(surface)
+      WHERE pa.shop_id = ${shopId}
+        AND key != 'total'
+      GROUP BY key
+    `,
+  ]);
+
+  const revenueBySurface = new Map(revenueRows.map((r) => [r.surface, r.revenue]));
+  return new Map(
+    impressionRows.map((r) => [
+      r.surface,
+      { ...r, revenue: revenueBySurface.get(r.surface) ?? 0 },
+    ])
+  );
 }
 
 interface TopOfferRow {
@@ -168,7 +186,7 @@ export async function getTopProducts(
     SELECT offer_id, COUNT(*) AS accepts, COALESCE(SUM(revenue_added), 0)::float AS revenue
     FROM offer_impressions
     WHERE shop_id = ${shopId} AND is_control = false
-      AND outcome = 'accepted' AND offer_id IS NOT NULL
+      AND paid IS TRUE AND offer_id IS NOT NULL
     GROUP BY offer_id
     ORDER BY revenue DESC
     LIMIT ${limit}
