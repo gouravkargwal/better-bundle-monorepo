@@ -291,6 +291,11 @@ export function HomePage({ data }: HomePageProps) {
                       ? formatCurrency(cycle.attributedRevenue, cycle.currency)
                       : "—"
                   }
+                  sub={
+                    totalImpressions > 0
+                      ? `${totalImpressions.toLocaleString()} recommendations shown`
+                      : undefined
+                  }
                   tooltip="Revenue from orders where the shopper interacted with a recommendation. This is the number your commission is calculated on."
                 />
 
