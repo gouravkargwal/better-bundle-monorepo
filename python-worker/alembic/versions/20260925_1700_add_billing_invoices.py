@@ -21,11 +21,13 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-CREATE_ENUM = (
-    "CREATE TYPE IF NOT EXISTS invoice_status_enum AS ENUM ("
-    "'draft', 'pending', 'paid', 'overdue', 'cancelled', 'refunded', 'failed'"
-    ")"
-)
+CREATE_ENUM = """DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'invoice_status_enum') THEN
+        CREATE TYPE invoice_status_enum AS ENUM ('draft', 'pending', 'paid', 'overdue', 'cancelled', 'refunded', 'failed');
+    END IF;
+END
+$$;"""
 
 
 def upgrade() -> None:
@@ -67,3 +69,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("billing_invoices")
+    op.execute("DROP TYPE IF EXISTS invoice_status_enum")
