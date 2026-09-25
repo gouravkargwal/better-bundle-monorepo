@@ -99,6 +99,7 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     # Keep operational relationships
     billing_cycles = relationship("BillingCycle", back_populates="shop_subscription")
+    billing_invoices = relationship("BillingInvoice", back_populates="shop_subscription")
 
     # ===== SMART PROPERTIES =====
 

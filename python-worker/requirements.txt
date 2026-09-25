@@ -35,6 +35,10 @@ typing-extensions>=4.10.0
 # Dense vector support for pgvector
 pgvector==0.3.6
 
+# SQLAdmin operations console
+sqladmin>=0.16.0
+itsdangerous>=2.1.0
+
 # Google Gemini / Vertex AI (Multimodal embeddings + LLM reranking)
 google-genai==1.9.0
 

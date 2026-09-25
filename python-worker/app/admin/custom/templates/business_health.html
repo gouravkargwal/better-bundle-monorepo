@@ -1,0 +1,50 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Shop</th>
+      <th>Status</th>
+      <th>Active</th>
+      <th>Impressions 24h</th>
+      <th>Clicks 24h</th>
+      <th>Attributed Orders 7d</th>
+      <th>Revenue 7d</th>
+      <th>Last Impression</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    {% set status = row.status or "unknown" %}
+    <tr>
+      <td>{{ row.shop_domain }}</td>
+      <td>
+        {% if status == "healthy" %}
+          <span class="badge bg-success">{{ status }}</span>
+        {% elif status == "inactive" %}
+          <span class="badge bg-danger">{{ status }}</span>
+        {% elif status == "silent" %}
+          <span class="badge bg-warning">{{ status }}</span>
+        {% elif status == "never_served" %}
+          <span class="badge bg-secondary">{{ status }}</span>
+        {% elif status == "no_engagement" %}
+          <span class="badge bg-warning">{{ status }}</span>
+        {% else %}
+          <span class="badge bg-secondary">{{ status }}</span>
+        {% endif %}
+      </td>
+      <td>{{ "Yes" if row.is_active else "No" }}</td>
+      <td>{{ row.impressions_24h }}</td>
+      <td>{{ row.clicks_24h }}</td>
+      <td>{{ row.attributed_orders_7d }}</td>
+      <td>{{ "{:.2f}".format(row.revenue_7d) if row.revenue_7d is not none else "0.00" }}</td>
+      <td>{{ row.last_impression_at.strftime("%Y-%m-%d %H:%M:%S") if row.last_impression_at else "Never" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

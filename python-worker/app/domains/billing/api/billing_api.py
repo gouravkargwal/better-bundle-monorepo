@@ -24,11 +24,12 @@ from app.core.config.kafka_settings import kafka_settings
 from ..services.billing_scheduler_service import BillingSchedulerService
 from ..repositories.billing_repository_v2 import BillingPeriod, BillingRepositoryV2
 
+from app.core.config.settings import settings
+
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
 
-# Simple auth
-CRON_SECRET = "your-secret-key-here"  # TODO: Move to env
+CRON_SECRET = settings.ADMIN_CRON_SECRET
 
 
 def verify_cron_secret(x_cron_secret: str = Header(None)):

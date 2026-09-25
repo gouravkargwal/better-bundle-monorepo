@@ -218,6 +218,12 @@ class Settings(BaseSettings):
         default="your-secret-key-change-in-production", env="SECRET_KEY"
     )
 
+    # Admin / operations console
+    ADMIN_CRON_SECRET: str = Field(default="", env="ADMIN_CRON_SECRET")
+    ADMIN_USERNAME: str = Field(default="admin", env="ADMIN_USERNAME")
+    ADMIN_PASSWORD: str = Field(default="", env="ADMIN_PASSWORD")
+    ADMIN_SECRET_KEY: str = Field(default="", env="ADMIN_SECRET_KEY")
+
     # Sub-settings
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()

@@ -221,6 +221,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.admin import setup_admin
+
+setup_admin(app)
+
 
 # No metrics middleware.
 #
@@ -335,6 +339,13 @@ async def initialize_services():
             logger.warning(
                 "⚠️ Application will start but Redis-dependent features may not work"
             )
+
+        # 2b. Validate admin settings in production
+        if settings.ENVIRONMENT == "production":
+            if not settings.ADMIN_PASSWORD or not settings.ADMIN_SECRET_KEY:
+                raise RuntimeError(
+                    "ADMIN_PASSWORD and ADMIN_SECRET_KEY must be set in production"
+                )
 
         # Initialize Shopify services
         services["shopify_api"] = ShopifyAPIClient()

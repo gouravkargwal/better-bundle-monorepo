@@ -52,6 +52,7 @@ from .subscription_plan import SubscriptionPlan
 from .shop_subscription import ShopSubscription
 from .billing_cycle import BillingCycle
 from .commission import CommissionRecord
+from .billing_invoice import BillingInvoice
 from .product_enrichment import ProductEnrichment, MAX_ENRICHMENT_ATTEMPTS
 from .exchange_rate import ExchangeRate
 
@@ -96,6 +97,7 @@ __all__ = [
     "ShopSubscription",
     "BillingCycle",
     "CommissionRecord",
+    "BillingInvoice",
     "ProductEnrichment",
     "MAX_ENRICHMENT_ATTEMPTS",
     "ExchangeRate",
