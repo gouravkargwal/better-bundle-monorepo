@@ -118,7 +118,8 @@ export function ResultState({
         `than the ${holdoutPercent}% who saw generic ones. Over ${window} that's money you ` +
         `wouldn't otherwise have made. We're 95% confident the real figure sits ` +
         `between ${money(result.incrementalRevenueLower)} and ` +
-        `${money(result.incrementalRevenueUpper)}.`;
+        `${money(result.incrementalRevenueUpper)}. ` +
+        `N = ${result.treatment.shoppers.toLocaleString()} treatment / ${result.control.shoppers.toLocaleString()} control.`;
       action = { label: "See what you were charged", url: "/app/billing" };
       break;
 
@@ -129,7 +130,8 @@ export function ResultState({
         `Shoppers who saw personalised recommendations spent about the same as those who ` +
         `saw generic ones. The ${pct(result.conversionLiftRel)} difference observed so far is ` +
         `within normal week-to-week variation, so we are not reporting it as a ` +
-        `lift. Adding placements increases the volume needed to settle it.`;
+        `lift. Adding placements increases the volume needed to settle it. ` +
+        `N = ${result.treatment.shoppers.toLocaleString()} treatment / ${result.control.shoppers.toLocaleString()} control.`;
       action = { label: "Add another placement", url: "/app/extensions" };
       break;
 
@@ -149,7 +151,8 @@ export function ResultState({
         `${result.controlConverters}` +
         (wait ? `, and are gaining them at a rate that suggests ${wait}` : "") +
         `. This does not affect your bill — ` +
-        `attributed revenue is tracked and charged as normal.`;
+        `attributed revenue is tracked and charged as normal. ` +
+        `N = ${result.treatmentShoppers.toLocaleString()} treatment / ${result.controlShoppers.toLocaleString()} control.`;
       break;
     }
 
