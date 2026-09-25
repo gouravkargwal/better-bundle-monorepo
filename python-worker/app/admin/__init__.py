@@ -1,18 +1,18 @@
 from sqladmin import Admin
 from app.core.database.engine import create_engine
 from .auth import AdminAuth
-from app.core.config.settings import settings
 
 
 def setup_admin(app):
     engine = create_engine()
-    auth = AdminAuth(secret_key=settings.ADMIN_SECRET_KEY)
+    auth = AdminAuth()
     admin = Admin(
         app,
         engine,
         base_url="/ops",
         title="BetterBundle Ops",
         authentication_backend=auth,
+        templates_dir="app/admin/custom/templates",
     )
 
     from app.admin.views.shops import (

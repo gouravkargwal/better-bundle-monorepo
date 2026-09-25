@@ -5,6 +5,12 @@ from app.core.config.settings import settings
 
 
 class AdminAuth(AuthenticationBackend):
+    def __init__(self):
+        super().__init__(
+            secret_key=settings.ADMIN_SECRET_KEY,
+            https_only=False,  # Allow HTTP for local development
+        )
+
     async def login(self, request: Request) -> bool:
         form = await request.form()
         username = form.get("username", "")

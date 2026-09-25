@@ -70,7 +70,7 @@ class BusinessHealthView(BaseView):
     name = "Business Health"
     icon = "fa-solid fa-heart-pulse"
 
-    @expose("/", methods=["GET"])
+    @expose("/business-health", methods=["GET"])
     async def business_health(self, request: Request) -> str:
         async with get_transaction_context() as session:
             rows = (await session.execute(_BUSINESS_HEALTH_SQL)).all()
@@ -83,10 +83,10 @@ class BusinessHealthView(BaseView):
                 data["status"] = "unknown"
             cleaned.append(data)
 
-        return self.templates.TemplateResponse(
+        return await self.templates.TemplateResponse(
+            request,
             "business_health.html",
             {
-                "request": request,
                 "rows": cleaned,
                 "title": "Business Health",
             },
