@@ -52,6 +52,7 @@ function base(over: Partial<Args> = {}): Args {
     isTrial: true,
     ordersInfluenced: 0,
     proof: COLLECTING,
+    totalImpressions: 0,
     ...over,
   };
 }
@@ -149,5 +150,45 @@ describe("precedence", () => {
     expect(() =>
       pickMilestone(base({ trialThreshold: 0, trialRevenueEarned: 10 })),
     ).not.toThrow();
+  });
+
+  it("marks recommendations as live when impressions exist and no other milestone fires", () => {
+    expect(
+      pickMilestone(
+        base({ totalImpressions: 2000, isTrial: false, ordersInfluenced: 0, attributedRevenue: 0 }),
+      ),
+    ).toBe("serving_started");
+  });
+
+  it("does not fire serving_started when proven lift would fire first", () => {
+    expect(
+      pickMilestone(
+        base({ totalImpressions: 2000, proof: PROVEN, isTrial: false }),
+      ),
+    ).toBe("lift_proven");
+  });
+
+  it("does not fire serving_started when trial complete would fire first", () => {
+    expect(
+      pickMilestone(
+        base({ totalImpressions: 2000, trialRevenueEarned: 1000 }),
+      ),
+    ).toBe("trial_complete");
+  });
+
+  it("does not fire serving_started when first_revenue would fire first", () => {
+    expect(
+      pickMilestone(
+        base({ totalImpressions: 2000, attributedRevenue: 50, ordersInfluenced: 1 }),
+      ),
+    ).toBe("first_revenue");
+  });
+
+  it("does not fire serving_started with zero impressions", () => {
+    expect(
+      pickMilestone(
+        base({ totalImpressions: 0, isTrial: false, ordersInfluenced: 0 }),
+      ),
+    ).toBeNull();
   });
 });

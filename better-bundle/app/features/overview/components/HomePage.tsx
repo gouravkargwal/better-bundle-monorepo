@@ -258,6 +258,7 @@ export function HomePage({ data }: HomePageProps) {
             commissionRate={cycle.commissionRate}
             proof={proof}
             currency={cycle.currency}
+            totalImpressions={totalImpressions}
           />
         )}
 

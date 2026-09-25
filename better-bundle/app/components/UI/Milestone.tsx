@@ -23,7 +23,8 @@ export type MilestoneKind =
   | "first_revenue"
   | "trial_nearly_done"
   | "trial_complete"
-  | "lift_proven";
+  | "lift_proven"
+  | "serving_started";
 
 interface MilestoneProps {
   attributedRevenue: number;
@@ -37,6 +38,7 @@ interface MilestoneProps {
   commissionRate: number;
   proof: ProofResult;
   currency: string;
+  totalImpressions: number;
 }
 
 /**
@@ -55,6 +57,7 @@ export function pickMilestone({
   isTrial,
   ordersInfluenced,
   proof,
+  totalImpressions,
 }: Omit<MilestoneProps, "currency" | "commissionRate">): MilestoneKind | null {
   // Proven incrementality is the strongest thing this product can ever tell a
   // merchant, so nothing outranks it.
@@ -78,6 +81,8 @@ export function pickMilestone({
   // Only for the very first one; after that it is just business as usual.
   if (ordersInfluenced === 1 && attributedRevenue > 0) return "first_revenue";
 
+  if (totalImpressions > 0) return "serving_started";
+
   return null;
 }
 
@@ -100,24 +105,27 @@ export function Milestone(props: MilestoneProps) {
 
   const content: Record<
     MilestoneKind,
-    { badge: string; title: string; body: string; action?: { label: string; url: string } }
+    { badge: string; title: string; body: string; tone: "success" | "info" | "attention" | "warning"; action?: { label: string; url: string } }
   > = {
     first_revenue: {
       badge: "First sale",
       title: "A recommendation just earned its first sale",
       body: `${money(props.attributedRevenue)} of this order came from a product we suggested. You're not billed for any of it yet — the first ${money(trialThreshold)}, across ${trialOrdersThreshold} orders, is free.`,
+      tone: "success",
       action: { label: "See where it happened", url: "/app/impact" },
     },
     trial_nearly_done: {
       badge: "Heads up",
       title: `You've used most of your free allowance`,
       body: `Recommendations have earned you ${money(trialRevenueEarned)} of the ${money(trialThreshold)} that comes free, across ${trialOrdersThreshold} orders. After that it's ${rate} of attributed revenue, capped monthly — no surprises.`,
+      tone: "info",
       action: { label: "See what that means", url: "/app/billing" },
     },
     trial_complete: {
       badge: "Trial complete",
       title: `Recommendations have earned you ${money(trialRevenueEarned)}`,
       body: `That's past your free allowance, so billing starts from here — ${rate} of attributed revenue, never more than the monthly cap.`,
+      tone: "success",
       action: { label: "Review your plan", url: "/app/billing" },
     },
     lift_proven: {
@@ -127,7 +135,14 @@ export function Milestone(props: MilestoneProps) {
         proof.state === "significant"
           ? `Shoppers who saw recommendations spent measurably more than the control group who didn't. ${money(proof.incrementalRevenue)} of your revenue wouldn't have happened otherwise.`
           : "",
+      tone: "success",
       action: { label: "See the proof", url: "/app/impact" },
+    },
+    serving_started: {
+      badge: "Live",
+      title: "Recommendations are live",
+      body: `${props.totalImpressions.toLocaleString()} shoppers have seen them so far.`,
+      tone: "info",
     },
   };
 
@@ -143,7 +158,7 @@ export function Milestone(props: MilestoneProps) {
     >
       <BlockStack gap="200">
         <InlineStack gap="200" blockAlign="center">
-          <Badge tone="success">{c.badge}</Badge>
+          <Badge tone={c.tone}>{c.badge}</Badge>
         </InlineStack>
 
         <Text as="h2" variant="headingMd">
