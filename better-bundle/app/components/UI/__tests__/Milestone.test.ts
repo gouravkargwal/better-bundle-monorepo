@@ -38,11 +38,17 @@ const PROVEN: ProofResult = {
   },
 };
 
-function base(over: Partial<Parameters<typeof pickMilestone>[0]> = {}) {
+type Args = Parameters<typeof pickMilestone>[0];
+
+function base(over: Partial<Args> = {}): Args {
   return {
     attributedRevenue: 0,
     trialRevenueEarned: 0,
     trialThreshold: 1000,
+    // Orders met by default so each case below varies one thing. The cases
+    // that matter — one condition met, the other not — set this explicitly.
+    trialOrdersEarned: 30,
+    trialOrdersThreshold: 30,
     isTrial: true,
     ordersInfluenced: 0,
     proof: COLLECTING,
@@ -87,6 +93,25 @@ describe("the moments", () => {
     expect(pickMilestone(base({ trialRevenueEarned: 1000 }))).toBe(
       "trial_complete",
     );
+  });
+
+  it("does not call the trial complete on one big order", () => {
+    // The gate is revenue AND orders. A single $1,490 sale clears $1,000 while
+    // billing keeps running the trial — this card said "billing starts from
+    // here" and the bill disagreed.
+    expect(
+      pickMilestone(
+        base({ trialRevenueEarned: 1490, trialOrdersEarned: 1 }),
+      ),
+    ).not.toBe("trial_complete");
+  });
+
+  it("does not call the trial complete on many small orders", () => {
+    expect(
+      pickMilestone(
+        base({ trialRevenueEarned: 300, trialOrdersEarned: 30 }),
+      ),
+    ).not.toBe("trial_complete");
   });
 
   it("marks proven lift", () => {

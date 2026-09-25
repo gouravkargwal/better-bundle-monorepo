@@ -347,8 +347,9 @@ function MeasurementTab({
                 🧪 Revenue Measurement
               </Text>
               <Text as="p" tone="subdued">
-                A small % of shoppers see no offers (control group) so we can
-                measure the true revenue lift your recommendations drive.
+                Some shoppers see generic recommendations instead of
+                personalised ones (the control group), so we can measure the
+                revenue your personalised recommendations actually add.
               </Text>
             </BlockStack>
             <Checkbox
@@ -368,7 +369,7 @@ function MeasurementTab({
             <InlineStack align="space-between" blockAlign="center">
               <Text as="p" variant="bodyMd" fontWeight="medium">
                 {holdoutDisabled
-                  ? "Holdout is off — impact is estimated, not measured against a control."
+                  ? "Holdout is off — with no control group there is nothing to compare against, so we cannot report a lift at all."
                   : "Control group active — revenue is measured against shoppers who saw generic recommendations."}
               </Text>
               <Badge tone={holdoutDisabled ? "attention" : "success"}>

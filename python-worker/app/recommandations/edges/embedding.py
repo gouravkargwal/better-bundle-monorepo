@@ -18,6 +18,7 @@ import hashlib
 import math
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -28,6 +29,10 @@ from google.protobuf.struct_pb2 import Value
 from sqlalchemy import select, and_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from opentelemetry import trace
+from opentelemetry.trace import Status, StatusCode
+
+from app.core.metrics import gen_ai_operation_duration
 from app.core.database.models.product_data import ProductData
 from app.core.database.models.product_vector import ProductVector
 from app.core.database.session import get_transaction_context
@@ -40,6 +45,8 @@ logger = logging.getLogger(__name__)
 # disagreed, category vectors would land in a different space from product
 # vectors and every similarity score would be meaningless.
 EMBEDDING_MODEL = "multimodalembedding"
+
+_tracer = trace.get_tracer(__name__)
 VECTOR_DIM = 1408
 ENCODE_BATCH_SIZE = 16
 
@@ -216,15 +223,56 @@ class ProductEmbedder:
         instance = Value()
         json_format.ParseDict(instance_dict, instance)
 
-        try:
-            response = await self.client.predict(
-                endpoint=self.endpoint,
-                instances=[instance],
-            )
-            pred = dict(response.predictions[0])
-        except Exception as e:
-            logger.warning(f"Embedding call failed for {product.product_id}: {e}")
-            return None
+        # Hand-rolled telemetry, because nothing generic can see this call.
+        #
+        # Vertex's PredictionServiceAsyncClient speaks gRPC, and the only
+        # instrumentors installed are httpx, redis and sqlalchemy — so every
+        # embedding request was invisible: no span, no metric, no cost. The
+        # only trace of this code path in OpenObserve was the httpx span for
+        # the product IMAGE fetch above, which made image downloads look like
+        # the whole of the embedding pipeline.
+        #
+        # Attribute names follow the GenAI semconv so these sit in the same
+        # streams as the chat calls and can be queried together.
+        op_attrs = {
+            "gen_ai.operation.name": "embeddings",
+            "gen_ai.system": "gcp.vertex_ai",
+            "gen_ai.request.model": self.model_name,
+        }
+        started = time.perf_counter()
+        with _tracer.start_as_current_span("gen_ai.embeddings") as span:
+            span.set_attribute("gen_ai.operation.name", "embeddings")
+            span.set_attribute("gen_ai.system", "gcp.vertex_ai")
+            span.set_attribute("gen_ai.request.model", self.model_name)
+            # Which modalities this call was billed for: Vertex prices images
+            # and text separately, so a text-only call is not the same unit of
+            # spend as a multimodal one.
+            span.set_attribute("gen_ai.embeddings.has_image", bool(image_bytes))
+            try:
+                response = await self.client.predict(
+                    endpoint=self.endpoint,
+                    instances=[instance],
+                )
+                pred = dict(response.predictions[0])
+            except Exception as e:
+                # Recorded before the early return. This except swallows the
+                # failure and returns None, which is deliberate — one bad
+                # product must not stop a catalog sweep — but it also meant a
+                # wholly failing embedding pipeline looked identical to an idle
+                # one from the outside.
+                gen_ai_operation_duration.record(
+                    time.perf_counter() - started,
+                    {**op_attrs, "error.type": type(e).__name__},
+                )
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                logger.warning(
+                    f"Embedding call failed for {product.product_id}: {e}",
+                    exc_info=True,
+                )
+                return None
+
+            gen_ai_operation_duration.record(time.perf_counter() - started, op_attrs)
 
         image_vec = list(pred.get("imageEmbedding") or [])
         text_vec = list(pred.get("textEmbedding") or [])

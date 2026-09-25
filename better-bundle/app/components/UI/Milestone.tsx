@@ -29,8 +29,12 @@ interface MilestoneProps {
   attributedRevenue: number;
   trialRevenueEarned: number;
   trialThreshold: number;
+  trialOrdersEarned: number;
+  trialOrdersThreshold: number;
   isTrial: boolean;
   ordersInfluenced: number;
+  /** Share of attributed revenue charged after the trial, e.g. 0.03. */
+  commissionRate: number;
   proof: ProofResult;
   currency: string;
 }
@@ -46,16 +50,25 @@ export function pickMilestone({
   attributedRevenue,
   trialRevenueEarned,
   trialThreshold,
+  trialOrdersEarned,
+  trialOrdersThreshold,
   isTrial,
   ordersInfluenced,
   proof,
-}: Omit<MilestoneProps, "currency">): MilestoneKind | null {
+}: Omit<MilestoneProps, "currency" | "commissionRate">): MilestoneKind | null {
   // Proven incrementality is the strongest thing this product can ever tell a
   // merchant, so nothing outranks it.
   if (proof.state === "significant") return "lift_proven";
 
-  if (isTrial && trialThreshold > 0) {
-    const progress = trialRevenueEarned / trialThreshold;
+  if (isTrial && trialThreshold > 0 && trialOrdersThreshold > 0) {
+    // The trial ends on revenue AND orders, so the slower one decides. Reading
+    // revenue alone announced "Trial complete" on a single $1,490 order while
+    // billing carried on running the trial — the card and the bill disagreeing
+    // about the merchant's own money.
+    const progress = Math.min(
+      trialRevenueEarned / trialThreshold,
+      trialOrdersEarned / trialOrdersThreshold,
+    );
     if (progress >= 1) return "trial_complete";
     // 80% is late enough to be worth a heads-up and early enough that the
     // first charge is not a surprise.
@@ -72,8 +85,18 @@ export function Milestone(props: MilestoneProps) {
   const kind = pickMilestone(props);
   if (!kind) return null;
 
-  const { currency, trialThreshold, trialRevenueEarned, proof } = props;
+  const {
+    currency,
+    trialThreshold,
+    trialRevenueEarned,
+    trialOrdersThreshold,
+    commissionRate,
+    proof,
+  } = props;
   const money = (n: number) => formatCurrency(n, currency);
+  // Read from the plan, never typed as "3%" — a merchant on a different rate
+  // was being quoted someone else's price.
+  const rate = `${(commissionRate * 100).toFixed(1).replace(/\.0$/, "")}%`;
 
   const content: Record<
     MilestoneKind,
@@ -82,19 +105,19 @@ export function Milestone(props: MilestoneProps) {
     first_revenue: {
       badge: "First sale",
       title: "A recommendation just earned its first sale",
-      body: `${money(props.attributedRevenue)} of this order came from a product we suggested. You're not billed for any of it yet — the first ${money(trialThreshold)} is free.`,
+      body: `${money(props.attributedRevenue)} of this order came from a product we suggested. You're not billed for any of it yet — the first ${money(trialThreshold)}, across ${trialOrdersThreshold} orders, is free.`,
       action: { label: "See where it happened", url: "/app/impact" },
     },
     trial_nearly_done: {
       badge: "Heads up",
       title: `You've used most of your free allowance`,
-      body: `Recommendations have earned you ${money(trialRevenueEarned)} of the ${money(trialThreshold)} that comes free. After that it's 3% of attributed revenue, capped monthly — no surprises.`,
+      body: `Recommendations have earned you ${money(trialRevenueEarned)} of the ${money(trialThreshold)} that comes free, across ${trialOrdersThreshold} orders. After that it's ${rate} of attributed revenue, capped monthly — no surprises.`,
       action: { label: "See what that means", url: "/app/billing" },
     },
     trial_complete: {
       badge: "Trial complete",
       title: `Recommendations have earned you ${money(trialRevenueEarned)}`,
-      body: `That's past your free allowance, so billing starts from here — 3% of attributed revenue, never more than the monthly cap.`,
+      body: `That's past your free allowance, so billing starts from here — ${rate} of attributed revenue, never more than the monthly cap.`,
       action: { label: "Review your plan", url: "/app/billing" },
     },
     lift_proven: {

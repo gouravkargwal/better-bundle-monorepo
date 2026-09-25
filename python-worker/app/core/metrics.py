@@ -88,6 +88,26 @@ gen_ai_token_usage = get_meter().create_histogram(
     unit="{token}",
 )
 
+# `gen_ai.client.operation.duration` is the semconv name, and its `_count`
+# series is the only honest answer to "how many times did we call the model".
+#
+# Token usage cannot answer that. It is recorded only after a call SUCCEEDS and
+# returns usage metadata, so failures and retries leave no trace in it at all.
+# Measured over ten days: token usage reported 96 completions while the spans
+# showed 497 real requests, 361 of them errors — a 73% failure rate that no
+# metric or dashboard could see.
+#
+# Recorded once per ATTEMPT, not per logical completion, because a retry is a
+# real request that costs real latency and real quota. `error.type` carries the
+# exception class on failure and is absent on success, which is the semconv
+# convention and makes the success/failure split a group-by rather than a
+# second metric.
+gen_ai_operation_duration = get_meter().create_histogram(
+    "gen_ai.client.operation.duration",
+    description="Duration of one LLM API attempt, including failed ones",
+    unit="s",
+)
+
 # No semantic convention exists for spend, so it is namespaced. Recorded in USD
 # at the moment of the call, because the price of a model is a property of when
 # it ran — repricing old usage from today's table gives the wrong number.

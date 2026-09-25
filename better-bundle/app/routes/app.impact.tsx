@@ -10,6 +10,7 @@ import {
   getLiftSummary,
 } from "../features/impact/services/lift.service";
 import type { ProofResult, SurfaceProofRow } from "../features/impact/types/proof.types";
+import { holdoutPercentFor } from "../lib/holdout";
 import prisma from "../db.server";
 import { authenticate } from "../shopify.server";
 
@@ -37,7 +38,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const shop = await prisma.shops.findUnique({
     where: { shop_domain: session.shop },
-    select: { id: true, currency_code: true, holdout_disabled: true },
+    select: {
+      id: true,
+      currency_code: true,
+      holdout_disabled: true,
+      holdout_percent: true,
+    },
   });
 
   // Throw rather than return an error object: the route ErrorBoundary renders
@@ -56,9 +62,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     summary,
     bySurface,
     currencyCode: (shop.currency_code || "USD").toUpperCase(),
-    // Mirrors INITIAL_HOLDOUT_PERCENT in holdout_service.py. Used for copy
-    // only ("the 10% who didn't"); the engine decides measurability itself.
-    holdoutPercent: shop.holdout_disabled ? 0 : 10,
+    // The live value, not a constant: the holdout starts at 50% and steps down
+    // to 10%, so a hardcoded 10 told half this shop's shoppers' worth of
+    // control group that it was a tenth.
+    holdoutPercent: holdoutPercentFor(shop),
     windowDays: WINDOW_DAYS,
   });
 };

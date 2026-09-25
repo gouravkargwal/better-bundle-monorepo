@@ -72,7 +72,8 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               </Text>
               <Text as="p" tone="subdued">
                 Free until Better Bundle has driven{" "}
-                {formatCurrency(trialThreshold)} in attributed sales
+                {formatCurrency(trialThreshold)} in attributed sales across{" "}
+                {ordersThreshold} orders
               </Text>
             </BlockStack>
             <Badge tone={nearingThreshold ? "attention" : "success"} size="large">
@@ -116,7 +117,7 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                 <InlineStack align="space-between" blockAlign="end">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Revenue Generated
+                      Attributed revenue
                     </Text>
                     <Text as="h3" variant="headingLg" fontWeight="bold">
                       {formatCurrency(revenueEarned)}
@@ -173,14 +174,24 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                   </InlineStack>
                 </BlockStack>
 
+                {/* "You've made the sales" is only true if that side is
+                    actually met. bindingConstraint names the slower half even
+                    when neither half has started, which read as "You've had
+                    enough orders" at zero orders. */}
                 <Text as="p" variant="bodySm" tone="subdued">
-                  {blocking === "orders"
-                    ? `You've made the sales — we're waiting on ${ordersRemaining} more ${
+                  {remaining > 0 && ordersRemaining > 0
+                    ? `Both have to happen before you pay anything: ${formatCurrency(
+                        remaining,
+                      )} more in attributed sales, across ${ordersRemaining} more ${
                         ordersRemaining === 1 ? "order" : "orders"
-                      } so you can see the pattern before paying anything.`
-                    : `You've had enough orders — we're waiting until they add up to ${formatCurrency(
-                        trialThreshold,
-                      )} before charging anything.`}
+                      }.`
+                    : blocking === "orders"
+                      ? `You've made the sales — we're waiting on ${ordersRemaining} more ${
+                          ordersRemaining === 1 ? "order" : "orders"
+                        } so you can see the pattern before paying anything.`
+                      : `You've had enough orders — we're waiting until they add up to ${formatCurrency(
+                          trialThreshold,
+                        )} before charging anything.`}
                 </Text>
               </BlockStack>
             </div>
@@ -211,8 +222,8 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">3.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  After that you pay a share of the sales we generate — nothing
-                  if we generate nothing
+                  After that you pay a share of attributed revenue — nothing
+                  in a cycle where we attribute nothing
                 </Text>
               </div>
             </BlockStack>

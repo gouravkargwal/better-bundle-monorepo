@@ -1,6 +1,6 @@
 {
-  "title": "LLM Cost",
-  "description": "Gemini spend and token usage, priced at call time",
+  "title": "External Dependencies",
+  "description": "Outbound API calls: who we call, how often, and how often it fails",
   "tabs": [
     {
       "tabId": "default",
@@ -8,9 +8,9 @@
       "panels": [
         {
           "id": "panel_1",
-          "type": "line",
-          "title": "Spend Over Time",
-          "description": "USD, summed per time bucket",
+          "type": "bar",
+          "title": "Calls by Host",
+          "description": "Every third-party API this backend depends on",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -20,23 +20,23 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_gen_ai_cost\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "query": "SELECT server_address as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
-                "stream": "betterbundle_gen_ai_cost",
-                "stream_type": "metrics",
+                "stream": "default",
+                "stream_type": "traces",
                 "x": [
                   {
-                    "label": "Timestamp",
+                    "label": "Host",
                     "alias": "x_axis_1",
-                    "column": "_timestamp",
+                    "column": "server_address",
                     "color": null
                   }
                 ],
                 "y": [
                   {
-                    "label": "USD",
+                    "label": "Calls",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -57,7 +57,7 @@
           "layout": {
             "x": 0,
             "y": 0,
-            "w": 24,
+            "w": 12,
             "h": 14,
             "i": 1
           }
@@ -65,8 +65,8 @@
         {
           "id": "panel_2",
           "type": "bar",
-          "title": "Spend by Model",
-          "description": "Which model the money is going to",
+          "title": "Failures by Host",
+          "description": "The panel this dashboard was built for. Read it next to 'Calls by Host' \u2014 a big number here is only alarming relative to the volume beside it",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -76,23 +76,79 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT gen_ai_request_model as x_axis_1, sum(value) as y_axis_1 FROM \"betterbundle_gen_ai_cost\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "query": "SELECT server_address as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address IS NOT NULL AND span_status = 'ERROR' GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
-                "stream": "betterbundle_gen_ai_cost",
-                "stream_type": "metrics",
+                "stream": "default",
+                "stream_type": "traces",
                 "x": [
                   {
-                    "label": "Model",
+                    "label": "Host",
                     "alias": "x_axis_1",
-                    "column": "gen_ai_request_model",
+                    "column": "server_address",
                     "color": null
                   }
                 ],
                 "y": [
                   {
-                    "label": "USD",
+                    "label": "Failures",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 14,
+            "i": 2
+          }
+        },
+        {
+          "id": "panel_3",
+          "type": "line",
+          "title": "Outbound Call Rate",
+          "description": "Total third-party calls over time",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address IS NOT NULL GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Calls",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -115,14 +171,14 @@
             "y": 14,
             "w": 12,
             "h": 14,
-            "i": 2
+            "i": 3
           }
         },
         {
-          "id": "panel_3",
-          "type": "donut",
-          "title": "Tokens by Type",
-          "description": "Input vs output -- they are priced differently, so the split is what explains the bill",
+          "id": "panel_4",
+          "type": "line",
+          "title": "Outbound Failures Over Time",
+          "description": "A step change here dates an upstream outage",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -132,23 +188,23 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT gen_ai_token_type as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_sum\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address IS NOT NULL AND span_status = 'ERROR' GROUP BY x_axis_1 ORDER BY x_axis_1",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
-                "stream": "gen_ai_client_token_usage_sum",
-                "stream_type": "metrics",
+                "stream": "default",
+                "stream_type": "traces",
                 "x": [
                   {
-                    "label": "Token Type",
+                    "label": "Timestamp",
                     "alias": "x_axis_1",
-                    "column": "gen_ai_token_type",
+                    "column": "_timestamp",
                     "color": null
                   }
                 ],
                 "y": [
                   {
-                    "label": "Tokens",
+                    "label": "Failures",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -171,14 +227,14 @@
             "y": 14,
             "w": 12,
             "h": 14,
-            "i": 3
+            "i": 4
           }
         },
         {
-          "id": "panel_4",
-          "type": "line",
-          "title": "Token Volume Over Time",
-          "description": "Total tokens per time bucket",
+          "id": "panel_5",
+          "type": "table",
+          "title": "Slowest Dependencies",
+          "description": "Mean span duration per host, microseconds. A dependency that slows down shows here before it shows as our latency",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -188,23 +244,23 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_sum\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "query": "SELECT server_address as x_axis_1, avg(duration) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address IS NOT NULL GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
-                "stream": "gen_ai_client_token_usage_sum",
-                "stream_type": "metrics",
+                "stream": "default",
+                "stream_type": "traces",
                 "x": [
                   {
-                    "label": "Timestamp",
+                    "label": "Host",
                     "alias": "x_axis_1",
-                    "column": "_timestamp",
+                    "column": "server_address",
                     "color": null
                   }
                 ],
                 "y": [
                   {
-                    "label": "Tokens",
+                    "label": "Microseconds",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -226,15 +282,15 @@
             "x": 0,
             "y": 28,
             "w": 12,
-            "h": 14,
-            "i": 4
+            "h": 16,
+            "i": 5
           }
         },
         {
-          "id": "panel_5",
-          "type": "line",
-          "title": "LLM Calls (successful)",
-          "description": "Completions that returned usage. Retries and failures are NOT counted \u2014 see External Dependencies for those",
+          "id": "panel_6",
+          "type": "donut",
+          "title": "LLM API Calls by Outcome",
+          "description": "Real HTTP requests to the model API, including retries and failures \u2014 not the same number as 'LLM Calls (successful)' on the LLM Cost dashboard, and the gap is the point",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -244,12 +300,124 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) as x_axis_1, sum(value) as y_axis_1 FROM \"gen_ai_client_token_usage_count\" WHERE gen_ai_token_type = 'input' GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "query": "SELECT span_status as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address LIKE '%generativelanguage%' GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
-                "stream": "gen_ai_client_token_usage_count",
-                "stream_type": "metrics",
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Outcome",
+                    "alias": "x_axis_1",
+                    "column": "span_status",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 12,
+            "y": 28,
+            "w": 12,
+            "h": 14,
+            "i": 6
+          }
+        },
+        {
+          "id": "panel_7",
+          "type": "donut",
+          "title": "Embedding Calls by Outcome",
+          "description": "Vertex AI embedding requests. These are gRPC, not HTTP, so they appear only because embedding.py records its own spans \u2014 generic instrumentation does not see them",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT span_status as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE operation_name LIKE 'gen_ai.embed%' GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Outcome",
+                    "alias": "x_axis_1",
+                    "column": "span_status",
+                    "color": null
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Requests",
+                    "alias": "y_axis_1",
+                    "column": "value",
+                    "color": null
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": ""
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 44,
+            "w": 12,
+            "h": 14,
+            "i": 7
+          }
+        },
+        {
+          "id": "panel_8",
+          "type": "line",
+          "title": "Shopify API Calls",
+          "description": "Admin GraphQL and CDN traffic over time",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "base_map": null,
+            "map_view": null
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE span_kind = 3 AND server_address LIKE '%shopify%' GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "vrlFunctionQuery": null,
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
                 "x": [
                   {
                     "label": "Timestamp",
@@ -280,66 +448,10 @@
           ],
           "layout": {
             "x": 12,
-            "y": 28,
+            "y": 44,
             "w": 12,
             "h": 14,
-            "i": 5
-          }
-        },
-        {
-          "id": "panel_6",
-          "type": "line",
-          "title": "\u26a0 Unpriced Models",
-          "description": "Non-zero means the spend figures above are too low: these models were called but are missing from llm_pricing.PRICES, so their cost was recorded as 0",
-          "config": {
-            "show_legends": true,
-            "legends_position": null,
-            "base_map": null,
-            "map_view": null
-          },
-          "queryType": "sql",
-          "queries": [
-            {
-              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" WHERE body LIKE '%No price entry for model%' GROUP BY x_axis_1 ORDER BY x_axis_1",
-              "vrlFunctionQuery": null,
-              "customQuery": true,
-              "fields": {
-                "stream": "default",
-                "stream_type": "logs",
-                "x": [
-                  {
-                    "label": "Timestamp",
-                    "alias": "x_axis_1",
-                    "column": "_timestamp",
-                    "color": null
-                  }
-                ],
-                "y": [
-                  {
-                    "label": "Warnings",
-                    "alias": "y_axis_1",
-                    "column": "value",
-                    "color": null
-                  }
-                ],
-                "z": [],
-                "filter": {
-                  "filterType": "group",
-                  "logicalOperator": "AND",
-                  "conditions": []
-                }
-              },
-              "config": {
-                "promql_legend": ""
-              }
-            }
-          ],
-          "layout": {
-            "x": 0,
-            "y": 42,
-            "w": 24,
-            "h": 14,
-            "i": 6
+            "i": 8
           }
         }
       ]

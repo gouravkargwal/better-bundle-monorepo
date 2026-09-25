@@ -176,7 +176,8 @@ export function ProofPage({
                 </Text>{" "}
                 — orders where a shopper interacted with a recommendation. It
                 comes from a stamp on the order line, so it is exact. This is
-                what your 3% is calculated on, and you can see it on Home.
+                what your commission is calculated on, and you can see it on
+                Home.
               </Text>
               <Text as="p">
                 <Text as="span" fontWeight="semibold">
@@ -188,9 +189,11 @@ export function ProofPage({
                 and it is always smaller than attributed revenue.
               </Text>
               <Text as="p" tone="subdued">
-                We hold back {holdoutPercent}% of shoppers from seeing
-                personalised recommendations to create a clean comparison.
-                recommendations so there is always something to compare against.
+                We hold back {holdoutPercent}% of shoppers from personalised
+                recommendations, showing them generic ones instead, so there is
+                always something to compare against. That share starts high so a
+                result is reachable in weeks rather than months, and drops once
+                the lift is settled.
                 Without that control group there is no way to tell a sale you
                 caused from one that would have happened anyway — so we would
                 rather say "we can't tell yet" than show you a number we can't

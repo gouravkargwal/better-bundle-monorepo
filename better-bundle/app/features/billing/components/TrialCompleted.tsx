@@ -159,7 +159,7 @@ export function TrialCompleted({
                     Monthly Maximum:
                   </Text>
                   <Text as="p" variant="bodyMd" fontWeight="bold">
-                    {formatCurrency(trialData.cappedAmount)}
+                    {formatCurrency(chosenCap)}
                   </Text>
                 </InlineStack>
 
@@ -182,8 +182,8 @@ export function TrialCompleted({
                 }}
               >
                 <Text as="p" variant="bodySm" tone="subdued">
-                  ✅ Cancel anytime • No monthly fee • You only pay on sales
-                  we generate
+                  ✅ Cancel anytime • No monthly fee • You only pay on
+                  attributed sales
                 </Text>
               </div>
             </BlockStack>
@@ -220,8 +220,8 @@ export function TrialCompleted({
                     Continue with Pay As You Go
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    {ratePercent}% of the revenue we generate, capped at{" "}
-                    {formatCurrency(trialData.cappedAmount)}
+                    {ratePercent}% of the revenue we attribute to our
+                    recommendations, capped at {formatCurrency(chosenCap)}
                   </Text>
                 </BlockStack>
               </InlineStack>
@@ -368,7 +368,7 @@ export function TrialCompleted({
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>Capped:</strong> Your bill can never exceed{" "}
-                  {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
+                  {formatCurrency(chosenCap)} in a 30-day cycle.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   <strong>At the limit:</strong> Recommendations pause until

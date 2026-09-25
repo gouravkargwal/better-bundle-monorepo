@@ -15,14 +15,34 @@ model shows up as "unpriced" rather than as "free".
 from typing import Tuple
 
 # USD per 1,000,000 tokens, as (input, output).
-# Source: Google Gemini API pricing. Last checked 2026-09-12.
+# Source: https://ai.google.dev/gemini-api/docs/pricing — last checked
+# 2026-09-25. Standard paid tier, text/image/video input. The batch, flex and
+# priority tiers are different prices; if this service ever submits batch jobs
+# their cost will be overstated here by 2x, which is the safer direction but
+# worth fixing at that point rather than now.
 PRICES: dict[str, Tuple[float, float]] = {
+    # The model this service actually runs (AI_CHAT_MODEL in .env). Its absence
+    # was why the LLM Cost dashboard reported a cumulative $0.00 while the
+    # model served 96 completions: unpriced models fall through to 0.
+    "gemini-3.1-flash-lite": (0.25, 1.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-pro": (1.25, 10.00),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-2.0-flash-lite": (0.075, 0.30),
 }
+
+# NOT PRICED HERE: `multimodalembedding` (AI_EMBEDDING_MODEL).
+#
+# Vertex prices embeddings per image and per 1k text characters, not per
+# input/output token, so it does not fit this table's shape and a token-based
+# entry would produce a confidently wrong number. Google also replaced the
+# embedding SKUs on 2026-09-01, which dates every third-party figure currently
+# findable for it.
+#
+# Embedding CALLS and failures are measured — see the gen_ai.client.operation
+# .duration metric recorded in embedding.py — only their cost is not. A missing
+# cost reads as "unpriced" in the dashboard; a guessed one reads as fact.
 
 PER_TOKENS = 1_000_000
 

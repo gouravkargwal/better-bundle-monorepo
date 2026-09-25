@@ -1,4 +1,4 @@
-import { Card, Text } from "@shopify/polaris";
+import { BlockStack, Button, Card, InlineStack, Text } from "@shopify/polaris";
 import type { BillingState, BillingSetupData } from "../types/billing.types";
 import { TrialActive } from "./TrialActive";
 import { TrialCompleted } from "./TrialCompleted";
@@ -87,11 +87,35 @@ export function BillingPlan({
           />
         );
 
+      // Reachable whenever the merchant cancels in their Shopify admin. It
+      // used to fall through to the default and print the raw status string.
+      case "subscription_cancelled":
+        return (
+          <Card>
+            <BlockStack gap="300">
+              <Text variant="headingMd" as="h3">
+                Subscription cancelled
+              </Text>
+              <Text as="p" tone="subdued">
+                Recommendations have stopped showing and you will not be
+                charged again. Your data is still here. There is no in-app way
+                to resubscribe yet — get in touch and we'll switch it back on.
+              </Text>
+              <InlineStack>
+                <Button url="/app/help">Contact support</Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        );
+
       default:
         return (
           <Card>
             <div style={{ padding: "24px", textAlign: "center" }}>
-              <Text as="p">Unknown billing status: {billingState.status}</Text>
+              <Text as="p">
+                We can't load your billing details right now. Please refresh, or
+                contact support if this keeps happening.
+              </Text>
             </div>
           </Card>
         );

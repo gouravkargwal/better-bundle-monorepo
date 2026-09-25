@@ -10,6 +10,7 @@ import { getLiftSummary } from "../../impact/services/lift.service";
 import { getShopSettings } from "../../settings/services/settings.service";
 import { getCycleMetrics } from "./cycle.service";
 import { ALL_SURFACES } from "../../../lib/surfaces";
+import { holdoutPercentFor } from "../../../lib/holdout";
 import type {
   EdgeStatus,
   HomeData,
@@ -277,7 +278,10 @@ export async function getHomeData(
   return {
     cycle,
     proof,
-    holdoutPercent: settings.holdoutDisabled ? 0 : 10,
+    holdoutPercent: holdoutPercentFor({
+      holdout_disabled: settings.holdoutDisabled,
+      holdout_percent: settings.holdoutPercent,
+    }),
     edges,
     sync,
     surfaces,

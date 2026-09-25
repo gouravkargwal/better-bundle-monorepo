@@ -251,8 +251,11 @@ export function HomePage({ data }: HomePageProps) {
             attributedRevenue={cycle.attributedRevenue}
             trialRevenueEarned={cycle.trialRevenueEarned}
             trialThreshold={cycle.trialThreshold}
+            trialOrdersEarned={cycle.trialOrdersEarned}
+            trialOrdersThreshold={cycle.trialOrdersThreshold}
             isTrial={cycle.isTrial}
             ordersInfluenced={cycle.ordersInfluenced}
+            commissionRate={cycle.commissionRate}
             proof={proof}
             currency={cycle.currency}
           />

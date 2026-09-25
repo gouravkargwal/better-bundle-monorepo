@@ -88,8 +88,8 @@ export function SpendCap({
           </Text>
           <Text as="p" tone="subdued">
             The most Better Bundle can charge you in a 30-day cycle. You are
-            only ever charged on revenue it actually generates, so a higher
-            limit costs nothing unless it sells more for you.
+            only ever charged on revenue we attribute to its recommendations,
+            so a higher limit costs nothing unless it sells more for you.
           </Text>
         </BlockStack>
 

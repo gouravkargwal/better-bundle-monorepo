@@ -10,9 +10,14 @@ answered, and nothing below it knows what the JSON means.
 import asyncio
 import logging
 import random
+import time
 from typing import Optional, Protocol
 
-from app.core.metrics import gen_ai_cost, gen_ai_token_usage
+from app.core.metrics import (
+    gen_ai_cost,
+    gen_ai_operation_duration,
+    gen_ai_token_usage,
+)
 
 from .llm_budget import LLMBudget
 from .llm_pricing import cost_usd, is_priced
@@ -137,6 +142,15 @@ class GeminiProvider:
 
         last_error = None
         for attempt in range(self.retries + 1):
+            # Timed per attempt, and recorded on both paths below. Token usage
+            # cannot stand in for this: it is only recorded after a success, so
+            # on its own a failing model looks like a quiet one.
+            attempt_started = time.perf_counter()
+            op_attrs = {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.system": "gcp.gemini",
+                "gen_ai.request.model": self.model,
+            }
             try:
                 await self.budget.record_call()
                 response = await asyncio.wait_for(
@@ -148,10 +162,20 @@ class GeminiProvider:
                 text = (response.text or "").strip()
                 if not text:
                     raise RuntimeError("empty response from model")
+                gen_ai_operation_duration.record(
+                    time.perf_counter() - attempt_started, op_attrs
+                )
                 await self.budget.record_success()
                 self._record_usage(response)
                 return text
             except Exception as e:
+                # `error.type` present means failure; absent means success.
+                # That is the semconv convention, and it makes the split a
+                # group-by rather than a second metric to keep in sync.
+                gen_ai_operation_duration.record(
+                    time.perf_counter() - attempt_started,
+                    {**op_attrs, "error.type": type(e).__name__},
+                )
                 last_error = e
                 classification = await self.budget.record_failure(e)
 

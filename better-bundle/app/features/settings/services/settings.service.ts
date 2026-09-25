@@ -26,6 +26,7 @@ interface ShopSettingsRow {
   shop_id: string;
   currency_code: string | null;
   holdout_disabled: boolean;
+  holdout_percent: number | null;
   settings: PersistedShopSettings | null;
 }
 
@@ -35,7 +36,7 @@ interface ShopSettingsRow {
  */
 export async function getShopSettings(shopDomain: string) {
   const rows = await prisma.$queryRaw<ShopSettingsRow[]>`
-    SELECT id AS shop_id, currency_code, holdout_disabled, settings
+    SELECT id AS shop_id, currency_code, holdout_disabled, holdout_percent, settings
     FROM shops
     WHERE shop_domain = ${shopDomain}
   `;
@@ -66,6 +67,9 @@ export async function getShopSettings(shopDomain: string) {
     shopId: row.shop_id,
     shopCurrency: row.currency_code || "USD",
     holdoutDisabled: row.holdout_disabled,
+    // The tuner's live value. NULL means it has not run for this shop yet,
+    // i.e. still learning — resolved by holdoutPercentFor, never assumed.
+    holdoutPercent: row.holdout_percent,
     surfaces,
     detectedSurfaces: (raw.detected_surfaces as Partial<Record<SurfaceKey, boolean>> | undefined) ?? null,
     excludedProductIds: Array.isArray(raw.excluded_product_ids)

@@ -8,7 +8,7 @@ import {
   Banner,
   Badge,
 } from "@shopify/polaris";
-import { AlertTriangleIcon, RefreshIcon } from "@shopify/polaris-icons";
+import { AlertTriangleIcon } from "@shopify/polaris-icons";
 import type { SubscriptionData } from "../types/billing.types";
 import { SpendCap } from "./SpendCap";
 
@@ -32,10 +32,6 @@ export function SubscriptionSuspended({
   const ratePercent = (subscriptionData.commissionRate * 100)
     .toFixed(1)
     .replace(/\.0$/, "");
-
-  const handleReactivate = () => {
-    window.location.href = "/app/billing?action=reactivate";
-  };
 
   return (
     <BlockStack gap="500">
@@ -96,8 +92,9 @@ export function SubscriptionSuspended({
 
           <Banner tone="critical">
             <Text as="p">
-              BetterBundle services are currently suspended. Please contact
-              support or reactivate your subscription to continue.
+              Recommendations have stopped showing. Raising your spend limit
+              above starts them again straight away; otherwise they resume on
+              their own when the cycle resets.
             </Text>
           </Banner>
 
@@ -140,23 +137,9 @@ export function SubscriptionSuspended({
             </BlockStack>
           </Box>
 
-          {/* Action Buttons */}
           <BlockStack gap="300">
-            <Button
-              variant="primary"
-              size="large"
-              onClick={handleReactivate}
-              icon={RefreshIcon}
-              fullWidth
-            >
-              Reactivate Subscription
-            </Button>
-
-            <Button
-              variant="tertiary"
-              onClick={() => (window.location.href = "/app/support")}
-            >
-              Contact Support
+            <Button variant="tertiary" url="/app/help">
+              Contact support
             </Button>
           </BlockStack>
 

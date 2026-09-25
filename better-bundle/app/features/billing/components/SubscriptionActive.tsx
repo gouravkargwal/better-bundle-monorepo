@@ -56,8 +56,8 @@ export function SubscriptionActive({
                   ✅ Subscription Active
                 </Text>
                 <Text as="p" tone="subdued">
-                  Better Bundle is running. You are billed only on the revenue
-                  it generates.
+                  Better Bundle is running. You are billed only on revenue we
+                  attribute to its recommendations.
                 </Text>
               </BlockStack>
               <Badge tone="success" size="large">
@@ -272,8 +272,9 @@ export function SubscriptionActive({
                     feature requests.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    <strong>Need to cancel?</strong> Visit the billing settings
-                    to cancel your subscription. No cancellation fees.
+                    <strong>Need to cancel?</strong> Uninstall Better Bundle
+                    from your Shopify admin under Settings → Apps. The
+                    subscription ends with it — no cancellation fees.
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     <strong>Payment issues?</strong> We'll notify you if there's

@@ -40,7 +40,7 @@ const STEPS = [
     icon: "📈",
     title: "Recommendations go live",
     description:
-      "Smart offers start appearing across storefront, checkout, and post-purchase.",
+      "Smart offers start appearing on your product pages, post-purchase, and the thank-you page — plus checkout if you're on Shopify Plus.",
   },
 ] as const;
 
@@ -177,14 +177,14 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
             <BlockStack gap="400">
               <InlineStackHeader
                 title="💳 Simple pricing"
-                subtitle="You only pay when we generate revenue for you — nothing upfront."
+                subtitle="You only pay on sales our recommendations are part of — nothing upfront."
                 badge={<Badge tone="success" size="large">No monthly fee</Badge>}
               />
 
               <Box padding="500" background="bg-surface-success" borderRadius="300">
                 <BlockStack gap="100">
                   <Text as="h3" variant="heading2xl" fontWeight="bold">
-                    {ratePercent}% of the revenue we generate
+                    {ratePercent}% of attributed revenue
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
                     Free until we&apos;ve driven {plan.symbol}
