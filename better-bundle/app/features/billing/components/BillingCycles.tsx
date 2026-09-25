@@ -10,8 +10,7 @@ import {
   Text,
 } from "@shopify/polaris";
 import { NOTHING_FOUND } from "../../../components/UI/illustrations";
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "@remix-run/react";
+import { useNavigate, useSearchParams, useRevalidator } from "@remix-run/react";
 
 interface BillingCyclesProps {
   shopId: string;
@@ -24,8 +23,8 @@ export function BillingCycles({
   shopCurrency,
   data,
 }: BillingCyclesProps) {
-  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const revalidator = useRevalidator();
   const [searchParams] = useSearchParams();
 
   const cycles = data?.cycles || [];
@@ -66,10 +65,9 @@ export function BillingCycles({
             Billing cycles
           </Text>
           <Button
-            loading={isLoading}
+            loading={revalidator.state === "loading"}
             onClick={() => {
-              setIsLoading(true);
-              setTimeout(() => setIsLoading(false), 1000);
+              revalidator.revalidate();
             }}
           >
             Refresh
