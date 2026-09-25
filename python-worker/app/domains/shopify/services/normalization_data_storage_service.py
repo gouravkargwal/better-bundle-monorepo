@@ -11,6 +11,7 @@ from app.core.database.session import get_session_context, get_transaction_conte
 from app.core.database.models import (
     OrderData,
     LineItemData,
+    RefundData,
     ProductData,
     CustomerData,
     CollectionData,
@@ -139,8 +140,10 @@ class NormalizationDataStorageService:
                 self.logger.error("Missing order_id in canonical data")
                 return False
 
-            # Extract line items BEFORE preparing order data
+            # Extract line items and refunds BEFORE preparing order data; both
+            # live in their own tables and `_clean_internal_fields` strips them.
             line_items = canonical_data.get("line_items", [])
+            refunds = canonical_data.get("refunds", [])
 
             # Use canonical data directly - it's already aligned with DB schema
             order_data = canonical_data.copy()
@@ -199,6 +202,8 @@ class NormalizationDataStorageService:
 
                     await self._create_line_items(session, order_record_id, line_items)
 
+                await self._replace_refunds(session, shop_id, order_record_id, refunds)
+
                 await session.commit()
 
             return True
@@ -237,7 +242,9 @@ class NormalizationDataStorageService:
                     order_data.pop("lineItems", None)
                     order_data.pop("line_items", None)
 
-                    # Remove fields that don't exist in OrderData model
+                    # Refunds live in their own table, so lift them out before
+                    # the order dict is written.
+                    refunds = canonical_data.get("refunds", [])
                     order_data.pop("refunds", None)
 
                     # Clean internal fields
@@ -287,6 +294,10 @@ class NormalizationDataStorageService:
                         )
                     else:
                         self.logger.warning(f"No line items found for order {order_id}")
+
+                    await self._replace_refunds(
+                        session, shop_id, order_record_id, refunds
+                    )
 
                     processed_count += 1
                     self.logger.debug(f"Successfully processed order {order_id}")
@@ -407,6 +418,69 @@ class NormalizationDataStorageService:
         }
         return model_map[data_type]
 
+    async def _replace_refunds(
+        self, session: Any, shop_id: str, order_record_id: str, refunds: List[Any]
+    ):
+        """Replace the stored refunds for an order.
+
+        Delete-then-insert rather than upsert-per-refund: Shopify sends the full
+        refund list on every order read, so the incoming set is authoritative
+        and a refund that disappears upstream should disappear here too.
+
+        `order_id` is stored as the internal `order_data.id` so the recommender
+        can join refunds to line items directly.
+        """
+        await session.execute(
+            delete(RefundData).where(RefundData.order_id == order_record_id)
+        )
+
+        if not refunds:
+            return
+
+        bulk_rows: List[Dict[str, Any]] = []
+        seen: set = set()
+
+        for refund in refunds:
+            refund_id = refund.get("refund_id") or refund.get("refundId")
+            refunded_at = refund.get("refunded_at")
+
+            # The unique index is on (shop_id, refund_id) and `refunded_at` is
+            # NOT NULL, so a malformed refund would abort the whole order write.
+            if not refund_id or refunded_at is None:
+                self.logger.warning(
+                    f"Skipping refund without id or timestamp on order "
+                    f"{order_record_id}: refund_id={refund_id!r}"
+                )
+                continue
+
+            # Shopify has been observed repeating a refund inside one payload;
+            # a duplicate here would trip the unique index mid-batch.
+            if refund_id in seen:
+                continue
+            seen.add(refund_id)
+
+            bulk_rows.append(
+                {
+                    "shop_id": shop_id,
+                    "order_id": order_record_id,
+                    "refund_id": str(refund_id),
+                    "refunded_at": refunded_at,
+                    "total_refund_amount": float(
+                        refund.get("total_refund_amount") or 0.0
+                    ),
+                    "currency_code": refund.get("currency_code") or "USD",
+                    "note": refund.get("note"),
+                    "restock": bool(refund.get("restock", False)),
+                    "refund_line_items": refund.get("refund_line_items") or [],
+                }
+            )
+
+        if bulk_rows:
+            await session.execute(insert(RefundData), bulk_rows)
+            self.logger.debug(
+                f"Stored {len(bulk_rows)} refunds for order {order_record_id}"
+            )
+
     async def _create_line_items(
         self, session: Any, order_record_id: str, line_items: List[Any]
     ):
@@ -444,6 +518,12 @@ class NormalizationDataStorageService:
                         "title": item.get("title"),
                         "quantity": int(item.get("quantity", 0)),
                         "price": float(item.get("price", 0.0)),
+                        # `price` is the pre-discount unit price. Billing needs
+                        # what the shopper actually paid, so carry the
+                        # discounted figure through instead of dropping it.
+                        "original_unit_price": item.get("original_unit_price"),
+                        "discounted_unit_price": item.get("discounted_unit_price"),
+                        "currency_code": item.get("currency_code"),
                         "properties": item.get("properties", {}),
                     }
 

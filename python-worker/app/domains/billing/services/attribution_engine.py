@@ -606,7 +606,7 @@ class AttributionEngine:
             if (imp.offer_id and pid == str(imp.offer_id)) or (
                 imp.variant_id and vid == str(imp.variant_id)
             ):
-                price = product.get("price") or product.get("total") or 0
+                price = product.get("price") or 0
                 qty = product.get("quantity") or 1
                 return Decimal(str(price)) * Decimal(str(qty))
 

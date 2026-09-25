@@ -18,8 +18,32 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Default holdout percentage
-INITIAL_HOLDOUT_PERCENT = 10  # 10% initially
+# Holdout runs in two phases.
+#
+# Learning: a large control arm, because time-to-proof is what matters and
+# nothing else is gated on it. The merchant is being asked to pay for revenue
+# we claim to have caused, and until there is a measured lift that claim rests
+# on attribution alone — which is precisely the thing merchants distrust about
+# every competitor in this category.
+#
+# Earning: a small control arm, once the lift has been measured. Enough to keep
+# monitoring, not enough to keep withholding.
+#
+# The high learning rate is close to free, which is the part that is easy to get
+# wrong. What costs revenue is not the *rate* but the number of control orders,
+# and that number is fixed at MIN_CONTROL_ORDERS either way:
+#
+#   at 10%:  1,000 orders x 10% withheld = 100 orders' worth of lift forgone
+#   at 50%:    200 orders x 50% withheld = 100 orders' worth of lift forgone
+#
+# Same cost, five times sooner. Balanced arms also give more statistical power
+# per order, so the larger control arm detects a smaller true lift.
+LEARNING_HOLDOUT_PERCENT = 50
+EARNING_HOLDOUT_PERCENT = 10
+
+# Kept as the name the rest of the codebase imports.
+INITIAL_HOLDOUT_PERCENT = LEARNING_HOLDOUT_PERCENT
+
 MIN_CONTROL_ORDERS = 100       # minimum control orders before reporting
 P_VALUE_THRESHOLD = 0.05       # significance threshold
 
@@ -55,8 +79,17 @@ class HoldoutService:
         if surface is not None and surface in SURFACE_HOLDOUT_PERCENT:
             return SURFACE_HOLDOUT_PERCENT[surface]
 
-        # Future: read from a shop config or derive from rollup stats.
-        return INITIAL_HOLDOUT_PERCENT
+        # Written by the holdout tuner once the shop has enough control orders
+        # to measure lift. NULL means it has not got there yet.
+        #
+        # Read from the already-loaded shop row rather than counted here: this
+        # runs on the recommendation serving path, where a query per request
+        # would show up as latency on every product page.
+        tuned = getattr(shop, "holdout_percent", None)
+        if tuned is not None:
+            return int(tuned)
+
+        return LEARNING_HOLDOUT_PERCENT
 
     @staticmethod
     def is_held_out(

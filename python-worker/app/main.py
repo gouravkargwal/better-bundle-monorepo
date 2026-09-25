@@ -130,11 +130,19 @@ async def lifespan(app: FastAPI):
     reconciler_entity_task = asyncio.create_task(entity_reconciler.run_forever())
     logger.info("✅ Entity reconciler started")
 
+    # Drops a shop's holdout to the monitoring rate once it has gathered enough
+    # control orders to measure lift. Until then the large control arm stands,
+    # because proving the revenue is worth more than withholding less of it.
+    from app.services import holdout_tuner
+
+    holdout_tuner_task = asyncio.create_task(holdout_tuner.run_forever())
+    logger.info("✅ Holdout tuner started")
+
     yield
 
     # Shutdown
 
-    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task, reconciler_entity_task):
+    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task, reconciler_entity_task, holdout_tuner_task):
         task.cancel()
         try:
             await task
@@ -174,10 +182,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# OpenTelemetry instrumentation for FastAPI
+# OpenTelemetry instrumentation for FastAPI.
+#
+# `excluded_urls` is load-bearing, not tidiness. The container healthcheck hits
+# /health every 30s forever, and each hit produced a server span plus an
+# `http send` child span — measured in OpenObserve at 252 spans/hour against
+# ~1700 total, i.e. 15% of all stored trace volume describing a request whose
+# answer is never in question. A failing healthcheck is visible from the
+# container state and the absence of other spans; it does not need a trace.
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-FastAPIInstrumentor.instrument_app(app)
+FastAPIInstrumentor.instrument_app(app, excluded_urls="health,health/redis")
 
 # Include API routers
 app.include_router(recommendations_router)

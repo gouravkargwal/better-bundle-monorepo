@@ -34,8 +34,24 @@ from app.core.config.settings import settings  # noqa: E402
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# `configure_logging` is set to False by app.core.database.migrations, which
+# runs these migrations in-process at startup after the app has already
+# configured logging.
+#
+# fileConfig() otherwise does two things that are correct for the `alembic` CLI
+# and destructive in-process: it sets `disabled = True` on every existing
+# logger (so all `app.*` loggers go silent for the life of the process), and it
+# replaces the root handlers with the single console handler from alembic.ini
+# (so the OTLP handler shipping logs to OpenObserve is detached). The worker
+# therefore emitted almost no application logs after startup, and the ones it
+# did emit never left the container.
+#
+# `disable_existing_loggers=False` on the CLI path too: even there, silencing
+# every logger a plugin or env.py has set up is not something alembic needs.
+if config.config_file_name is not None and config.attributes.get(
+    "configure_logging", True
+):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

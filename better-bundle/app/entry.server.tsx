@@ -14,6 +14,20 @@ import { addDocumentResponseHeaders } from "./shopify.server";
 // before any imports that might log or create connections.
 initObservability();
 
+// Polaris' IndexTable calls useLayoutEffect unconditionally, so every SSR pass
+// that renders a table dumps React's "useLayoutEffect does nothing on the
+// server" warning plus a 40-line component stack. It's a Polaris bug, not ours,
+// and there's nothing to fix at the call site — drop just this one message.
+const consoleError = console.error;
+console.error = (...args: unknown[]) => {
+  if (
+    typeof args[0] === "string" &&
+    args[0].includes("useLayoutEffect does nothing on the server")
+  )
+    return;
+  consoleError(...args);
+};
+
 export const streamTimeout = 5000;
 
 export default async function handleRequest(

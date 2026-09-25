@@ -12,11 +12,11 @@ ENV ENVIRONMENT=production
 WORKDIR /app
 
 # Install system dependencies
+# psycopg2-binary ships a manylinux wheel with libpq statically linked, so
+# build-essential and libpq-dev (~250MB) were installed to compile nothing.
+# postgresql-client stays: the entrypoint's pg_isready wait needs it.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        postgresql-client \
-        build-essential \
-        libpq-dev \
+    && apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

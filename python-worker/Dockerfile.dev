@@ -9,29 +9,25 @@ ENV PIP_PREFER_BINARY=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# curl is needed by the healthcheck below. gcc/g++ stay because a wheel-less
-# package on a new Python or architecture would otherwise fail the build
-# outright rather than compiling.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    curl \
+# Only curl, for the healthcheck below. gcc/g++ were ~200MB to compile nothing:
+# a build of these exact pins resolved every package to a manylinux wheel, with
+# zero "Building wheel for ..." lines. They were kept against the possibility of
+# a wheel-less package, but that possibility costs 200MB on every rebuild and
+# announces itself loudly when it happens -- add them back at that point.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Requirements are copied on their own so this layer caches. Editing app code
 # does not reinstall dependencies; only a requirements change does.
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
 
-# sentence-transformers pulls PyTorch, which by default is the CUDA build —
-# well over a gigabyte of libraries this image can never use. The CPU index
-# serves a far smaller wheel, and nothing here runs on a GPU.
-# --timeout/--retries because torch is a 159 MB wheel and pip's 15s default
-# read timeout aborts the whole install if the CDN stalls mid-download — which
-# it does often enough that a rebuild became a coin flip.
-RUN pip install --no-cache-dir \
-        --timeout 120 --retries 5 \
-        --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r requirements.txt
+# --timeout/--retries because grpcio and the google-cloud-aiplatform tree are
+# large wheels, and pip's 15s default read timeout aborts the whole install if
+# the CDN stalls mid-download.
+# requirements-dev.txt, which pulls in requirements.txt: the dev container
+# bind-mounts the repo and runs the test suite, so it needs pytest. The prod
+# image installs requirements.txt alone.
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements-dev.txt
 
 COPY . .
 

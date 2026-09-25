@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import logger from "app/utils/logger";
 import { incrementCounter } from "../services/metrics.service";
+import { clampCap } from "../features/billing/capBounds";
 
 export async function action({ request }: ActionFunctionArgs) {
   const { session, admin } = await authenticate.admin(request);
@@ -62,15 +63,24 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Pricing terms come from the plan, never from the request body — the
-    // client must not be able to name its own commission rate or cap.
+    // The commission rate comes from the plan and never from the request body —
+    // the client must not be able to name its own price.
+    //
+    // The cap is different: it is the merchant's own spending limit, and they
+    // approve the exact figure on Shopify's screen either way. So a requested
+    // cap is honoured, but only after being clamped to the range we allow —
+    // the slider is a convenience, this is the enforcement.
     const plan = shopSubscription.subscription_plans;
     const commissionRate = Number(
       shopSubscription.commission_rate_override ?? plan?.commission_rate ?? 0.03,
     );
-    const cappedAmount = Number(
+    const defaultCap = Number(
       shopSubscription.cap_amount_override ?? plan?.cap_amount ?? 29,
     );
+    const requestedCap = Number(body?.cappedAmount);
+    const cappedAmount = Number.isFinite(requestedCap)
+      ? clampCap(requestedCap)
+      : defaultCap;
 
     const currency = shopRecord.currency_code || "USD";
     const clientId = process.env.SHOPIFY_API_KEY || "";

@@ -2,6 +2,7 @@ import {
   Box, Card, BlockStack, InlineStack, Text, Badge
 } from "@shopify/polaris";
 import type { SubscriptionData } from "../types/billing.types";
+import { SpendCap } from "./SpendCap";
 
 interface SubscriptionActiveProps {
   subscriptionData: SubscriptionData;
@@ -39,6 +40,13 @@ export function SubscriptionActive({
   return (
     <>
       <BlockStack gap="500">
+        <SpendCap
+          usageThisCycle={subscriptionData.usageThisCycle}
+          cappedAmount={subscriptionData.cappedAmount}
+          commissionRate={subscriptionData.commissionRate}
+          shopCurrency={shopCurrency}
+        />
+
         {/* Status Header */}
         <Card>
           <BlockStack gap="300">

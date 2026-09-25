@@ -29,6 +29,14 @@ export interface TrialData {
   revenueEarned: number;
   /** Attributed revenue the shop gets free before the first charge. */
   trialThreshold: number;
+  /**
+   * Attributed orders so far. The trial needs both this and the revenue
+   * threshold: revenue alone lets one large order end the trial before the
+   * merchant has seen enough to judge. See ../trialGate.ts.
+   */
+  ordersEarned: number;
+  /** Attributed orders required before the first charge. */
+  ordersThreshold: number;
   /** The terms that take effect once the trial ends, for the copy. */
   commissionRate: number;
   cappedAmount: number;
@@ -70,4 +78,10 @@ export interface BillingError {
  */
 export interface BillingSetupData {
   planName: string;
+  /**
+   * The cap the merchant chose to approve. A preference, not an instruction:
+   * the server clamps it to the allowed range, and the commission rate is
+   * still read from the plan and never from here.
+   */
+  cappedAmount?: number;
 }

@@ -23,6 +23,15 @@ interface ResultStateProps {
   holdoutPercent?: number;
   /** Human window description, e.g. "the last 30 days". */
   window?: string;
+  /**
+   * Length of that window in days, used to estimate the remaining wait.
+   *
+   * Defaults to 30 to match `DEFAULT_WINDOW_DAYS` in the impact API, which is
+   * what the lift request falls back to when it passes no `days`. If a caller
+   * ever starts asking for a different window it must pass this too, or the
+   * estimate silently extrapolates from the wrong denominator.
+   */
+  windowDays?: number;
   /** Compact rendering for a table cell or Home's one-liner. */
   compact?: boolean;
 }
@@ -42,11 +51,56 @@ function pct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+// A window shorter than this, or fewer control orders than this, and the
+// observed rate is noise. Extrapolating from two orders over three days gives a
+// confident-looking date that is off by months — worse than saying nothing, because
+// a merchant told "ready Tuesday" who is still waiting in March has learned not to
+// believe the app.
+const MIN_FORECAST_WINDOW_DAYS = 7;
+const MIN_FORECAST_CONTROL_ORDERS = 5;
+
+// Past a year the honest answer is "not at this rate", not a date.
+const MAX_FORECAST_DAYS = 365;
+
+/**
+ * Roughly how long until there are enough control orders to measure.
+ *
+ * A flat linear extrapolation on purpose. Order rates are seasonal,
+ * promotion-driven and trending, none of which is knowable from one window, so
+ * a cleverer model would imply precision the input does not have. This answers
+ * "weeks or months?", not "which day".
+ *
+ * Returns null when we are not willing to guess — the caller must say so
+ * rather than quietly implying "soon".
+ */
+export function forecastWait(
+  controlConverters: number,
+  minControlOrders: number,
+  windowDays: number,
+): string | null {
+  if (windowDays < MIN_FORECAST_WINDOW_DAYS) return null;
+  if (controlConverters < MIN_FORECAST_CONTROL_ORDERS) return null;
+
+  const perDay = controlConverters / windowDays;
+  if (perDay <= 0) return null;
+
+  const remaining = minControlOrders - controlConverters;
+  if (remaining <= 0) return null;
+
+  const days = remaining / perDay;
+  if (days > MAX_FORECAST_DAYS) return null;
+
+  if (days <= 14) return `about ${Math.max(1, Math.round(days))} days`;
+  if (days <= 60) return `about ${Math.round(days / 7)} weeks`;
+  return `about ${Math.round(days / 30)} months`;
+}
+
 export function ResultState({
   result,
   currencyCode,
   holdoutPercent = 10,
   window = "the last 30 days",
+  windowDays = 30,
   compact = false,
 }: ResultStateProps) {
   const badge = BADGE[result.state];
@@ -79,14 +133,25 @@ export function ResultState({
       action = { label: "Add another placement", url: "/app/extensions" };
       break;
 
-    case "insufficient_data":
+    case "insufficient_data": {
+      // Turns a dead end into a countdown. Without it the merchant is told to
+      // wait with no idea whether that means days or never, which reads the
+      // same as "this will not happen".
+      const wait = forecastWait(
+        result.controlConverters,
+        result.minControlOrders,
+        windowDays,
+      );
       body =
         `Not enough data yet. To confirm recommendations caused a sale we ` +
         `compare against the shoppers who were shown generic recommendations, which needs about ` +
         `${result.minControlOrders} orders from that group. You have ` +
-        `${result.controlConverters}. This does not affect your bill — ` +
+        `${result.controlConverters}` +
+        (wait ? `, and are gaining them at a rate that suggests ${wait}` : "") +
+        `. This does not affect your bill — ` +
         `attributed revenue is tracked and charged as normal.`;
       break;
+    }
 
     case "not_measurable":
       body =

@@ -4,7 +4,7 @@ Shop model for SQLAlchemy
 Represents a Shopify shop with all its configuration and relationships.
 """
 
-from sqlalchemy import Column, String, Boolean, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSONB
 from sqlalchemy.orm import relationship
 from .base import BaseModel
@@ -54,6 +54,12 @@ class Shop(BaseModel):
         Boolean, default=False, server_default="false", nullable=False
     )
 
+    # The share of shoppers currently withheld from personalised offers.
+    # NULL means the shop is still learning and uses the high default; the
+    # holdout tuner writes the lower earning-phase rate once enough control
+    # orders exist to measure lift. See app/services/holdout_service.py.
+    holdout_percent = Column(Integer, nullable=True)
+
     # Merchant controls from the admin Settings page (surface toggles,
     # excluded product ids). See the alembic migration for the shape.
     settings = Column(JSONB, nullable=True)
@@ -70,6 +76,9 @@ class Shop(BaseModel):
     )
     order_data = relationship(
         "OrderData", back_populates="shop", cascade="all, delete-orphan"
+    )
+    refund_data = relationship(
+        "RefundData", back_populates="shop", cascade="all, delete-orphan"
     )
     product_data = relationship(
         "ProductData", back_populates="shop", cascade="all, delete-orphan"

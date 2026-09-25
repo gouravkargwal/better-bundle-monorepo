@@ -17,7 +17,8 @@ from app.core.database.models import (
 )
 
 # Using string values directly for database insertion
-from sqlalchemy import select, update, insert
+from sqlalchemy import select, update, insert, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.shared.helpers.datetime_utils import now_utc, parse_iso_timestamp
 
 logger = get_logger(__name__)
@@ -199,70 +200,55 @@ class ShopifyDataStorageService:
         if not item_data_map:
             return {"new": 0, "updated": 0}
 
-        # Batch lookup existing items using full GraphQL IDs
-        existing_items = await self._batch_lookup_existing_items(
-            data_type, shop_id, list(item_data_map.keys())
-        )
-
-        # Separate new vs updated
-        new_items = []
-        updated_items = []
-
-        for item_id, item_data in item_data_map.items():
-            existing = existing_items.get(item_id)
-
-            if not existing:
-                new_items.append(item_data)
-            else:
-                # Ensure both datetimes are timezone-aware for comparison
-                item_updated_at = item_data["shopify_updated_at"]
-                existing_updated_at = existing.shopify_updated_at
-
-                # Make both timezone-aware (assume UTC if naive)
-                if item_updated_at and item_updated_at.tzinfo is None:
-                    item_updated_at = item_updated_at.replace(tzinfo=timezone.utc)
-                if existing_updated_at and existing_updated_at.tzinfo is None:
-                    existing_updated_at = existing_updated_at.replace(
-                        tzinfo=timezone.utc
-                    )
-
-                if (
-                    item_updated_at
-                    and existing_updated_at
-                    and item_updated_at > existing_updated_at
-                ):
-                    updated_items.append(item_data)
-
-        # Batch operations using SQLAlchemy models
         model_class = self._get_model_class(data_type)
 
-        if new_items:
-            async with get_transaction_context() as session:
-                for item_data in new_items:
-                    model_instance = model_class(**item_data)
-                    session.add(model_instance)
-                await session.commit()
+        # One upsert, rather than read-then-insert.
+        #
+        # The same resource legitimately arrives several times at once — a
+        # purchase fires orders/paid and orders/updated together, and the
+        # ingestion backstop may republish the very same order. Reading first
+        # and inserting if absent means every one of those concurrent
+        # collections sees "not there" and inserts, leaving duplicate raw rows.
+        # Normalisation then reads with `scalar_one_or_none()` and raises
+        # "Multiple rows were found" for that resource forever after, so the
+        # order never lands and the backstop republishes it on every sweep.
+        #
+        # A race can only be settled by the database, so the unique index on
+        # (shop_id, shopify_id) decides the winner and this becomes idempotent:
+        # re-delivering a resource we already hold is now a no-op.
+        table = model_class.__table__
+        stmt = pg_insert(table).values(list(item_data_map.values()))
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["shop_id", "shopify_id"],
+            set_={
+                "payload": stmt.excluded.payload,
+                "extracted_at": stmt.excluded.extracted_at,
+                "shopify_updated_at": stmt.excluded.shopify_updated_at,
+                "source": stmt.excluded.source,
+                "format": stmt.excluded.format,
+                "updated_at": current_time,
+            },
+            # Keep the original "only move forward" rule: an older copy of a
+            # resource must not overwrite a newer one. Shopify sends events out
+            # of order often enough that this matters — without it, a delayed
+            # orders/paid could clobber a later orders/updated.
+            where=(
+                table.c.shopify_updated_at.is_(None)
+                | (stmt.excluded.shopify_updated_at > table.c.shopify_updated_at)
+            ),
+        ).returning(
+            # `xmax = 0` is the standard Postgres way to tell an insert from an
+            # update inside one upsert. Only used for the counts we log.
+            text("(xmax = 0) AS inserted")
+        )
 
-        if updated_items:
-            async with get_transaction_context() as session:
-                for item_data in updated_items:
-                    await session.execute(
-                        update(model_class)
-                        .where(
-                            (model_class.shop_id == shop_id)
-                            & (model_class.shopify_id == item_data["shopify_id"])
-                        )
-                        .values(
-                            payload=item_data["payload"],
-                            extracted_at=item_data["extracted_at"],
-                            shopify_updated_at=item_data["shopify_updated_at"],
-                            source=self._source,
-                            format="graphql",
-                        )
-                    )
-                await session.commit()
+        async with get_transaction_context() as session:
+            result = await session.execute(stmt)
+            rows = result.fetchall()
+            await session.commit()
 
-        return {"new": len(new_items), "updated": len(updated_items)}
+        new_count = sum(1 for r in rows if r.inserted)
+        return {"new": new_count, "updated": len(rows) - new_count}
 
     def _get_model_class(self, data_type: str) -> type:
         """Get the SQLAlchemy model class for a data type"""
@@ -280,29 +266,6 @@ class ShopifyDataStorageService:
     def _serialize_item_generic(self, item: Any) -> Dict[str, Any]:
         """Generic serialization for any item type - return dict for JSON column"""
         return self._serialize_to_dict(item)
-
-    async def _batch_lookup_existing_items(
-        self, data_type: str, shop_id: str, item_ids: List[str]
-    ) -> Dict[str, Any]:
-        """Generic batch lookup for any data type"""
-        existing_items = {}
-        model_class = self._get_model_class(data_type)
-
-        # Process in chunks to avoid query timeouts
-        for i in range(0, len(item_ids), self.chunk_size):
-            chunk_ids = item_ids[i : i + self.chunk_size]
-            async with get_session_context() as session:
-                result = await session.execute(
-                    select(model_class).where(
-                        (model_class.shop_id == shop_id)
-                        & (model_class.shopify_id.in_(chunk_ids))
-                    )
-                )
-                existing_records = result.scalars().all()
-                for record in existing_records:
-                    existing_items[record.shopify_id] = record
-
-        return existing_items
 
     def _create_batches(self, items: List[Any], batch_size: int) -> List[List[Any]]:
         """Create batches from a list of items"""

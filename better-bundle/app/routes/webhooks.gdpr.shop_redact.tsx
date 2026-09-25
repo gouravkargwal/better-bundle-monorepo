@@ -1,16 +1,32 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import logger from "../utils/logger";
+import { eraseShopData } from "../services/dataErasure.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   try {
-    const { shop, topic, payload } = await authenticate.webhook(request);
+    const { shop, topic } = await authenticate.webhook(request);
 
-    // Log/store request for compliance
     logger.info({ shop, topic }, "GDPR shop redact request received");
 
-    // Handle shop data deletion/redaction
-    // Return 200 to acknowledge receipt
+    try {
+      const { erased, shopFound } = await eraseShopData(shop);
+      logger.info({ shop, shopFound, erased }, "GDPR shop redact completed");
+    } catch (erasureError) {
+      // Acknowledged regardless — see the note in customers_redact. A retry
+      // cannot fix a broken query, so the log line is the alarm.
+      logger.error(
+        {
+          error:
+            erasureError instanceof Error
+              ? erasureError.message
+              : String(erasureError),
+          shop,
+        },
+        "🚨 GDPR shop redact FAILED - shop data may still be held",
+      );
+    }
+
     return new Response();
   } catch (error) {
     // According to Shopify docs: "If a mandatory compliance webhook sends a request 

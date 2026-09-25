@@ -19,6 +19,7 @@ import {
   showsCurrency,
   type ProofResult,
 } from "../../../features/impact/types/proof.types";
+import { forecastWait } from "../ResultState";
 import { formatCurrency } from "../../../utils/currency";
 import { SURFACES, isMeasurable } from "../../../lib/surfaces";
 
@@ -145,5 +146,50 @@ describe("money formatting", () => {
 
   it("falls back to USD rather than throwing on a blank code", () => {
     expect(() => formatCurrency(10, "")).not.toThrow();
+  });
+});
+
+/**
+ * The countdown shown while waiting for enough control orders.
+ *
+ * Its job is to turn a dead end into a schedule — "Not enough data yet" with
+ * no end in sight reads the same as "this is never going to happen". Its other
+ * job is to keep quiet when it does not actually know, because a merchant told
+ * "ready in about 5 days" who is still waiting in March has learned not to
+ * trust anything else on the page either.
+ */
+describe("forecastWait", () => {
+  it("estimates the wait from the observed rate", () => {
+    // 20 control orders in 30 days = 2/3 per day; 80 more needed = ~120 days.
+    expect(forecastWait(20, 100, 30)).toBe("about 4 months");
+  });
+
+  it("says nothing when the window is too short to mean anything", () => {
+    // 6 orders in 2 days extrapolates to a confident, wrong answer.
+    expect(forecastWait(6, 100, 2)).toBeNull();
+  });
+
+  it("says nothing on too few control orders", () => {
+    expect(forecastWait(2, 100, 30)).toBeNull();
+  });
+
+  it("says nothing rather than promising a date years away", () => {
+    // 5 orders in 90 days is a rate that would take over a decade.
+    expect(forecastWait(5, 100, 90)).toBeNull();
+  });
+
+  it("says nothing when no control shopper has bought", () => {
+    expect(forecastWait(0, 100, 30)).toBeNull();
+  });
+
+  it("scales its unit to the distance", () => {
+    expect(forecastWait(90, 100, 30)).toMatch(/days$/);
+    expect(forecastWait(50, 100, 30)).toMatch(/weeks$/);
+    expect(forecastWait(20, 100, 30)).toMatch(/months$/);
+  });
+
+  it("says nothing once the threshold is already met", () => {
+    // Not a wait at all — the caller is in a different state by then.
+    expect(forecastWait(100, 100, 30)).toBeNull();
   });
 });

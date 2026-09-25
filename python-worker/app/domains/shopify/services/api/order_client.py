@@ -138,16 +138,24 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             created_at: createdAt
                             note
-                            total_refunded: totalRefunded {
-                                amount
-                                currency_code: currencyCode
+                            total_refunded: totalRefundedSet {
+                                shop_money: shopMoney {
+                                    amount
+                                    currency_code: currencyCode
+                                }
                             }
                             refund_line_items: refundLineItems(first: 10) {
                                 edges {
                                     node {
                                         id
                                         quantity
-                                        subtotal
+                                        restocked
+                                        subtotal_set: subtotalSet {
+                                            shop_money: shopMoney {
+                                                amount
+                                                currency_code: currencyCode
+                                            }
+                                        }
                                         line_item: lineItem {
                                             id
                                             product {
@@ -402,16 +410,24 @@ class OrderAPIClient(BaseShopifyAPIClient):
                     id
                     created_at: createdAt
                     note
-                    total_refunded: totalRefunded {
-                        amount
-                        currency_code: currencyCode
+                    total_refunded: totalRefundedSet {
+                        shop_money: shopMoney {
+                            amount
+                            currency_code: currencyCode
+                        }
                     }
                     refund_line_items: refundLineItems(first: 10) {
                         edges {
                             node {
                                 id
                                 quantity
-                                subtotal
+                                restocked
+                                subtotal_set: subtotalSet {
+                                    shop_money: shopMoney {
+                                        amount
+                                        currency_code: currencyCode
+                                    }
+                                }
                                 line_item: lineItem {
                                     id
                                     product {
@@ -613,16 +629,24 @@ class OrderAPIClient(BaseShopifyAPIClient):
                             id
                             created_at: createdAt
                             note
-                            total_refunded: totalRefunded {
-                                amount
-                                currency_code: currencyCode
+                            total_refunded: totalRefundedSet {
+                                shop_money: shopMoney {
+                                    amount
+                                    currency_code: currencyCode
+                                }
                             }
                             refund_line_items: refundLineItems(first: 10) {
                                 edges {
                                     node {
                                         id
                                         quantity
-                                        subtotal
+                                        restocked
+                                        subtotal_set: subtotalSet {
+                                            shop_money: shopMoney {
+                                                amount
+                                                currency_code: currencyCode
+                                            }
+                                        }
                                         line_item: lineItem {
                                             id
                                             product_id: productId
@@ -683,7 +707,13 @@ class OrderAPIClient(BaseShopifyAPIClient):
                         node {
                             id
                             quantity
-                            subtotal
+                            restocked
+                            subtotal_set: subtotalSet {
+                                shop_money: shopMoney {
+                                    amount
+                                    currency_code: currencyCode
+                                }
+                            }
                             line_item: lineItem {
                                 id
                                 product {

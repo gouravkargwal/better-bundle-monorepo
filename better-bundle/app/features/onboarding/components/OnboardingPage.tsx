@@ -16,6 +16,7 @@ import type {
   OnboardingData,
   OnboardingError,
 } from "../services/onboarding.types";
+import { MIN_TRIAL_ORDERS } from "../../billing/trialGate";
 
 interface OnboardingPageProps {
   data: OnboardingData;
@@ -188,6 +189,7 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
                   <Text as="p" variant="bodyMd" tone="subdued">
                     Free until we&apos;ve driven {plan.symbol}
                     {plan.trial_revenue_threshold.toLocaleString()} in sales
+                    across {MIN_TRIAL_ORDERS} orders
                   </Text>
                 </BlockStack>
               </Box>
@@ -203,12 +205,13 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
                 <Box padding="400" background="bg-surface-warning" borderRadius="300">
                   <BlockStack gap="100">
                     <Text as="p" variant="bodyMd" fontWeight="semibold">
-                      🎯 Always capped
+                      🎯 You set the limit
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
-                      Never more than {plan.symbol}
-                      {plan.cap_amount.toLocaleString()} in 30 days — no
-                      surprise charges.
+                      When the free period ends you choose a monthly limit —{" "}
+                      {plan.symbol}
+                      {plan.cap_amount.toLocaleString()} to start — and we can
+                      never charge above it. Change it whenever you like.
                     </Text>
                   </BlockStack>
                 </Box>
@@ -248,10 +251,11 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
                 Ready to start?
               </Text>
               <Text as="p" tone="subdued">
-                No credit card required, and nothing to pay until
-                recommendations have earned you your first $1,000. Setup takes
-                about two minutes — you can add placements to your theme while
-                we analyse your catalogue.
+                No credit card required. You pay nothing until recommendations
+                have earned you {plan.symbol}
+                {plan.trial_revenue_threshold.toLocaleString()} across{" "}
+                {MIN_TRIAL_ORDERS} separate orders — enough that you can see
+                it working before you decide. Setup takes about two minutes.
               </Text>
               <Form method="post" name="onboarding-form">
                 <Button

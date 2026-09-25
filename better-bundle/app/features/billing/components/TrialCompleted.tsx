@@ -12,6 +12,8 @@ import {
 } from "@shopify/polaris";
 import { AlertTriangleIcon, CreditCardIcon } from "@shopify/polaris-icons";
 import type { TrialData, BillingSetupData } from "../types/billing.types";
+import { CapSlider } from "./CapSlider";
+import { clampCap } from "../capBounds";
 
 interface TrialCompletedProps {
   trialData: TrialData;
@@ -28,6 +30,10 @@ export function TrialCompleted({
 }: TrialCompletedProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Starts at the plan default; the merchant approves whatever this ends on.
+  const [chosenCap, setChosenCap] = useState(() =>
+    clampCap(trialData.cappedAmount),
+  );
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-US", {
@@ -46,7 +52,10 @@ export function TrialCompleted({
     setError(null);
 
     try {
-      const setupData: BillingSetupData = { planName: "Pay As You Go" };
+      const setupData: BillingSetupData = {
+        planName: "Pay As You Go",
+        cappedAmount: chosenCap,
+      };
 
       const result = await onSetupBilling(setupData);
       if (!result.success) {
@@ -250,9 +259,33 @@ export function TrialCompleted({
                 <Text as="p" variant="bodySm" tone="subdued">
                   💡 You are charged {ratePercent}% of the revenue we
                   attribute to our recommendations, never more than{" "}
-                  {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
-                  A month we generate nothing costs you nothing.
+                  {formatCurrency(chosenCap)} in a 30-day cycle. A month we
+                  generate nothing costs you nothing.
                 </Text>
+              </Box>
+
+              {/* Chosen here rather than imposed: this is the screen where the
+                  merchant approves the figure, so it is the screen where they
+                  should be able to pick it. */}
+              <Box padding="400" background="bg-surface-secondary" borderRadius="300">
+                <BlockStack gap="200">
+                  <Text as="p" variant="bodyMd" fontWeight="semibold">
+                    Set your monthly limit
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    The most we can ever charge you in 30 days. If
+                    recommendations earn past it they pause until the next
+                    cycle, so pick a limit that fits how much you expect them
+                    to sell — you can change it whenever you like.
+                  </Text>
+                  <CapSlider
+                    value={chosenCap}
+                    onChange={setChosenCap}
+                    commissionRate={trialData.commissionRate}
+                    shopCurrency={shopCurrency}
+                    disabled={isLoading}
+                  />
+                </BlockStack>
               </Box>
             </BlockStack>
           </div>
@@ -334,16 +367,17 @@ export function TrialCompleted({
               </Box>
               <BlockStack gap="200">
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Capped Pricing:</strong> Your bill can never exceed{" "}
+                  <strong>Capped:</strong> Your bill can never exceed{" "}
                   {formatCurrency(trialData.cappedAmount)} in a 30-day cycle.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Flexible:</strong> Upgrade, downgrade, or cancel
-                  anytime with no penalties.
+                  <strong>At the limit:</strong> Recommendations pause until
+                  the next cycle. You can raise the limit any time from
+                  Billing to start again straight away.
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  <strong>Fair:</strong> Full access to all features for one
-                  simple price.
+                  <strong>Fair:</strong> A cycle where we generate nothing
+                  costs you nothing. Cancel any time, no penalty.
                 </Text>
               </BlockStack>
             </BlockStack>

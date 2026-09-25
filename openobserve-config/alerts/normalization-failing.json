@@ -1,0 +1,29 @@
+{
+  "name": "Normalization-Failing",
+  "stream_type": "logs",
+  "stream_name": "default",
+  "is_real_time": false,
+  "enabled": true,
+  "description": "Entity normalization failed 3+ times in 15 minutes. A resource that cannot normalize never reaches order_data, so it is never attributed and never billed - and the ingestion backstop will keep republishing it, hiding the failure behind retry noise. Check the log line for shopify_id and data_type.",
+  "query_condition": {
+    "type": "sql",
+    "sql": "SELECT COUNT(*) AS failure_count FROM \"default\" WHERE service_name = 'python-worker' AND str_match(body, 'Failed entity normalization')",
+    "aggregation": {
+      "group_by": [],
+      "function": "count",
+      "having": {
+        "column": "failure_count",
+        "operator": ">=",
+        "value": 3
+      }
+    }
+  },
+  "trigger_condition": {
+    "period": 15,
+    "operator": ">=",
+    "threshold": 1,
+    "frequency": 15,
+    "silence": 60
+  },
+  "destinations": ["slack"]
+}

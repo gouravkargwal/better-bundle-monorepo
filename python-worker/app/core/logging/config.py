@@ -2,6 +2,7 @@
 Logging configuration for BetterBundle Python Worker
 """
 
+import os
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
@@ -9,11 +10,23 @@ from pydantic import BaseModel
 from .otel_logger import init_otel_logger
 
 
+def _in_container() -> bool:
+    """True when running inside a container.
+
+    Rotating log files are write-only storage in a container: the same records
+    already go to stdout (which the Docker json-file driver captures and caps)
+    and over OTLP to OpenObserve. A third copy on the container filesystem is
+    read by nobody and is lost with the container, while still costing 150MB
+    of disk and a write on every log line.
+    """
+    return os.path.exists("/.dockerenv") or os.environ.get("IN_CONTAINER") == "1"
+
+
 @dataclass
 class FileHandlerConfig:
     """File handler configuration"""
 
-    enabled: bool = True
+    enabled: bool = not _in_container()
     log_dir: str = "logs"
     max_file_size: int = 10485760  # 10MB
     backup_count: int = 5

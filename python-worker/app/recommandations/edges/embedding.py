@@ -26,10 +26,12 @@ from google.cloud import aiplatform_v1
 from google.protobuf import json_format
 from google.protobuf.struct_pb2 import Value
 from sqlalchemy import select, and_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.database.models.product_data import ProductData
 from app.core.database.models.product_vector import ProductVector
 from app.core.database.session import get_transaction_context
+from app.shared.helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
@@ -352,31 +354,33 @@ class ProductEmbedder:
                 if not vector:
                     continue
                 stored += 1
-                existing = (
-                    await session.execute(
-                        select(ProductVector).where(
-                            and_(
-                                ProductVector.shop_id == shop_id,
-                                ProductVector.product_id == product.product_id,
-                            )
-                        )
-                    )
-                ).scalar_one_or_none()
 
-                if existing:
-                    existing.vector = vector
-                    existing.text_hash = digest
-                    existing.model_version = self.model_name
-                else:
-                    session.add(
-                        ProductVector(
-                            shop_id=shop_id,
-                            product_id=product.product_id,
-                            vector=vector,
-                            text_hash=digest,
-                            model_version=self.model_name,
-                        )
+                # Upsert rather than read-then-insert. Several catalog
+                # refreshes run at once for a shop — each product webhook
+                # triggers one — so two of them reach this point for the same
+                # product together, both see no existing row, and both insert.
+                # `uq_product_vector_shop_product` then rejects the second, and
+                # because the failure surfaces at flush it aborts the whole
+                # embedding batch: the run reports `embedded: 0` and the shop
+                # keeps serving without vectors.
+                stmt = pg_insert(ProductVector.__table__).values(
+                    shop_id=shop_id,
+                    product_id=product.product_id,
+                    vector=vector,
+                    text_hash=digest,
+                    model_version=self.model_name,
+                )
+                await session.execute(
+                    stmt.on_conflict_do_update(
+                        index_elements=["shop_id", "product_id"],
+                        set_={
+                            "vector": stmt.excluded.vector,
+                            "text_hash": stmt.excluded.text_hash,
+                            "model_version": stmt.excluded.model_version,
+                            "updated_at": now_utc(),
+                        },
                     )
+                )
         return stored
 
 

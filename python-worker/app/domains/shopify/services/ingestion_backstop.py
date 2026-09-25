@@ -40,7 +40,7 @@ costs one cheap ID-only query per shop and cannot get stuck.
 import asyncio
 import time
 from datetime import timedelta
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
@@ -57,6 +57,7 @@ from app.core.metrics import (
     reconciler_runs_total,
 )
 from app.shared.helpers import now_utc
+from app.shared.helpers.datetime_utils import parse_iso_timestamp
 from app.core.single_run import claim
 
 logger = get_logger(__name__)
@@ -96,30 +97,39 @@ async def _active_shops() -> List[Dict[str, str]]:
     ]
 
 
-async def _local_order_ids(shop_id: str, since) -> Set[str]:
-    """Order ids we already hold for this shop inside the window."""
+async def _local_orders(shop_id: str) -> Dict[str, Any]:
+    """Shopify's `updatedAt` for every order we hold, keyed by order id.
+
+    Deliberately not filtered by date. The window belongs on the Shopify side:
+    an order placed six months ago and refunded this morning is inside the
+    remote window and has to be found here, and filtering locally by
+    `order_date` would hide it and make it look like a brand new order we had
+    never ingested.
+    """
     async with get_transaction_context() as session:
         rows = (
             await session.execute(
-                text(
-                    """
-                    SELECT order_id FROM order_data
-                    WHERE shop_id = :shop_id AND order_date >= :since
-                    """
-                ),
-                {"shop_id": shop_id, "since": since},
+                text("""
+                    SELECT order_id, updated_at FROM order_data
+                    WHERE shop_id = :shop_id
+                    """),
+                {"shop_id": shop_id},
             )
         ).all()
-    return {str(r.order_id) for r in rows}
+    return {str(r.order_id): r.updated_at for r in rows}
 
 
-async def _shopify_order_ids(shop: Dict[str, str], since) -> Set[str]:
-    """Order ids Shopify has for this shop inside the window.
+async def _shopify_orders(shop: Dict[str, str], since) -> Dict[str, Any]:
+    """Shopify's `updatedAt` for each order in the window, keyed by order id.
 
     Uses the same paginated client the collection pipeline uses, with a
     `updated_at:>=` filter. `updated_at` rather than `created_at` on purpose: an
     order edited after the fact — a post-purchase add, a refund — also needs
     re-ingesting, and keying on creation time would miss it.
+
+    The timestamp comes back with the id because presence alone is not enough:
+    an order we already hold can still have changed since we last saw it, and
+    comparing ids would call that "seen" and move on.
     """
     from app.domains.shopify.services.api.order_client import OrderAPIClient
 
@@ -133,45 +143,83 @@ async def _shopify_order_ids(shop: Dict[str, str], since) -> Set[str]:
         query=query,
     )
 
-    ids: Set[str] = set()
+    orders: Dict[str, Any] = {}
     for edge in (result or {}).get("edges") or []:
         node = edge.get("node") or {}
         gid = node.get("id") or ""
         # Shopify returns GIDs; order_data stores the numeric id.
-        ids.add(gid.split("/")[-1] if gid.startswith("gid://") else str(gid))
-    ids.discard("")
-    return ids
+        order_id = gid.split("/")[-1] if gid.startswith("gid://") else str(gid)
+        if order_id:
+            orders[order_id] = parse_iso_timestamp(node.get("updated_at"))
+    return orders
 
 
 async def sweep_shop(shop: Dict[str, str], dry_run: bool = False) -> Dict[str, Any]:
     """Compare one shop against Shopify and republish anything missing."""
     since = now_utc() - timedelta(hours=BACKSTOP_LOOKBACK_HOURS)
 
-    remote = await _shopify_order_ids(shop, since)
+    remote = await _shopify_orders(shop, since)
     if not remote:
-        return {"shop_domain": shop["shop_domain"], "missing": 0, "published": 0}
+        return {
+            "shop_domain": shop["shop_domain"],
+            "missing": 0,
+            "stale": 0,
+            "published": 0,
+        }
 
-    local = await _local_order_ids(shop["id"], since)
-    missing = sorted(remote - local)
+    local = await _local_orders(shop["id"])
 
-    if not missing:
-        return {"shop_domain": shop["shop_domain"], "missing": 0, "published": 0}
-
-    # This is the alarm. Orders existing in Shopify but not here means webhook
-    # delivery is failing right now — the condition that previously went
-    # unnoticed for days.
-    logger.error(
-        f"🚨 Webhook delivery appears broken for {shop['shop_domain']}: "
-        f"{len(missing)} of {len(remote)} orders in the last "
-        f"{BACKSTOP_LOOKBACK_HOURS}h are missing locally. Recovering them. "
-        f"Check that the app's webhook subscriptions are registered against a "
-        f"supported api_version."
+    # Two different failures, deliberately counted apart.
+    #
+    #   missing: Shopify has an order we have never seen. Webhook delivery is
+    #            broken — this is the alarm.
+    #   stale:   we have the order, but Shopify's copy has changed since. A
+    #            refund or a post-purchase edit, and routine. Recovered the same
+    #            way, but it must not trip the alarm, because an alarm that
+    #            fires on every refund is one nobody reads.
+    missing = sorted(oid for oid in remote if oid not in local)
+    stale = sorted(
+        oid
+        for oid, remote_updated in remote.items()
+        if oid in local
+        and remote_updated is not None
+        and local[oid] is not None
+        and remote_updated > local[oid]
     )
+
+    if not missing and not stale:
+        return {
+            "shop_domain": shop["shop_domain"],
+            "missing": 0,
+            "stale": 0,
+            "published": 0,
+        }
+
+    if missing:
+        # This is the alarm. Orders existing in Shopify but not here means
+        # webhook delivery is failing right now — the condition that previously
+        # went unnoticed for days.
+        logger.error(
+            f"🚨 Webhook delivery appears broken for {shop['shop_domain']}: "
+            f"{len(missing)} of {len(remote)} orders in the last "
+            f"{BACKSTOP_LOOKBACK_HOURS}h are missing locally. Recovering them. "
+            f"Check that the app's webhook subscriptions are registered against "
+            f"a supported api_version."
+        )
+
+    if stale:
+        logger.info(
+            f"↻ {shop['shop_domain']}: {len(stale)} order(s) changed upstream "
+            f"since we last ingested them. Re-ingesting."
+        )
+
+    recover = missing + stale
 
     if dry_run:
         return {
             "shop_domain": shop["shop_domain"],
             "missing": len(missing),
+            "stale": len(stale),
             "published": 0,
             "dry_run": True,
         }
@@ -180,7 +228,7 @@ async def sweep_shop(shop: Dict[str, str], dry_run: bool = False) -> Dict[str, A
     await publisher.initialize()
     published = 0
     try:
-        for order_id in missing:
+        for order_id in recover:
             try:
                 # Deliberately the same event a webhook produces, so the order
                 # flows through collection, normalisation and attribution by the
@@ -199,7 +247,7 @@ async def sweep_shop(shop: Dict[str, str], dry_run: bool = False) -> Dict[str, A
                 published += 1
             except Exception as e:
                 logger.error(
-                    f"Failed to republish missing order {order_id} for "
+                    f"Failed to republish order {order_id} for "
                     f"{shop['shop_domain']}: {e}"
                 )
     finally:
@@ -208,6 +256,7 @@ async def sweep_shop(shop: Dict[str, str], dry_run: bool = False) -> Dict[str, A
     return {
         "shop_domain": shop["shop_domain"],
         "missing": len(missing),
+        "stale": len(stale),
         "published": published,
     }
 
@@ -229,22 +278,31 @@ async def sweep_once(dry_run: bool = False) -> Dict[str, Any]:
                     # but it must not be mistaken for a clean result either.
                     logger.error(
                         f"Ingestion backstop failed for {shop['shop_domain']}: {e}",
-                        extra={"reconciler": "ingestion_backstop", "shop_domain": shop["shop_domain"]},
+                        extra={
+                            "reconciler": "ingestion_backstop",
+                            "shop_domain": shop["shop_domain"],
+                        },
                     )
                     failed.append(shop["shop_domain"])
 
             total_missing = sum(r.get("missing", 0) for r in results)
+            total_stale = sum(r.get("stale", 0) for r in results)
             total_published = sum(r.get("published", 0) for r in results)
 
             span.set_attribute("shops_checked", len(results))
             span.set_attribute("orders_ingested", total_published)
             span.set_attribute("missing", total_missing)
+            span.set_attribute("stale", total_stale)
 
-            if total_published > 0:
-                backstop_missed_orders.add(total_published)
+            # Only genuinely missed orders count as webhook failure. Stale ones
+            # are upstream edits and would drown the signal.
+            if total_missing > 0:
+                backstop_missed_orders.add(total_missing)
 
             duration = time.perf_counter() - start_time
-            reconciler_runs_total.add(1, {"reconciler": "ingestion_backstop", "status": "success"})
+            reconciler_runs_total.add(
+                1, {"reconciler": "ingestion_backstop", "status": "success"}
+            )
             reconciler_duration.record(duration, {"reconciler": "ingestion_backstop"})
 
             # A shop that errored was never actually checked, so it cannot be reported
@@ -267,12 +325,14 @@ async def sweep_once(dry_run: bool = False) -> Dict[str, Any]:
                 )
             elif total_missing == 0:
                 logger.info(
-                    f"✅ Ingestion backstop: {len(shops)} shop(s) checked, nothing missing",
+                    f"✅ Ingestion backstop: {len(shops)} shop(s) checked, nothing "
+                    f"missing ({total_stale} upstream edit(s) re-ingested)",
                     extra={
                         "reconciler": "ingestion_backstop",
                         "shops_total": len(shops),
                         "shops_checked": len(results),
                         "missing": 0,
+                        "stale": total_stale,
                         "duration_sec": duration,
                     },
                 )
@@ -302,7 +362,9 @@ async def sweep_once(dry_run: bool = False) -> Dict[str, Any]:
             span.record_exception(e)
             span.set_status(StatusCode.ERROR, str(e))
             duration = time.perf_counter() - start_time
-            reconciler_runs_total.add(1, {"reconciler": "ingestion_backstop", "status": "error"})
+            reconciler_runs_total.add(
+                1, {"reconciler": "ingestion_backstop", "status": "error"}
+            )
             reconciler_duration.record(duration, {"reconciler": "ingestion_backstop"})
             raise
 

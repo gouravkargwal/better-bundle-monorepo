@@ -217,7 +217,14 @@ class PurchaseAttributionKafkaConsumer:
                             "id": li.product_id,  # Updated to use SQLAlchemy field name
                             "variant_id": li.variant_id,
                             "quantity": li.quantity,
-                            "price": li.price,
+                            # What the shopper actually paid. `li.price` is the
+                            # pre-discount unit price, so billing on it charges
+                            # commission on money the merchant never received.
+                            "price": (
+                                li.discounted_unit_price
+                                if li.discounted_unit_price is not None
+                                else li.price
+                            ),
                             "properties": getattr(li, "properties", None) or {},
                         }
                     )

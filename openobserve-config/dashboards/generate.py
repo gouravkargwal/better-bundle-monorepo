@@ -50,6 +50,45 @@ def panel(pid, title, desc, stream, sql, y_label, ptype="line", x=0, y=0, w=12, 
     }
 
 
+# Panel heights, in OpenObserve grid rows (~30px each).
+#
+# Everything was h=9 — about 270px — which has to hold a title, a legend, an
+# x-axis with timestamps and the plot itself. The plot got whatever was left,
+# which is why the cards read as cramped. Tables get more because their content
+# is rows: at h=9 a table showing "slowest routes" displayed three of them.
+#
+# Change these and every dashboard follows: relayout() recomputes the y of each
+# row from the heights below, so the panels cannot end up overlapping the way
+# hand-maintained coordinates eventually do.
+HEIGHTS = {"table": 16, "default": 14}
+
+
+def height_for(ptype):
+    return HEIGHTS.get(ptype, HEIGHTS["default"])
+
+
+def relayout(dash):
+    """Recompute every panel's height and y from its type.
+
+    Rows are taken from the y values already in the spec — panels sharing a y
+    are one row — so the intended arrangement is preserved and only the
+    vertical sizing changes.
+    """
+    for tab in dash["tabs"]:
+        rows = {}
+        for panel_ in tab["panels"]:
+            rows.setdefault(panel_["layout"]["y"], []).append(panel_)
+        cursor = 0
+        for original_y in sorted(rows):
+            row = rows[original_y]
+            tallest = max(height_for(p_["type"]) for p_ in row)
+            for p_ in row:
+                p_["layout"]["y"] = cursor
+                p_["layout"]["h"] = height_for(p_["type"])
+            cursor += tallest
+    return dash
+
+
 def dashboard(title, description, panels):
     return {"title": title, "description": description,
             "tabs": [{"tabId": "default", "name": "Default", "panels": panels}]}
@@ -201,10 +240,21 @@ logs = dashboard(
     "Logs Explorer",
     "Log volume and errors across every service",
     [
-        panel(1, "Log Volume by Service", "Every service that is reporting at all",
+        # Counts are scaled by 1/log_sample_rate, not count(*).
+        #
+        # In production only ~10% of INFO records are shipped (see
+        # app/core/logging/sampling.py), and each kept one carries the rate it
+        # was kept at. A raw count(*) would therefore report a tenth of the
+        # real volume and read as a service that had gone quiet — the exact
+        # failure the panel exists to catch. WARNING and above are never
+        # sampled and have no rate attribute, so COALESCE(..., 1) counts them
+        # once each.
+        panel(1, "Log Volume by Service", "Sampling-corrected: each record counts "
+              "as 1/log_sample_rate, so this is real volume, not shipped volume",
               "default",
-              "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 "
-              "FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1", "Log lines",
+              "SELECT histogram(_timestamp) as x_axis_1, "
+              "SUM(1.0 / COALESCE(log_sample_rate, 1.0)) as y_axis_1 "
+              "FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1", "Log lines (est.)",
               x=0, y=0, w=24, h=9, stream_type="logs"),
         panel(2, "Errors by Service", "severity ERROR or above",
               "default",
@@ -213,10 +263,12 @@ logs = dashboard(
               "GROUP BY x_axis_1 ORDER BY y_axis_1 DESC", "Errors",
               ptype="bar", x=0, y=9, w=12, h=9, stream_type="logs",
               x_column="service_name", x_label="Service"),
-        panel(3, "Volume by Severity", "Shape of the logging, not just the errors",
+        panel(3, "Volume by Severity", "Sampling-corrected. Without the correction "
+              "ERROR looks disproportionately common, because only INFO is sampled",
               "default",
-              "SELECT severity as x_axis_1, count(*) as y_axis_1 FROM \"default\" "
-              "GROUP BY x_axis_1 ORDER BY y_axis_1 DESC", "Log lines",
+              "SELECT severity as x_axis_1, "
+              "SUM(1.0 / COALESCE(log_sample_rate, 1.0)) as y_axis_1 FROM \"default\" "
+              "GROUP BY x_axis_1 ORDER BY y_axis_1 DESC", "Log lines (est.)",
               ptype="donut", x=12, y=9, w=12, h=9, stream_type="logs",
               x_column="severity", x_label="Severity"),
     ])
@@ -359,10 +411,93 @@ theme = dashboard(
               x_column="theme_adapt_enabled", x_label="Enabled"),
     ])
 
+# --- Reconcilers ----------------------------------------------------------
+# The six periodic loops started in main.py's lifespan had metrics and spans
+# but nothing that read them: no panel, no alert. A loop whose task dies simply
+# stops incrementing its counter, and with nothing watching, that is
+# indistinguishable from a quiet period — the same silent-failure shape the
+# ingestion backstop exists to catch for webhooks.
+#
+# "Runs by Reconciler" is the liveness panel: every loop that is alive appears,
+# so a MISSING series is the signal. Read it knowing the intervals differ by
+# two orders of magnitude (enrichment 120s, fx_refresher 24h), so a flat line
+# for fx_refresher is normal and a flat line for enrichment is not.
+reconcilers = dashboard(
+    "Reconcilers & Background Jobs",
+    "Liveness, failures and business effect of the six periodic loops",
+    [
+        panel(1, "Runs by Reconciler", "One series per loop. A series that "
+              "disappears is a dead task — that is the thing to look for here",
+              f"{NS}_reconciler_runs_total",
+              f'SELECT reconciler as x_axis_1, sum(value) as y_axis_1 '
+              f'FROM "{NS}_reconciler_runs_total" GROUP BY x_axis_1 '
+              f'ORDER BY y_axis_1 DESC', "Runs",
+              ptype="bar", x=0, y=0, w=12, h=9,
+              x_column="reconciler", x_label="Reconciler"),
+        panel(2, "Failed Runs", "status=error only. Empty is the healthy state, "
+              "which is why the panel next to it exists to prove the loops ran at all",
+              f"{NS}_reconciler_runs_total",
+              f'SELECT reconciler as x_axis_1, sum(value) as y_axis_1 '
+              f'FROM "{NS}_reconciler_runs_total" WHERE status = \'error\' '
+              f'GROUP BY x_axis_1 ORDER BY y_axis_1 DESC', "Failures",
+              ptype="bar", x=12, y=0, w=12, h=9,
+              x_column="reconciler", x_label="Reconciler"),
+        panel(3, "Run Rate Over Time", "Liveness as a time series: each loop should "
+              "show a steady cadence at its own interval",
+              f"{NS}_reconciler_runs_total",
+              ts("sum(value)", f"{NS}_reconciler_runs_total"), "Runs",
+              x=0, y=9, w=24, h=9),
+        panel(4, "Time Spent Reconciling", "Total seconds per bucket. A sweep growing "
+              "without the work growing means it is falling behind",
+              f"{NS}_reconciler_duration_sum",
+              ts("sum(value)", f"{NS}_reconciler_duration_sum"), "Seconds",
+              x=0, y=18, w=12, h=9),
+        panel(5, "Slowest Reconcilers", "By total time, so a slow rare sweep still shows",
+              f"{NS}_reconciler_duration_sum",
+              f'SELECT reconciler as x_axis_1, sum(value) as y_axis_1 '
+              f'FROM "{NS}_reconciler_duration_sum" GROUP BY x_axis_1 '
+              f'ORDER BY y_axis_1 DESC', "Seconds",
+              ptype="table", x=12, y=18, w=12, h=9,
+              x_column="reconciler", x_label="Reconciler"),
+        # The business counters below had no home anywhere. Each one is a
+        # recovery: a number above zero means the primary path failed and the
+        # backstop caught it, so a sustained non-zero line is a bug report
+        # about the primary path, not a success story about the backstop.
+        panel(6, "Orders Recovered by the Ingestion Backstop", "Orders Shopify had "
+              "that we did not. Persistently non-zero means webhook delivery is broken",
+              f"{NS}_reconciler_backstop_missed_orders",
+              ts("sum(value)", f"{NS}_reconciler_backstop_missed_orders"), "Orders",
+              x=0, y=27, w=12, h=9),
+        panel(7, "Orders Recovered by Attribution", "Stamped orders that were never "
+              "attributed — each one is revenue that would not have been billed",
+              f"{NS}_reconciler_attribution_missed_orders",
+              ts("sum(value)", f"{NS}_reconciler_attribution_missed_orders"), "Orders",
+              x=12, y=27, w=12, h=9),
+        panel(8, "Shops Reactivated on Cycle Rollover", "Suspended shops whose Shopify "
+              "usage cycle renewed",
+              f"{NS}_reconciler_rollover_reactivated_shops",
+              ts("sum(value)", f"{NS}_reconciler_rollover_reactivated_shops"), "Shops",
+              x=0, y=36, w=12, h=9),
+        panel(9, "Commissions Drained on Reactivation", "Backlogged commissions billed "
+              "once a shop came back",
+              f"{NS}_reconciler_rollover_drained_commissions",
+              ts("sum(value)", f"{NS}_reconciler_rollover_drained_commissions"),
+              "Commissions", x=12, y=36, w=12, h=9),
+        panel(10, "Reconciler Errors in Logs", "The traceback behind a failed run",
+              "default",
+              'SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 '
+              'FROM "default" WHERE severity = \'ERROR\' '
+              'AND instrumentation_library_name LIKE \'%reconcil%\' '
+              'GROUP BY x_axis_1 ORDER BY x_axis_1', "Errors",
+              x=0, y=45, w=24, h=9, stream_type="logs"),
+    ])
+
+
 for name, d in [("service-health", health), ("application-performance", perf),
                 ("business-kpis", kpi), ("logs-explorer", logs),
                 ("llm-cost", llm), ("database-performance", db),
-                ("theme-adaptation", theme)]:
+                ("theme-adaptation", theme), ("reconcilers", reconcilers)]:
+    relayout(d)
     p = OUT / f"{name}.json"
     p.write_text(json.dumps(d, indent=2) + "\n")
     n = sum(len(t["panels"]) for t in d["tabs"])

@@ -8,6 +8,7 @@ import {
 } from "@shopify/polaris";
 import { CheckCircleIcon } from "@shopify/polaris-icons";
 import type { TrialData } from "../types/billing.types";
+import { bindingConstraint } from "../trialGate";
 
 interface TrialActiveProps {
   trialData: TrialData | undefined;
@@ -24,15 +25,33 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
     );
   }
 
-  // Progress is revenue, not time — the trial ends when we have driven
-  // `trialThreshold` of attributed sales, however long that takes.
-  const { revenueEarned, trialThreshold } = trialData;
+  // Progress is revenue and orders, not time — the trial ends when we have
+  // driven `trialThreshold` of attributed sales across `ordersThreshold`
+  // separate orders, however long that takes.
+  const { revenueEarned, trialThreshold, ordersEarned, ordersThreshold } =
+    trialData;
   const remaining = Math.max(0, trialThreshold - revenueEarned);
+  const ordersRemaining = Math.max(0, ordersThreshold - ordersEarned);
   const trialProgress =
     trialThreshold > 0
       ? Math.max(0, Math.min(100, (revenueEarned / trialThreshold) * 100))
       : 0;
-  const nearingThreshold = trialProgress >= 80 && trialProgress < 100;
+  const ordersProgress =
+    ordersThreshold > 0
+      ? Math.max(0, Math.min(100, (ordersEarned / ordersThreshold) * 100))
+      : 0;
+
+  // Only the slower of the two decides when the trial ends, so that is the one
+  // worth drawing attention to. Showing both as equals leaves the merchant to
+  // work out which is actually holding things up.
+  const blocking = bindingConstraint({
+    revenueEarned,
+    revenueThreshold: trialThreshold,
+    ordersEarned,
+    ordersThreshold,
+  });
+  const overallProgress = Math.min(trialProgress, ordersProgress);
+  const nearingThreshold = overallProgress >= 80 && overallProgress < 100;
 
   const formatCurrency = (amount: number) =>
     new Intl.NumberFormat("en-US", {
@@ -113,7 +132,7 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                   </BlockStack>
                 </InlineStack>
 
-                {/* Progress Bar */}
+                {/* Revenue progress */}
                 <BlockStack gap="200">
                   <ProgressBar
                     progress={Math.min(trialProgress, 100)}
@@ -122,7 +141,8 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                   />
                   <InlineStack align="space-between">
                     <Text as="p" variant="bodySm" fontWeight="medium">
-                      {Math.min(trialProgress, 100).toFixed(0)}% Complete
+                      {Math.min(trialProgress, 100).toFixed(0)}% of{" "}
+                      {formatCurrency(trialThreshold)} in sales
                     </Text>
                     {remaining > 0 && (
                       <Text as="p" variant="bodySm" tone="subdued">
@@ -131,6 +151,37 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
                     )}
                   </InlineStack>
                 </BlockStack>
+
+                {/* Order progress. Shown alongside revenue because the trial
+                    needs both — one big order is money, not evidence. */}
+                <BlockStack gap="200">
+                  <ProgressBar
+                    progress={Math.min(ordersProgress, 100)}
+                    tone="primary"
+                    size="medium"
+                  />
+                  <InlineStack align="space-between">
+                    <Text as="p" variant="bodySm" fontWeight="medium">
+                      {ordersEarned} of {ordersThreshold} orders with a
+                      recommendation
+                    </Text>
+                    {ordersRemaining > 0 && (
+                      <Text as="p" variant="bodySm" tone="subdued">
+                        {ordersRemaining} to go
+                      </Text>
+                    )}
+                  </InlineStack>
+                </BlockStack>
+
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {blocking === "orders"
+                    ? `You've made the sales — we're waiting on ${ordersRemaining} more ${
+                        ordersRemaining === 1 ? "order" : "orders"
+                      } so you can see the pattern before paying anything.`
+                    : `You've had enough orders — we're waiting until they add up to ${formatCurrency(
+                        trialThreshold,
+                      )} before charging anything.`}
+                </Text>
               </BlockStack>
             </div>
           </BlockStack>
@@ -152,8 +203,9 @@ export function TrialActive({ trialData, shopCurrency }: TrialActiveProps) {
               <div style={{ display: "flex", gap: "8px" }}>
                 <Text as="span">2.</Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  Once we&apos;ve driven {formatCurrency(trialThreshold)},
-                  approve billing in Shopify to keep going
+                  Once we&apos;ve driven {formatCurrency(trialThreshold)} across{" "}
+                  {ordersThreshold} orders, approve billing in Shopify to keep
+                  going
                 </Text>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>

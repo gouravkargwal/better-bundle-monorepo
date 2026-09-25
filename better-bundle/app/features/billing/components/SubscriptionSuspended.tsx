@@ -10,6 +10,7 @@ import {
 } from "@shopify/polaris";
 import { AlertTriangleIcon, RefreshIcon } from "@shopify/polaris-icons";
 import type { SubscriptionData } from "../types/billing.types";
+import { SpendCap } from "./SpendCap";
 
 interface SubscriptionSuspendedProps {
   subscriptionData: SubscriptionData;
@@ -58,6 +59,15 @@ export function SubscriptionSuspended({
         </BlockStack>
       </Card>
 
+      {/* Raising the limit is the actual way out of this state, so it belongs
+          here rather than one screen away. */}
+      <SpendCap
+        usageThisCycle={subscriptionData.usageThisCycle}
+        cappedAmount={subscriptionData.cappedAmount}
+        commissionRate={subscriptionData.commissionRate}
+        shopCurrency={shopCurrency}
+      />
+
       <Card>
         <BlockStack gap="500">
           {/* Header */}
@@ -92,7 +102,11 @@ export function SubscriptionSuspended({
           </Banner>
 
           {/* Subscription Details */}
-          <Box padding="500" background="bg-surface-critical" borderRadius="300">
+          <Box
+            padding="500"
+            background="bg-surface-critical"
+            borderRadius="300"
+          >
             <BlockStack gap="300">
               <Text as="h3" variant="headingMd" fontWeight="semibold">
                 Subscription Details
@@ -149,13 +163,14 @@ export function SubscriptionSuspended({
           {/* Info */}
           <Box padding="400" background="bg-surface-warning" borderRadius="300">
             <Text as="p" variant="bodyMd">
-              <strong>Why was my subscription suspended?</strong> This usually
-              happens due to payment issues or manual suspension. Contact
-              support for assistance.
+              <strong>Why was my subscription suspended?</strong> Almost always
+              because Better Bundle reached the spend limit you approved for
+              this 30-day cycle — which means it sold more for you than the
+              limit covers. Raise the limit above to start again straight away,
+              or wait for the next cycle, when it resets on its own.
             </Text>
           </Box>
         </BlockStack>
-
       </Card>
     </BlockStack>
   );

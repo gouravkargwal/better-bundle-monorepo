@@ -28,6 +28,13 @@ from app.core.database.models import (
 )
 from app.core.database.models.enums import BillingPhase
 
+# Attributed orders a shop must see before the trial can end, alongside the
+# revenue threshold. Thirty is where a merchant stops being able to call it
+# coincidence: enough separate receipts that the pattern is the obvious
+# explanation. Mirrored in the admin app for the progress display - see
+# better-bundle/app/features/billing/trialGate.ts.
+MIN_TRIAL_ORDERS = 30
+
 logger = logging.getLogger(__name__)
 
 
@@ -288,13 +295,30 @@ class BillingRepositoryV2:
             logger.error(f"Error updating billing cycle usage: {e}")
             return False
 
-    # ============= TRIAL COMPLETION BY REVENUE =============
+    # ============= TRIAL COMPLETION =============
     #
-    # The trial ends when the app has driven `effective_trial_threshold` of
-    # attributed revenue. There is deliberately no elapsed-time gate: a shop
-    # that has not yet been sold $1,000 of attributed revenue has not received
-    # what it was promised, so charging it after N days would contradict the
-    # offer.
+    # The trial ends when the app has driven BOTH `effective_trial_threshold`
+    # of attributed revenue AND `MIN_TRIAL_ORDERS` attributed orders.
+    #
+    # Revenue alone was the wrong gate, because revenue is not evidence. On a
+    # store with a $1,500 average order, a single attributed order clears a
+    # $1,000 threshold — so the merchant was asked to start paying on the
+    # strength of one sale, while the Proof page still read "Not enough data
+    # yet". Being billed for a number you cannot check is the specific
+    # complaint that fills competitors' one-star reviews.
+    #
+    # The two conditions block opposite failures, which is why this is an AND:
+    #
+    #   high average order: 1 order, $1,110  -> revenue met, orders not
+    #   low average order:  30 orders, $300  -> orders met, revenue not
+    #
+    # Neither shop is charged until it has both been sold real money and seen
+    # enough separate orders to believe the pattern.
+    #
+    # There is deliberately no elapsed-time gate either way. A shop that has
+    # not received what it was promised has not received it, and charging after
+    # N days would contradict the offer. A shop that never gets there is
+    # generating nothing, so a commission on nothing is nothing.
 
     async def calculate_trial_revenue(self, shop_id: str) -> Decimal:
         """Total attributed revenue accumulated during the trial phase."""
@@ -307,6 +331,11 @@ class BillingRepositoryV2:
                     # Only TRIAL-phase rows: counting paid ones too would make
                     # the threshold appear to be re-crossed on every order.
                     CommissionRecord.billing_phase == BillingPhase.TRIAL,
+                    # Soft-deleted rows are excluded here as everywhere else.
+                    # The admin app already excludes them, so counting them
+                    # here would let the progress bar and the actual cutover
+                    # describe the same trial differently.
+                    CommissionRecord.deleted_at.is_(None),
                 )
             )
             result = await self.session.execute(query)
@@ -314,6 +343,27 @@ class BillingRepositoryV2:
         except Exception as e:
             logger.error(f"Error calculating trial revenue: {e}")
             return Decimal("0")
+
+    async def calculate_trial_orders(self, shop_id: str) -> int:
+        """Attributed orders accumulated during the trial phase.
+
+        One commission record is one attributed order, so this counts the rows
+        the merchant can see as receipts — which is the point. The evidence a
+        merchant weighs is instances, not currency.
+        """
+        try:
+            query = select(func.count(CommissionRecord.id)).where(
+                and_(
+                    CommissionRecord.shop_id == shop_id,
+                    CommissionRecord.billing_phase == BillingPhase.TRIAL,
+                    CommissionRecord.deleted_at.is_(None),
+                )
+            )
+            result = await self.session.execute(query)
+            return int(result.scalar_one() or 0)
+        except Exception as e:
+            logger.error(f"Error counting trial orders: {e}")
+            return 0
 
     async def check_trial_completion(
         self, shop_id: str, actual_revenue: Decimal
@@ -362,6 +412,18 @@ class BillingRepositoryV2:
             if actual_revenue < threshold:
                 logger.debug(
                     f"Trial threshold not reached: {actual_revenue} < {threshold}"
+                )
+                return False
+
+            # Counted here rather than threaded through the caller so the two
+            # conditions cannot drift apart: whoever completes a trial checks
+            # both, always.
+            orders = await self.calculate_trial_orders(shop_id)
+            if orders < MIN_TRIAL_ORDERS:
+                logger.debug(
+                    f"Trial revenue reached ({actual_revenue} >= {threshold}) but "
+                    f"only {orders} of {MIN_TRIAL_ORDERS} attributed orders. "
+                    f"Trial continues - the merchant has not seen enough to judge."
                 )
                 return False
 

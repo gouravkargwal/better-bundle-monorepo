@@ -10,7 +10,7 @@
           "id": "panel_1",
           "type": "line",
           "title": "Log Volume by Service",
-          "description": "Every service that is reporting at all",
+          "description": "Sampling-corrected: each record counts as 1/log_sample_rate, so this is real volume, not shipped volume",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -20,7 +20,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) as x_axis_1, count(*) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1",
+              "query": "SELECT histogram(_timestamp) as x_axis_1, SUM(1.0 / COALESCE(log_sample_rate, 1.0)) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
@@ -36,7 +36,7 @@
                 ],
                 "y": [
                   {
-                    "label": "Log lines",
+                    "label": "Log lines (est.)",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -58,7 +58,7 @@
             "x": 0,
             "y": 0,
             "w": 24,
-            "h": 9,
+            "h": 14,
             "i": 1
           }
         },
@@ -112,9 +112,9 @@
           ],
           "layout": {
             "x": 0,
-            "y": 9,
+            "y": 14,
             "w": 12,
-            "h": 9,
+            "h": 14,
             "i": 2
           }
         },
@@ -122,7 +122,7 @@
           "id": "panel_3",
           "type": "donut",
           "title": "Volume by Severity",
-          "description": "Shape of the logging, not just the errors",
+          "description": "Sampling-corrected. Without the correction ERROR looks disproportionately common, because only INFO is sampled",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -132,7 +132,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT severity as x_axis_1, count(*) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
+              "query": "SELECT severity as x_axis_1, SUM(1.0 / COALESCE(log_sample_rate, 1.0)) as y_axis_1 FROM \"default\" GROUP BY x_axis_1 ORDER BY y_axis_1 DESC",
               "vrlFunctionQuery": null,
               "customQuery": true,
               "fields": {
@@ -148,7 +148,7 @@
                 ],
                 "y": [
                   {
-                    "label": "Log lines",
+                    "label": "Log lines (est.)",
                     "alias": "y_axis_1",
                     "column": "value",
                     "color": null
@@ -168,9 +168,9 @@
           ],
           "layout": {
             "x": 12,
-            "y": 9,
+            "y": 14,
             "w": 12,
-            "h": 9,
+            "h": 14,
             "i": 3
           }
         }

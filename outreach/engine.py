@@ -3,7 +3,7 @@ BetterBundle Outreach Engine
 Handles: CSV import → Elastic Email sending → Gmail reply polling → classification → follow-ups
 """
 
-import os, re, json, time, sqlite3, imaplib, email, requests
+import os, re, json, time, sqlite3, imaplib, email, requests, csv
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr, formataddr
 from dotenv import load_dotenv
@@ -79,52 +79,73 @@ _db_conn = None
 
 def get_db():
     global _db_conn
-    if _db_conn is None:
-        # timeout: a second writer waits its turn instead of raising "database is
-        # locked". WAL: readers never block on a writer, which matters because the
-        # Streamlit app polls while a verification run is writing.
-        _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
-        _db_conn.row_factory = sqlite3.Row
-        _db_conn.execute("PRAGMA journal_mode=WAL")
-        _db_conn.execute("PRAGMA busy_timeout=30000")
-        _db_conn.executescript("""
-        CREATE TABLE IF NOT EXISTS prospects (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            company TEXT, domain TEXT, contact_name TEXT,
-            email TEXT UNIQUE, person_title TEXT,
-            email_type TEXT, email_confidence TEXT, email_method TEXT,
-            website_info TEXT, niche TEXT,
-            status TEXT DEFAULT 'new',
-            emails_sent INTEGER DEFAULT 0,
-            last_sent_at TEXT,
-            first_subject TEXT,
-            body TEXT,
-            reply_text TEXT,
-            reply_classification TEXT,
-            rebuttal_draft TEXT,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS emails (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prospect_id INTEGER,
-            seq INTEGER,
-            subject TEXT,
-            body TEXT,
-            sent_at TEXT,
-            message_id TEXT,
-            FOREIGN KEY (prospect_id) REFERENCES prospects(id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_prospect_status ON prospects(status);
-        CREATE INDEX IF NOT EXISTS idx_prospect_email ON prospects(email);
-        """)
-        # Migration: add body column if missing (for existing DBs created before this column)
+    if _db_conn is not None:
         try:
-            _db_conn.execute("ALTER TABLE prospects ADD COLUMN body TEXT")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-        _migrate(_db_conn)
-        _db_conn.commit()
+            _db_conn.execute("SELECT 1")
+            return _db_conn
+        except sqlite3.OperationalError as e:
+            print(f"[DB] connection test failed: {e}")
+            try:
+                _db_conn.close()
+            except Exception:
+                pass
+            _db_conn = None
+    print("[DB] opening new connection")
+    _open_db()
     return _db_conn
+
+
+def _open_db():
+    global _db_conn
+    for suffix in ("-wal", "-shm"):
+        path = DB_PATH + suffix
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                print(f"[DB] removed stale {path}")
+            except OSError as e:
+                print(f"[DB] could not remove {path}: {e}")
+    _db_conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    _db_conn.row_factory = sqlite3.Row
+    _db_conn.execute("PRAGMA journal_mode=WAL")
+    _db_conn.execute("PRAGMA busy_timeout=30000")
+    _db_conn.executescript("""
+    CREATE TABLE IF NOT EXISTS prospects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company TEXT, domain TEXT, contact_name TEXT,
+        email TEXT UNIQUE, person_title TEXT,
+        email_type TEXT, email_confidence TEXT, email_method TEXT,
+        website_info TEXT, niche TEXT,
+        status TEXT DEFAULT 'new',
+        emails_sent INTEGER DEFAULT 0,
+        last_sent_at TEXT,
+        first_subject TEXT,
+        body TEXT,
+        reply_text TEXT,
+        reply_classification TEXT,
+        rebuttal_draft TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS emails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        prospect_id INTEGER,
+        seq INTEGER,
+        subject TEXT,
+        body TEXT,
+        sent_at TEXT,
+        message_id TEXT,
+        FOREIGN KEY (prospect_id) REFERENCES prospects(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_prospect_status ON prospects(status);
+    CREATE INDEX IF NOT EXISTS idx_prospect_email ON prospects(email);
+    """)
+    try:
+        _db_conn.execute("ALTER TABLE prospects ADD COLUMN body TEXT")
+    except sqlite3.OperationalError:
+        pass
+    _migrate(_db_conn)
+    _db_conn.commit()
+    print("[DB] new connection ready")
 
 
 def close_db():
@@ -418,8 +439,6 @@ CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prospects.c
 
 def import_prospects(csv_path: str = CSV_PATH) -> dict:
     """Import prospects from CSV. Returns stats with dedup info."""
-    import csv
-
     if not os.path.exists(csv_path):
         return {"imported": 0, "skipped": 0, "error": f"CSV not found: {csv_path}"}
 
@@ -481,7 +500,7 @@ def import_prospects(csv_path: str = CSV_PATH) -> dict:
                         row.get("email_method", ""),
                         row.get("website_info", ""),
                         row.get("niche", ""),
-                        row.get("subject", ""),
+                        row.get("first_subject", ""),
                         row.get("body", ""),
                     ),
                 )
@@ -498,6 +517,58 @@ def import_prospects(csv_path: str = CSV_PATH) -> dict:
         "dup_domain": dup_domain,
         "dup_company": dup_company,
     }
+
+
+def backfill_copy_from_csv(csv_path: str = CSV_PATH) -> dict:
+    """Fix prospects already in the DB that are missing first_subject/body.
+
+    This is a one-time repair for rows imported before the column-name bug
+    was fixed (row.get("subject") instead of row.get("first_subject")), and
+    for malformed CSV rows that are missing the id/trailing columns so the
+    copy landed in niche/status instead.
+    """
+    if not os.path.exists(csv_path):
+        return {"fixed": 0, "error": f"CSV not found: {csv_path}"}
+
+    con = get_db()
+    fixed = 0
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            email = (row.get("email", "") or "").strip().lower()
+            if not email or "@" not in email:
+                continue
+            subject = (row.get("first_subject", "") or "").strip()
+            body = (row.get("body", "") or "").strip()
+            # Some rows are missing the id/trailing columns; their copy was
+            # shifted into niche/status. Recover it from there.
+            if not subject and not body:
+                niche = (row.get("niche", "") or "").strip()
+                status = (row.get("status", "") or "").strip()
+                if (niche and status and len(niche) < 150
+                        and len(status) > 40
+                        and not status.lower().startswith("new")
+                        and not status.lower().startswith("emailed")
+                        and not status.lower().startswith("interested")
+                        and not status.lower().startswith("objection")):
+                    subject, body = niche, status
+            if not subject and not body:
+                continue
+            p = con.execute(
+                "SELECT id, first_subject, body FROM prospects WHERE LOWER(email) = ?",
+                (email,),
+            ).fetchone()
+            if not p:
+                continue
+            if (not p["first_subject"] or not p["body"]) and (subject or body):
+                con.execute(
+                    "UPDATE prospects SET first_subject = COALESCE(?, first_subject), "
+                    "body = COALESCE(?, body) WHERE id = ?",
+                    (subject or None, body or None, p["id"]),
+                )
+                fixed += 1
+    con.commit()
+    return {"fixed": fixed}
 
 
 # ---------- ELASTIC EMAIL SEND ----------

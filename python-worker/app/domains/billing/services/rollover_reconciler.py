@@ -379,8 +379,13 @@ async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:
     """Run rollover reconciliation loop forever."""
     logger.info(f"🔄 Rollover reconciler started (every {interval}s)")
     while True:
+        # Sweep first, then sleep. Sleeping first meant every restart pushed the
+        # first pass a full hour out, so a deploy delayed reactivation for every
+        # shop whose Shopify cycle had already rolled over — and in a day with
+        # several deploys the sweep could not run at all. It also made the loop
+        # invisible in OpenObserve: `reconciler_runs_total` reported 0 rollover
+        # runs in 24h purely because the timer kept being reset.
         try:
-            await asyncio.sleep(interval)
             async with claim("rollover_reconciler") as mine:
                 if mine:
                     result = await reconcile_rollovers_once()
@@ -391,3 +396,4 @@ async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:
             raise
         except Exception as e:
             logger.error(f"Rollover reconciler loop error: {e}", exc_info=True)
+        await asyncio.sleep(interval)

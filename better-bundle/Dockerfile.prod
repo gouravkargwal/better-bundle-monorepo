@@ -1,39 +1,62 @@
-FROM node:22-alpine
+# Two stages, because image layers are additive: the old single-stage build
+# ran `npm remove @shopify/cli` and `npm prune --omit=dev` *after* the layers
+# that installed them, so those commands shrank the image by exactly zero. The
+# full dev tree (vite, typescript, vitest, the Shopify CLI) stayed in the
+# history forever. Only what the runtime stage COPYs ships now.
 
-# Install openssl for Node.js crypto operations and curl for health checks
-RUN apk add --no-cache openssl curl
+# ---------- build ----------
+FROM node:22-alpine AS build
 
-# Set working directory
+# openssl: prisma generate needs it to pick a query-engine binary target.
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 
-# Set environment to production
-ENV NODE_ENV=production
-
-# Copy package files
 COPY package.json package-lock.json* ./
 
-# Clean install to avoid rollup ARM64 musl issues
-RUN rm -rf node_modules package-lock.json && npm install && npm cache clean --force
+# --workspaces=false: extensions/* are Shopify-deployed bundles, not inputs to
+# the Remix server build. Installing them pulls ~19MB of node_modules the
+# server never imports, and their package.json files are not copied yet.
+# npm ci, not `rm -rf package-lock.json && npm install`: deleting the lockfile
+# that was just copied throws away reproducibility and re-resolves the whole
+# tree from the registry on every build.
+RUN npm ci --workspaces=false --include-workspace-root
 
-# Copy source code
 COPY . .
 
-# Build the application
-RUN npm run build
+# prisma generate moves to build time. It used to run on every container start
+# via `docker-start`, which meant the prisma CLI (a devDependency) had to
+# survive into the production image, and a cold start paid for codegen.
+RUN npx prisma generate && npm run build
 
-# Remove CLI packages since we don't need them in production
-RUN npm remove @shopify/cli
+# ---------- runtime ----------
+FROM node:22-alpine
 
-# Remove dev dependencies after build
-RUN npm prune --omit=dev
+# openssl for the prisma query engine, curl for the healthcheck below.
+RUN apk add --no-cache openssl curl
 
-# Expose port
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json* ./
+
+RUN npm ci --omit=dev --workspaces=false --include-workspace-root \
+    && npm cache clean --force
+
+# The generated client only exists after `prisma generate`; @prisma/client is
+# a regular dependency, so npm ci above installed the stub and this overlays
+# the engine and generated types onto it.
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/build ./build
+COPY --from=build /app/public ./public
+COPY --from=build /app/prisma ./prisma
+
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3000/ || exit 1
 
-# Generate Prisma Client and start production server
-# According to Shopify docs, setup (prisma generate) should run before start
-CMD ["npm", "run", "docker-start"]
+# `npm run start` directly, not `docker-start` — prisma generate already ran
+# in the build stage.
+CMD ["npm", "run", "start"]

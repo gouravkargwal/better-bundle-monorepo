@@ -148,9 +148,33 @@ Other supported notification types (check [OpenObserve docs](https://openobserve
 
 ## Stream Reference
 
-The dashboards query two OpenObserve streams:
+Verified against a running instance, not assumed. **OpenObserve does not put
+OTLP data into a stream named after the service.** It creates:
 
-- **`python-worker-metrics`** — Time-series metrics (counters, histograms, gauges) emitted by the Python worker via OpenTelemetry.
-- **`python-worker-logs`** — Structured log entries from the Python worker.
+- **one logs stream, `default`** — every service's logs share it, separated by
+  the `service_name` field (`python-worker`, `remix-app`). There is no
+  `python-worker-logs` stream and there never was; an earlier version of this
+  file claimed one, and any panel written against it returned nothing.
+- **one traces stream, `default`.**
+- **one metrics stream per metric name**, with histograms exploded into
+  `_bucket` / `_count` / `_sum` / `_min` / `_max` siblings. So
+  `betterbundle.recommendation.duration` is queried as
+  `betterbundle_recommendation_duration_count`, etc. Dots become underscores.
+
+To see what actually exists rather than what is expected:
+
+```bash
+KEY=$(grep -m1 '^OPENOBSERVE_API_KEY=' ../.env.dev | cut -d= -f2-)
+curl -s -H "Authorization: Basic $KEY" http://localhost:5080/api/default/streams
+```
+
+### Log fields
+
+The level field is `severity` (`INFO`/`WARN`/`ERROR`), **not** `severity_text`
+or `level`. The message is `body`. Structured fields passed as kwargs to
+`get_logger(...)` appear as their own top-level columns, so
+`logger.info("saved", shop_id=x)` is queried as `WHERE shop_id = ...`.
+`trace_id` and `span_id` are populated on any record emitted inside a span,
+which is what makes a log clickable through to its trace.
 
 Metric names match the definitions in [`python-worker/app/core/metrics.py`](../python-worker/app/core/metrics.py).

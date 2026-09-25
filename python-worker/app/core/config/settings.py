@@ -176,6 +176,11 @@ class LoggingSettings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", env="LOG_LEVEL")
     LOG_FORMAT: str = Field(default="console", env="LOG_FORMAT")
 
+    # Fraction of DEBUG/INFO records shipped to OpenObserve. Unset means
+    # environment-derived: 10% in production, 100% elsewhere (see
+    # app.core.logging.sampling.rate_for). WARNING and above are never sampled.
+    LOG_SAMPLE_RATE: float | None = Field(default=None, env="LOG_SAMPLE_RATE")
+
     # Comprehensive Logging Configuration
     LOGGING: dict = Field(
         default={

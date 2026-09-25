@@ -32,6 +32,10 @@ def _config() -> Config:
     if not ini.exists():
         raise FileNotFoundError(f"alembic.ini not found at {ini}")
     cfg = Config(str(ini))
+    # Do not let alembic reconfigure logging: this runs in-process at startup,
+    # after the app's own handlers (console, file, OTLP) are already attached.
+    # See the comment in alembic/env.py for what fileConfig() would do to them.
+    cfg.attributes["configure_logging"] = False
     # script_location is relative to alembic.ini, which is not necessarily the
     # process working directory.
     cfg.set_main_option("script_location", str(PROJECT_ROOT / "alembic"))

@@ -9,30 +9,22 @@ ENV PIP_PREFER_BINARY=1 \
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    curl \
+# Only curl, for the healthcheck below. gcc/g++ were ~200MB in the final image
+# to compile nothing: every pinned dependency (asyncpg, greenlet, grpcio,
+# psycopg) ships a manylinux wheel for both amd64 and arm64. If a future
+# dependency has no wheel the build will fail loudly — add them back then.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies (production only)
-# CPU-only PyTorch. The default sentence-transformers dependency chain pulls
-# the CUDA build — over a gigabyte of libraries no container here can use.
-RUN pip install --no-cache-dir \
-        --extra-index-url https://download.pytorch.org/whl/cpu \
-        -r requirements.txt
+# No PyTorch extra-index-url: nothing here imports torch or
+# sentence-transformers. The embeddings go out to Vertex AI over gRPC.
+RUN pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
 
 # Copy application code
 COPY . .
-
-# Remove development dependencies and cache
-RUN pip cache purge && \
-    find /usr/local/lib/python3.11/site-packages -name "*.pyc" -delete && \
-    find /usr/local/lib/python3.11/site-packages -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Create non-root user for security
 RUN useradd --create-home --shell /bin/bash appuser && \

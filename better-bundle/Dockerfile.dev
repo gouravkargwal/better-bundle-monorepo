@@ -12,11 +12,12 @@ ENV NODE_ENV=development
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install all dependencies (including dev dependencies for development)
+# Install all dependencies (including dev dependencies for development).
+# This already provides the Shopify CLI: `shopify` is a devDependency, so its
+# binary lands in node_modules/.bin and npm scripts resolve it there. A second
+# global `npm install -g @shopify/cli` used to follow this line, installing a
+# ~100MB copy of the same tool that nothing referenced.
 RUN npm install
-
-# Install Shopify CLI globally for development
-RUN npm install -g @shopify/cli
 
 # Copy source code
 COPY . .

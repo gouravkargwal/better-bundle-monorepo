@@ -1,4 +1,5 @@
 import prisma from "../../../db.server";
+import { MIN_TRIAL_ORDERS } from "../../billing/trialGate";
 
 /**
  * The merchant's money for the open billing cycle, read only from Postgres.
@@ -39,6 +40,13 @@ export interface CycleMetrics {
   /** Trial progress. Meaningful only when `isTrial`. */
   trialRevenueEarned: number;
   trialThreshold: number;
+  /**
+   * The trial needs both money and evidence — see ../../billing/trialGate.ts.
+   * Revenue alone lets one large order end the trial before the merchant has
+   * seen enough separate orders to judge.
+   */
+  trialOrdersEarned: number;
+  trialOrdersThreshold: number;
 
   cycleEnd: string | null;
   daysLeftInCycle: number | null;
@@ -57,6 +65,8 @@ const EMPTY: CycleMetrics = {
   capAmount: DEFAULT_CAP_AMOUNT,
   trialRevenueEarned: 0,
   trialThreshold: DEFAULT_TRIAL_THRESHOLD,
+  trialOrdersEarned: 0,
+  trialOrdersThreshold: MIN_TRIAL_ORDERS,
   cycleEnd: null,
   daysLeftInCycle: null,
   currency: "USD",
@@ -217,6 +227,8 @@ export async function getCycleMetrics(shopId: string): Promise<CycleMetrics> {
     capAmount: cycle.capAmount ?? planCap,
     trialRevenueEarned: trial.revenue,
     trialThreshold,
+    trialOrdersEarned: trial.orders,
+    trialOrdersThreshold: MIN_TRIAL_ORDERS,
     cycleEnd: cycle.cycleEnd ? cycle.cycleEnd.toISOString() : null,
     daysLeftInCycle,
     currency,

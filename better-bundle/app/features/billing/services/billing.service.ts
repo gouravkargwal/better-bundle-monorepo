@@ -5,6 +5,7 @@ import type {
 } from "../types/billing.types";
 import prisma from "../../../db.server";
 import logger from "app/utils/logger";
+import { MIN_TRIAL_ORDERS, isTrialComplete } from "../trialGate";
 
 export class BillingService {
   static async getBillingState(
@@ -64,7 +65,8 @@ export class BillingService {
       const isTrialPhase = subscription.subscription_type === "TRIAL";
       const isPaidPhase = subscription.subscription_type === "PAID";
 
-      // 2. TRIAL PHASE: ends on attributed revenue only — no elapsed-time gate.
+      // 2. TRIAL PHASE: ends on attributed revenue AND attributed orders —
+      // no elapsed-time gate. See ../trialGate.ts for why both.
       if (isTrialPhase) {
         const currency = await this.getShopCurrency(shopId);
         const trialThreshold = Number(
@@ -73,6 +75,7 @@ export class BillingService {
             1000,
         );
         const revenueEarned = await this.getTrialRevenueEarned(shopId);
+        const ordersEarned = await this.getTrialOrdersEarned(shopId);
         const commissionRate = Number(
           subscription.commission_rate_override ??
             subscription.subscription_plans?.commission_rate ??
@@ -84,10 +87,16 @@ export class BillingService {
             29,
         );
 
-        // The worker flips status to TRIAL_COMPLETED once the threshold is
-        // crossed; reaching it here too keeps the UI honest between webhooks.
+        // The worker flips status to TRIAL_COMPLETED once both conditions are
+        // met; reaching them here too keeps the UI honest between webhooks.
         const stillTrialing =
-          subscription.status === "TRIAL" && revenueEarned < trialThreshold;
+          subscription.status === "TRIAL" &&
+          !isTrialComplete({
+            revenueEarned,
+            revenueThreshold: trialThreshold,
+            ordersEarned,
+            ordersThreshold: MIN_TRIAL_ORDERS,
+          });
 
         return {
           status: stillTrialing ? "trial_active" : "trial_completed",
@@ -95,6 +104,8 @@ export class BillingService {
             isActive: stillTrialing,
             revenueEarned,
             trialThreshold,
+            ordersEarned,
+            ordersThreshold: MIN_TRIAL_ORDERS,
             commissionRate,
             cappedAmount,
             currency,
@@ -163,9 +174,25 @@ export class BillingService {
    * Sums TRIAL-phase commission rows only — the same basis the worker uses to
    * decide when the trial is over, so the two never disagree.
    */
+  /**
+   * Attributed orders so far in the trial.
+   *
+   * One commission record is one attributed order, which is also one row the
+   * merchant can check against their Shopify admin. That correspondence is the
+   * point: the count shown here is the count of receipts they can verify.
+   */
+  private static async getTrialOrdersEarned(shopId: string): Promise<number> {
+    return prisma.commission_records.count({
+      where: { shop_id: shopId, billing_phase: "TRIAL", deleted_at: null },
+    });
+  }
+
   private static async getTrialRevenueEarned(shopId: string): Promise<number> {
     const result = await prisma.commission_records.aggregate({
-      where: { shop_id: shopId, billing_phase: "TRIAL" },
+      // `deleted_at: null` matters: cycle.service.ts excludes soft-deleted
+      // rows, so without it Home's progress bar and this page's cutover read
+      // the same trial differently.
+      where: { shop_id: shopId, billing_phase: "TRIAL", deleted_at: null },
       _sum: { attributed_revenue: true },
     });
     return Number(result._sum.attributed_revenue ?? 0);
@@ -196,6 +223,8 @@ export class BillingService {
       isActive: true,
       revenueEarned: 0,
       trialThreshold: 1000,
+      ordersEarned: 0,
+      ordersThreshold: MIN_TRIAL_ORDERS,
       commissionRate: 0.03,
       cappedAmount: 29,
       currency: await this.getShopCurrency(shopId),

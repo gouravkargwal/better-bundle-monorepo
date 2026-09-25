@@ -148,6 +148,7 @@ model offer_impressions {
   updated_at          DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shop_id             String    @db.VarChar
   customer_id         String?   @db.VarChar
+  paid                Boolean
   shops               shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([customer_id], map: "ix_offer_impressions_customer_id")
@@ -202,6 +203,9 @@ model order_data {
   updated_at                DateTime?        @db.Timestamptz(6)
   id                        String           @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
   shop_id                   String           @db.VarChar
+  attribution_state         String?          @db.VarChar(20)
+  attribution_attempts      Int              @default(0)
+  attribution_last_error    String?
   line_item_data            line_item_data[]
   shops                     shops            @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -344,6 +348,7 @@ model raw_collections {
   updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([shop_id, shopify_id], map: "uq_raw_collections_shop_shopify_id")
   @@index([shop_id, format], map: "ix_raw_collection_shop_id_format")
   @@index([shop_id, shopify_created_at], map: "ix_raw_collection_shop_id_shopify_created_at")
   @@index([shop_id, shopify_id], map: "ix_raw_collection_shop_id_shopify_id")
@@ -369,6 +374,7 @@ model raw_customers {
   updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([shop_id, shopify_id], map: "uq_raw_customers_shop_shopify_id")
   @@index([shop_id, format], map: "ix_raw_customer_shop_id_format")
   @@index([shop_id, shopify_created_at], map: "ix_raw_customer_shop_id_shopify_created_at")
   @@index([shop_id, shopify_id], map: "ix_raw_customer_shop_id_shopify_id")
@@ -394,6 +400,7 @@ model raw_orders {
   updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([shop_id, shopify_id], map: "uq_raw_orders_shop_shopify_id")
   @@index([shop_id, format], map: "ix_raw_order_shop_id_format")
   @@index([shop_id, shopify_created_at], map: "ix_raw_order_shop_id_shopify_created_at")
   @@index([shop_id, shopify_id], map: "ix_raw_order_shop_id_shopify_id")
@@ -419,6 +426,7 @@ model raw_products {
   updated_at         DateTime  @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   shops              shops     @relation(fields: [shop_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
+  @@unique([shop_id, shopify_id], map: "uq_raw_products_shop_shopify_id")
   @@index([shop_id, format], map: "ix_raw_product_shop_id_format")
   @@index([shop_id, shopify_created_at], map: "ix_raw_product_shop_id_shopify_created_at")
   @@index([shop_id, shopify_id], map: "ix_raw_product_shop_id_shopify_id")
@@ -512,6 +520,7 @@ model shops {
   created_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   updated_at            DateTime                @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
   settings              Json?
+  holdout_percent       Int?
   collection_data       collection_data[]
   commission_records    commission_records[]
   customer_data         customer_data[]
@@ -525,6 +534,7 @@ model shops {
   raw_customers         raw_customers[]
   raw_orders            raw_orders[]
   raw_products          raw_products[]
+  refund_data           refund_data[]
   shop_subscriptions    shop_subscriptions[]
   user_identity_links   user_identity_links[]
   user_sessions         user_sessions[]
@@ -723,6 +733,29 @@ model product_enrichments {
   @@index([product_id], map: "ix_product_enrichments_product_id")
   @@index([shop_id], map: "ix_product_enrichments_shop_id")
   @@index([status], map: "ix_product_enrichments_status")
+}
+
+model refund_data {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.VarChar
+  shop_id             String   @db.VarChar
+  order_id            String   @db.VarChar
+  refund_id           String   @db.VarChar
+  refunded_at         DateTime @db.Timestamptz(6)
+  total_refund_amount Float
+  currency_code       String   @default("USD") @db.VarChar
+  note                String?  @db.VarChar
+  restock             Boolean? @default(false)
+  refund_line_items   Json?    @db.Json
+  created_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  updated_at          DateTime @default(dbgenerated("timezone('UTC'::text, CURRENT_TIMESTAMP)")) @db.Timestamptz(6)
+  shops               shops    @relation(fields: [shop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([shop_id, refund_id], map: "ux_refund_data_shop_refund")
+  @@index([refunded_at], map: "idx_refund_data_refunded_at")
+  @@index([shop_id, order_id], map: "idx_refund_data_shop_order")
+  @@index([order_id], map: "ix_refund_data_order_id")
+  @@index([refund_id], map: "ix_refund_data_refund_id")
+  @@index([shop_id], map: "ix_refund_data_shop_id")
 }
 
 enum billing_cycle_status_enum {

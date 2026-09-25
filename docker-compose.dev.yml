@@ -84,12 +84,28 @@ services:
 
   # ==================== KAFKA ====================
   kafka_b:
-    image: confluentinc/cp-kafka:7.8.0 # Use specific version
+    # apache/kafka, not confluentinc/cp-kafka: 626MB against 1.74GB for the
+    # same KRaft broker. The Confluent image carries Schema Registry hooks,
+    # Connect plumbing and the Confluent CLI suite, none of which this stack
+    # uses. Config is unchanged -- both images read the same KAFKA_* env vars.
+    #
+    # user: root because neither the image nor Docker pre-creates the data
+    # directory, so a fresh named volume is root-owned and the broker dies with
+    # AccessDeniedException on meta.properties. Confluent's image shipped a
+    # chown in its entrypoint; this one does not.
+    #
+    # The data path moved to /opt/kafka/data only because that is where this
+    # image's own directory lives. A named volume mounts its root wherever you
+    # point it, so kafka_data keeps its contents: verified on the dev volume,
+    # which came up "already formatted", recovered __cluster_metadata at offset
+    # 693297 and kept all nine topics. No wipe, no resync.
+    image: apache/kafka:3.9.1
     container_name: kafka_b_dev
+    user: root
     ports:
       - "9092:9092"
     volumes:
-      - kafka_data:/var/lib/kafka/data
+      - kafka_data:/opt/kafka/data
     env_file:
       - .env.dev
     environment:
@@ -101,7 +117,7 @@ services:
       - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9093,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
       - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      - KAFKA_LOG_DIRS=/opt/kafka/data
       - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       # 1, not the stock 50. `__consumer_offsets` accounted for 50 of the 56
@@ -214,6 +230,13 @@ services:
         condition: service_healthy
       kafka_b:
         condition: service_healthy
+      openobserve:
+        # No healthcheck on the OpenObserve image, so this only orders startup.
+        # That is enough: it closes the window where the worker's own startup
+        # logs and migration spans — the ones you actually want when a deploy
+        # goes wrong — are exported into a refused connection and dropped by
+        # the batch processors without an error anyone sees.
+        condition: service_started
     restart: unless-stopped
     # The largest ceiling, because this is the process that legitimately needs
     # headroom: a catalog sweep and an embedding run both hold real data. It is
@@ -251,6 +274,12 @@ services:
       - ZO_DATA_DIR=/data
       - ZO_LOCAL_MODE=true
       - ZO_TELEMETRY=false
+      # Retention. Without this OpenObserve keeps data for its default 3650
+      # days, i.e. forever, on a local disk volume. Trace volume measured at
+      # ~41k spans/day is harmless per day and 15M/year is not; the dashboards
+      # and alerts all query windows of minutes to 24h, so nothing reads past
+      # a fortnight. Traces are the bulk and expire first.
+      - ZO_COMPACT_DATA_RETENTION_DAYS=30
     ports:
       - "5080:5080"
     volumes:

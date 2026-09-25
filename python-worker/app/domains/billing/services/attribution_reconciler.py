@@ -261,8 +261,13 @@ async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:
 
     logger.info(f"Attribution reconciler started (every {interval}s)")
     while True:
+        # Sweep first, then sleep. Sleeping first pushed the first pass 15
+        # minutes past every restart, so each deploy delayed billing for orders
+        # that had already missed attribution. Measured effect: 11 runs in 24h
+        # against the ~96 this interval implies — the rest were lost to the
+        # timer restarting. `ingestion_backstop` and `entity_reconciler` were
+        # already this way round; these two had drifted.
         try:
-            await asyncio.sleep(interval)
             # Only one worker per cycle, or four of them sweep the same rows.
             async with claim("attribution_reconciler") as mine:
                 if mine:
@@ -276,3 +281,4 @@ async def run_forever(interval: int = RECONCILE_INTERVAL_SECONDS) -> None:
             # Never let the loop die. A reconciler that exits on its first
             # unexpected error removes the safety net without saying so.
             logger.error(f"Attribution reconciliation failed: {e}", exc_info=True)
+        await asyncio.sleep(interval)

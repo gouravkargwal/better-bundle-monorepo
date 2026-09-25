@@ -34,8 +34,10 @@ logger = logging.getLogger(__name__)
 # short enough that last season's catalog does not drive today's offers.
 LOOKBACK_DAYS = 90
 
-# Orders whose money actually landed. A refunded order is real evidence that the
-# pair was bought together, so it is kept; a voided one is not.
+# Orders whose money actually landed. Refunded statuses stay in: the refund is
+# subtracted at the line-item level below, which is finer than dropping the
+# whole order — a shopper who kept two of three items still tells us those two
+# go together.
 COUNTED_FINANCIAL_STATUSES = ("paid", "partially_refunded", "refunded")
 
 # A 60-line order is a wholesale or trade order, not a shopping basket. Its
@@ -46,22 +48,50 @@ MAX_BASKET_SIZE = 20
 MIN_PAIR_COUNT = 2
 
 
-# Deduplicate to one row per (order, product) so a customer buying three of the
-# same item does not inflate the basket, then pair products within each order.
-# `p1 < p2` keeps one row per unordered pair; edges are written both ways after.
-_PAIR_SQL = text(
-    """
-    WITH baskets AS (
+# The basket population, written once and shared by all three queries below.
+# k11, k12/k21 and the order total have to be counted over exactly the same set
+# of orders or the LLR is meaningless, and three hand-maintained copies of this
+# predicate would eventually disagree.
+#
+# Refunds are subtracted per line item rather than by dropping whole orders: a
+# shopper who kept two of three items still tells us those two belong together.
+# An item is dropped only once the returned quantity covers what was bought.
+_BASKETS_CTE = """
+    refunded AS (
+        SELECT rd.order_id,
+               item->>'product_id'               AS product_id,
+               SUM((item->>'quantity')::numeric) AS refunded_qty
+        FROM refund_data rd,
+             LATERAL jsonb_array_elements(rd.refund_line_items::jsonb) AS item
+        WHERE rd.shop_id = :shop_id
+          AND rd.refund_line_items IS NOT NULL
+          AND jsonb_typeof(rd.refund_line_items::jsonb) = 'array'
+          AND item->>'product_id' IS NOT NULL
+        GROUP BY rd.order_id, item->>'product_id'
+    ),
+    baskets AS (
         SELECT o.id AS order_id, li.product_id
         FROM order_data o
         JOIN line_item_data li ON li.order_id = o.id
+        LEFT JOIN refunded r
+               ON r.order_id = o.id AND r.product_id = li.product_id
         WHERE o.shop_id = :shop_id
           AND o.order_date >= :cutoff
           AND o.cancelled_at IS NULL
           AND LOWER(COALESCE(o.financial_status, '')) = ANY(:statuses)
           AND li.product_id IS NOT NULL
         GROUP BY o.id, li.product_id
-    ),
+        HAVING SUM(li.quantity) > COALESCE(MAX(r.refunded_qty), 0)
+    )
+"""
+
+
+# Deduplicate to one row per (order, product) so a customer buying three of the
+# same item does not inflate the basket, then pair products within each order.
+# `p1 < p2` keeps one row per unordered pair; edges are written both ways after.
+_PAIR_SQL = text(
+    f"""
+    WITH {_BASKETS_CTE},
     sized AS (
         SELECT order_id FROM baskets
         GROUP BY order_id
@@ -85,29 +115,19 @@ _PAIR_SQL = text(
 # consistent with k11. Counts every qualifying order, including single-item ones,
 # because "A sold alone 400 times" is exactly what makes a pair unsurprising.
 _ITEM_SQL = text(
-    """
-    WITH baskets AS (
-        SELECT o.id AS order_id, li.product_id
-        FROM order_data o
-        JOIN line_item_data li ON li.order_id = o.id
-        WHERE o.shop_id = :shop_id
-          AND o.order_date >= :cutoff
-          AND o.cancelled_at IS NULL
-          AND LOWER(COALESCE(o.financial_status, '')) = ANY(:statuses)
-          AND li.product_id IS NOT NULL
-        GROUP BY o.id, li.product_id
-    )
+    f"""
+    WITH {_BASKETS_CTE}
     SELECT product_id, COUNT(*) AS order_count FROM baskets GROUP BY product_id
     """
 )
 
+# Counted over the basket population rather than over `order_data`, so that an
+# order left empty by refunds is not still sitting in the denominator making
+# every surviving pair look rarer than it is.
 _TOTAL_SQL = text(
-    """
-    SELECT COUNT(*) FROM order_data o
-    WHERE o.shop_id = :shop_id
-      AND o.order_date >= :cutoff
-      AND o.cancelled_at IS NULL
-      AND LOWER(COALESCE(o.financial_status, '')) = ANY(:statuses)
+    f"""
+    WITH {_BASKETS_CTE}
+    SELECT COUNT(DISTINCT order_id) FROM baskets
     """
 )
 

@@ -270,7 +270,7 @@ export function HomePage({ data }: HomePageProps) {
                   </Text>
                   <Text as="p" tone="subdued">
                     {cycle.isTrial
-                      ? `Free until recommendations have earned you ${formatCurrency(cycle.trialThreshold, cycle.currency)}.`
+                      ? `Free until recommendations have earned you ${formatCurrency(cycle.trialThreshold, cycle.currency)} across ${cycle.trialOrdersThreshold} orders.`
                       : `${(cycle.commissionRate * 100).toFixed(0)}% of attributed revenue, capped at ${formatCurrency(cycle.capAmount, cycle.currency)}.`}
                   </Text>
                 </BlockStack>
@@ -300,12 +300,18 @@ export function HomePage({ data }: HomePageProps) {
                       ),
                       cycle.currency,
                     )}
-                    sub={`${formatCurrency(cycle.trialRevenueEarned, cycle.currency)} of ${formatCurrency(cycle.trialThreshold, cycle.currency)} earned`}
+                    sub={`${formatCurrency(cycle.trialRevenueEarned, cycle.currency)} of ${formatCurrency(cycle.trialThreshold, cycle.currency)} · ${cycle.trialOrdersEarned} of ${cycle.trialOrdersThreshold} orders`}
                     progress={{
-                      value: cycle.trialRevenueEarned,
-                      max: cycle.trialThreshold,
+                      // The slower of the two conditions is what actually ends
+                      // the trial, so showing the faster one would overstate
+                      // how close it is.
+                      value: Math.min(
+                        cycle.trialRevenueEarned / cycle.trialThreshold,
+                        cycle.trialOrdersEarned / cycle.trialOrdersThreshold,
+                      ),
+                      max: 1,
                     }}
-                    tooltip="You pay nothing until recommendations have earned you this much. The trial ends on revenue, not on a date."
+                    tooltip="You pay nothing until recommendations have earned you this much across this many separate orders — enough to see the pattern, not just one lucky sale. The trial ends on results, not on a date."
                   />
                 ) : (
                   <MetricTile

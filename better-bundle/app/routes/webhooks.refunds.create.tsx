@@ -55,16 +55,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     const kafkaProducer = await KafkaProducerService.getInstance();
 
-    // ✅ ONLY FOR ORDER DATA UPDATE - No refund attribution processing
+    // Publishes the ORDER id, not the refund: the consumer re-fetches the whole
+    // order from the Admin API, which carries the refunds with their line items.
+    // More reliable than trusting this payload, and it is the same path a
+    // backfill takes.
+    //
+    // Refunds feed the recommendation engine — a returned item is not evidence
+    // that products belong together, so co-purchase mining subtracts it. They
+    // deliberately do NOT adjust billing; commission is charged on the sale.
     const streamData = {
-      event_type: "refund_created", // For order data normalization only
+      event_type: "refund_created",
       shop_domain: shop,
-      shopify_id: orderId, // Order ID for order data update
+      shopify_id: orderId,
       metadata: {
         trigger: "refund_created",
         refund_id: refundId,
-        // ✅ NO REFUND COMMISSION POLICY - Only for data collection
-        purpose: "order_data_update_only",
+        purpose: "recommendation_signal",
       },
       timestamp: new Date().toISOString(),
     } as const;

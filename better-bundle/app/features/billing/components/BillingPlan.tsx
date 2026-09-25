@@ -43,12 +43,17 @@ export function BillingPlan({
             trialData={billingState.trialData!}
             shopCurrency={shopCurrency}
             onSetupBilling={async (setupData: BillingSetupData) => {
-              // Only the plan name is sent. Rate and cap are read server-side
-              // from the plan so the client cannot choose its own price.
+              // The commission rate is read server-side from the plan so the
+              // client cannot choose its own price. The cap is the merchant's
+              // own spending limit, so their choice is passed along — the
+              // server still clamps it to the range we allow.
               const response = await fetch("/api/billing/setup", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ planName: setupData.planName }),
+                body: JSON.stringify({
+                  planName: setupData.planName,
+                  cappedAmount: setupData.cappedAmount,
+                }),
               });
 
               const result = await response.json();

@@ -302,11 +302,16 @@ class GraphQLOrderAdapter(BaseAdapter):
                 # Get currency from order level first, then from refund's total_refunded
                 currency_code = payload.get("currency_code")
 
-                # Try to get currency from refund's total_refunded field
+                # `total_refunded` is aliased from `totalRefundedSet`, a MoneyBag,
+                # so the figure sits under `shop_money`. The flat shape is the
+                # deprecated `totalRefunded` scalar — still accepted here because
+                # `raw_orders` holds payloads fetched before the query changed,
+                # and those get re-normalized.
                 total_refunded = refund.get("total_refunded", {})
                 if total_refunded and isinstance(total_refunded, dict):
-                    currency_code = total_refunded.get("currency_code", currency_code)
-                    total_refund_amount = float(total_refunded.get("amount", 0))
+                    money = total_refunded.get("shop_money") or total_refunded
+                    currency_code = money.get("currency_code", currency_code)
+                    total_refund_amount = float(money.get("amount", 0))
                 else:
                     # Fallback: Calculate total refund amount from transactions
                     total_refund_amount = 0.0
@@ -337,6 +342,15 @@ class GraphQLOrderAdapter(BaseAdapter):
                 for rli in raw_line_items:
                     line_item = rli.get("line_item", {})
 
+                    # `subtotal_set` is the MoneyBag from `subtotalSet`; the bare
+                    # `subtotal` is the deprecated scalar, kept for raw payloads
+                    # captured before the query moved off it.
+                    subtotal_set = rli.get("subtotal_set") or {}
+                    subtotal_money = subtotal_set.get("shop_money") or {}
+                    line_subtotal = float(
+                        subtotal_money.get("amount", rli.get("subtotal", 0)) or 0
+                    )
+
                     refund_line_item = {
                         "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
                         "order_id": _extract_numeric_gid(str(payload.get("id", ""))),
@@ -347,8 +361,11 @@ class GraphQLOrderAdapter(BaseAdapter):
                             str(line_item.get("variant", {}).get("id", ""))
                         ),
                         "quantity": int(rli.get("quantity", 0)),
-                        "unit_price": float(rli.get("subtotal", 0)),
-                        "refund_amount": float(rli.get("subtotal", 0)),
+                        "unit_price": line_subtotal,
+                        "refund_amount": line_subtotal,
+                        # Restocked items went back into inventory; a refund
+                        # without a restock is more often damage or fraud.
+                        "restocked": bool(rli.get("restocked", False)),
                         "properties": line_item.get("customAttributes", []),
                     }
                     refund_line_items.append(refund_line_item)
@@ -360,7 +377,11 @@ class GraphQLOrderAdapter(BaseAdapter):
                     "refund_id": _extract_numeric_gid(str(refund.get("id", ""))),
                     "refunded_at": _parse_iso(refund.get("created_at")),
                     "note": refund.get("note", ""),
-                    "restock": False,  # restock field not available in GraphQL API
+                    # Refund-level restock is a roll-up: RefundLineItem.restocked
+                    # is per item, and there is no refund-wide flag in the API.
+                    "restock": any(
+                        li.get("restocked") for li in refund_line_items
+                    ),
                     "total_refund_amount": total_refund_amount,
                     "currency_code": currency_code,
                     "refund_line_items": refund_line_items,

@@ -1,3 +1,24 @@
-.cache
-build
-node_modules
+# .dockerignore patterns are NOT recursive. Plain `node_modules` matched only
+# the root one, so extensions/*/node_modules (19MB) still shipped to the daemon
+# on every build. `**/` is what actually excludes them.
+**/node_modules
+**/build
+**/dist
+**/.cache
+
+# Secrets must never enter an image layer. `COPY . .` was baking .env,
+# .env.prod and the Shopify CLI's credential cache into the published image.
+.env
+.env.*
+!.env.example
+.shopify/
+
+# Dev-only material
+*.md
+tests/
+scripts/
+seed_screenshots.sql
+.git
+.DS_Store
+.vscode/
+.idea/

@@ -10,6 +10,11 @@ from app.shared.helpers import now_utc
 
 router = APIRouter(tags=["Logs"])
 
+# Ceiling on how many caller-supplied keys one browser record may turn into
+# stream columns. ponytail: flat cap, make it a per-extension allowlist if an
+# extension ever legitimately needs more.
+MAX_EXTENSION_FIELDS = 20
+
 
 async def _forward_to_openobserve(
     logs: List[Dict[str, Any]],
@@ -18,10 +23,19 @@ async def _forward_to_openobserve(
 ) -> None:
     """Forward extension browser logs to OpenObserve JSON ingestion API.
 
-    OpenObserve accepts ``POST /api/{org}/{stream}/_json`` with an array of
-    log records.  Each record must include ``level`` and ``timestamp`` (Unix
-    seconds).  We enrich every record with the originating extension name
-    and forward the batch to the ``extension_logs`` stream.
+    Field names deliberately match what the OTLP exporters write into the
+    `default` stream — `body`, `severity`, `service_name` — rather than the
+    `message`/`level`/`source` this used to emit. Same concepts under three
+    different column names meant no single query, dashboard panel or alert
+    could span the browser extensions and the services they talk to; you had
+    to know which vocabulary a given record spoke before you could filter it.
+
+    The stream stays separate from `default` on purpose. These records are
+    unauthenticated browser input, and every distinct key in one becomes a
+    column in the stream's schema — pointed at `default` a buggy or hostile
+    extension could blow out the schema that every other service shares.
+    Separate stream, identical vocabulary: a UNION across the two works, and
+    the blast radius of bad input stops at this stream.
     """
     base = settings.OPENOBSERVE_ENDPOINT.rstrip("/")
     url = f"{base}/api/{settings.OPENOBSERVE_ORG}/extension_logs/_json"
@@ -63,13 +77,27 @@ async def _forward_to_openobserve(
             ts = time.time()
 
         record = {
-            "level": level,
-            "message": message,
+            "body": message,
+            "severity": str(level).upper(),
+            "service_name": source,
             "timestamp": ts,
-            "source": source,
+            # OTLP records carry this from the Resource; set it here so an
+            # environment filter covers the extensions too.
+            "deployment_environment_name": settings.ENVIRONMENT,
         }
+
+        # Caller fields are promoted to top-level columns, matching how the
+        # Python and Node loggers emit theirs — `attributes` as a nested blob
+        # was queryable only by a prefixed, lowercased key.
+        #
+        # Capped because this is untrusted input: an extension looping over a
+        # cart could otherwise mint a new column per product id and exhaust
+        # the stream's schema. Reserved names are never overwritten.
         if extra:
-            record["attributes"] = extra
+            for key, value in list(extra.items())[:MAX_EXTENSION_FIELDS]:
+                safe = str(key)[:64]
+                if safe not in record:
+                    record[safe] = value
 
         records.append(record)
 

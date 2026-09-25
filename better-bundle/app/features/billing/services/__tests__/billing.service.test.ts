@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MIN_TRIAL_ORDERS } from "../../trialGate";
 
 // ── Hoisted mocks ──────────────────────────────────────────────────────────
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    commission_records: { aggregate: vi.fn() },
+    commission_records: { aggregate: vi.fn(), count: vi.fn() },
     shop_subscriptions: {
       findFirst: vi.fn(),
       update: vi.fn(),
@@ -48,18 +49,28 @@ function mockSubscription(overrides: any = {}) {
   };
 }
 
-// The trial ends on revenue, so "used up" means the threshold was reached.
-// Callers must also stub commission_records.aggregate to return >= threshold.
+// The trial ends on revenue AND orders, so "used up" means both were reached.
+// Callers must also stub commission_records to return >= both thresholds.
 function mockUsedUpSubscription(overrides: any = {}) {
   return mockSubscription(overrides);
 }
 
-/** Attributed revenue the trial has accumulated so far. */
-function stubTrialRevenue(amount: number) {
+/**
+ * What the trial has accumulated so far.
+ *
+ * Orders default past the threshold so revenue-focused tests keep testing
+ * revenue. The order condition has its own tests below — see
+ * "one large order is money, not evidence".
+ */
+function stubTrialProgress(amount: number, orders: number = MIN_TRIAL_ORDERS) {
   mockPrisma.commission_records.aggregate.mockResolvedValue({
     _sum: { attributed_revenue: amount },
   });
+  mockPrisma.commission_records.count.mockResolvedValue(orders);
 }
+
+/** Back-compat alias for the revenue-only tests. */
+const stubTrialRevenue = stubTrialProgress;
 
 function mockPaidSubscription(overrides: any = {}) {
   return mockSubscription({
@@ -157,6 +168,46 @@ describe("BillingService", () => {
 
       expect(result.status).toBe("trial_completed");
       expect(result.trialData!.isActive).toBe(false);
+    });
+
+    it("one large order is money, not evidence, so the trial continues", async () => {
+      // The real case from the stage store: a single attributed order worth
+      // $1,110 clears a $1,000 threshold. Ending the trial there asks the
+      // merchant to start paying on the strength of one sale, while the Proof
+      // page still reads "Not enough data yet".
+      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
+        mockUsedUpSubscription(),
+      );
+      stubTrialProgress(1110.2, 1);
+
+      const result = await BillingService.getBillingState("shop-1");
+
+      expect(result.status).toBe("trial_active");
+      expect(result.trialData!.ordersEarned).toBe(1);
+    });
+
+    it("many small orders are evidence, not money, so the trial continues", async () => {
+      // The mirror failure: plenty for the merchant to look at, but we have
+      // barely made them anything.
+      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
+        mockUsedUpSubscription(),
+      );
+      stubTrialProgress(300, MIN_TRIAL_ORDERS);
+
+      const result = await BillingService.getBillingState("shop-1");
+
+      expect(result.status).toBe("trial_active");
+    });
+
+    it("completes only when both conditions are met", async () => {
+      mockPrisma.shop_subscriptions.findFirst.mockResolvedValue(
+        mockUsedUpSubscription(),
+      );
+      stubTrialProgress(1000, MIN_TRIAL_ORDERS);
+
+      const result = await BillingService.getBillingState("shop-1");
+
+      expect(result.status).toBe("trial_completed");
     });
 
     it("stays in trial no matter how old the install is", async () => {

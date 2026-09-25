@@ -22,6 +22,7 @@ from .enums import (
 from .shop import Shop
 from .session import Session
 from .order_data import OrderData, LineItemData
+from .refund_data import RefundData
 from .product_data import ProductData
 from .customer_data import CustomerData
 from .collection_data import CollectionData
@@ -75,6 +76,7 @@ __all__ = [
     "Session",
     "OrderData",
     "LineItemData",
+    "RefundData",
     "ProductData",
     "CustomerData",
     "CollectionData",

@@ -16,19 +16,24 @@ values it actually fetched.
 """
 
 import asyncio
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Dict
 
 import httpx
 from sqlalchemy.dialects.postgresql import insert
 
+from opentelemetry import trace
+
 from app.core.database.models.exchange_rate import ExchangeRate
+from app.core.metrics import reconciler_duration, reconciler_runs_total
 from app.core.database.session import get_transaction_context
 from app.core.logging import get_logger
 from app.shared.helpers import now_utc
 from app.core.single_run import claim
 
 logger = get_logger(__name__)
+tracer = trace.get_tracer(__name__)
 
 REFRESH_INTERVAL_SECONDS = 24 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 20
@@ -80,8 +85,32 @@ async def _fetch() -> tuple[str, Dict[str, Decimal]]:
 
 async def refresh_once() -> int:
     """Fetch and upsert rates. Returns the number of currencies written."""
+    start_time = time.perf_counter()
+    with tracer.start_as_current_span("reconciler.fx_refresher.sweep") as span:
+        try:
+            written = await _refresh_once_inner(span)
+        except Exception:
+            reconciler_duration.record(
+                time.perf_counter() - start_time, {"reconciler": "fx_refresher"}
+            )
+            reconciler_runs_total.add(
+                1, {"reconciler": "fx_refresher", "status": "error"}
+            )
+            raise
+        reconciler_duration.record(
+            time.perf_counter() - start_time, {"reconciler": "fx_refresher"}
+        )
+        reconciler_runs_total.add(
+            1, {"reconciler": "fx_refresher", "status": "success"}
+        )
+        return written
+
+
+async def _refresh_once_inner(span) -> int:
     source, rates = await _fetch()
     fetched_at = now_utc()
+    span.set_attribute("fx.source", source)
+    span.set_attribute("fx.currencies", len(rates))
 
     async with get_transaction_context() as session:
         for code, rate in rates.items():
@@ -125,5 +154,11 @@ async def run_forever() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - a dead refresher must not kill the app
-            logger.error(f"💱 FX refresh failed, keeping existing rates: {e}")
+            # exc_info so the traceback reaches OpenObserve as
+            # exception_stacktrace. Without it this line said only that the
+            # refresh failed, for the loop whose wrong answer once billed an
+            # INR merchant ~95x — the one place a stack is worth most.
+            logger.error(
+                f"💱 FX refresh failed, keeping existing rates: {e}", exc_info=True
+            )
         await asyncio.sleep(REFRESH_INTERVAL_SECONDS)

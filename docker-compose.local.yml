@@ -27,12 +27,28 @@ services:
 
   # ==================== KAFKA ====================
   kafka_b:
-    image: confluentinc/cp-kafka:7.8.0 # Use specific version
+    # apache/kafka, not confluentinc/cp-kafka: 626MB against 1.74GB for the
+    # same KRaft broker. The Confluent image carries Schema Registry hooks,
+    # Connect plumbing and the Confluent CLI suite, none of which this stack
+    # uses. Config is unchanged -- both images read the same KAFKA_* env vars.
+    #
+    # user: root because neither the image nor Docker pre-creates the data
+    # directory, so a fresh named volume is root-owned and the broker dies with
+    # AccessDeniedException on meta.properties. Confluent's image shipped a
+    # chown in its entrypoint; this one does not.
+    #
+    # The data path moved to /opt/kafka/data only because that is where this
+    # image's own directory lives. A named volume mounts its root wherever you
+    # point it, so kafka_data keeps its contents: verified on the dev volume,
+    # which came up "already formatted", recovered __cluster_metadata at offset
+    # 693297 and kept all nine topics. No wipe, no resync.
+    image: apache/kafka:3.9.1
     container_name: kafka_b_dev
+    user: root
     ports:
       - "9092:9092"
     volumes:
-      - kafka_data:/var/lib/kafka/data
+      - kafka_data:/opt/kafka/data
     env_file:
       - .env.dev
     environment:
@@ -44,7 +60,7 @@ services:
       - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9093,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092
       - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
       - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+      - KAFKA_LOG_DIRS=/opt/kafka/data
       - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
@@ -58,16 +74,19 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=kafka,env=dev"
+    # A TCP probe, NOT `kafka-broker-api-versions` -- matching dev and prod.
+    # Two reasons: that script is not on PATH in apache/kafka (it lives in
+    # /opt/kafka/bin), and it boots a whole second JVM to ask the broker one
+    # question, which measured 5.2-32.3s per run on dev against a 30s interval.
+    # `/dev/tcp` is a bash builtin, so this costs no process at all.
+    #
+    # Honest limitation: this proves the listener is bound, not that the broker
+    # is serving metadata. Kafka binds 9092 late in startup, so it is a good
+    # proxy; `start_period` covers the gap.
     healthcheck:
-      test:
-        [
-          "CMD",
-          "kafka-broker-api-versions",
-          "--bootstrap-server",
-          "localhost:9092",
-        ]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9092'"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 5
       start_period: 40s
 
@@ -126,6 +145,9 @@ services:
       - ZO_ROOT_USER_PASSWORD=admin
       - ZO_DATA_DIR=/data
       - ZO_LOCAL_MODE=true
+      # Local throwaway stack: a week is plenty, and it keeps the dev
+      # machine's disk out of it.
+      - ZO_COMPACT_DATA_RETENTION_DAYS=7
     ports:
       - "5080:5080"
     volumes:

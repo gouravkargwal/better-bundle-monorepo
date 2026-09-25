@@ -13,74 +13,65 @@ from .handlers import (
     FileHandler,
     ConsoleHandler,
 )
-from .formatters import JSONFormatter, ConsoleFormatter
+from .formatters import JSONFormatter, ConsoleFormatter, sanitize_extra
 
 # Global logger cache
 _loggers: Dict[str, logging.Logger] = {}
 
 
 class StructuredLogger:
-    """Wrapper around standard Python logger that supports structured logging with keyword arguments"""
+    """Standard logger wrapper that emits keyword arguments as structured fields.
+
+    kwargs go through logging's ``extra=`` rather than being concatenated into
+    the message. That is what makes them queryable in OpenObserve: the OTel
+    ``LoggingHandler`` copies every non-reserved LogRecord attribute into the
+    log record's attributes, so ``logger.info("saved", shop_id=x)`` becomes a
+    `shop_id` column you can filter and group by. Formatted into the message
+    string — as this used to do — the same call produced free text that nothing
+    can aggregate.
+
+    Terminal output is unchanged: ConsoleFormatter re-renders the same fields as
+    ``key=value`` at format time, so humans still see them inline.
+    """
 
     def __init__(self, logger: logging.Logger):
         self._logger = logger
 
-    def _format_message(self, message: str, **kwargs) -> str:
-        """Format message with structured data as key=value pairs"""
-        if not kwargs:
-            return message
+    # `/` makes message/level positional-only. Without it a caller's own field
+    # named `message` or `level` — plausible things to log — binds to the
+    # parameter instead of the kwargs and raises TypeError at runtime, in code
+    # that was merely trying to describe itself.
+    #
+    # `exc_info` stays a real keyword rather than joining kwargs: ~30 call
+    # sites pass it, all on error paths, and sweeping it into kwargs would
+    # rename it to a `ctx_exc_info=True` field and drop the traceback —
+    # losing the stack exactly where it is the entire point of the log line.
+    def _log(self, level: int, message: str, /, *, exc_info: bool = False, **kwargs):
+        extra = sanitize_extra(kwargs)
+        self._logger.log(
+            level, message, extra=extra, exc_info=exc_info, stacklevel=3
+        )
 
-        # Convert kwargs to structured format
-        structured_parts = []
-        for key, value in kwargs.items():
-            if value is not None:
-                # Handle different value types
-                if isinstance(value, (dict, list)):
-                    structured_parts.append(f"{key}={str(value)}")
-                elif isinstance(value, str) and " " in value:
-                    # Quote strings with spaces
-                    structured_parts.append(f'{key}="{value}"')
-                else:
-                    structured_parts.append(f"{key}={value}")
+    def debug(self, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(logging.DEBUG, message, exc_info=exc_info, **kwargs)
 
-        if structured_parts:
-            return f"{message} | {' | '.join(structured_parts)}"
-        return message
+    def info(self, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(logging.INFO, message, exc_info=exc_info, **kwargs)
 
-    def debug(self, message: str, **kwargs):
-        """Log debug message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.debug(formatted_message)
+    def warning(self, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(logging.WARNING, message, exc_info=exc_info, **kwargs)
 
-    def info(self, message: str, **kwargs):
-        """Log info message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.info(formatted_message)
+    def error(self, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(logging.ERROR, message, exc_info=exc_info, **kwargs)
 
-    def warning(self, message: str, **kwargs):
-        """Log warning message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.warning(formatted_message)
+    def critical(self, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(logging.CRITICAL, message, exc_info=exc_info, **kwargs)
 
-    def error(self, message: str, **kwargs):
-        """Log error message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.error(formatted_message)
+    def exception(self, message: str, /, **kwargs):
+        self._log(logging.ERROR, message, exc_info=True, **kwargs)
 
-    def critical(self, message: str, **kwargs):
-        """Log critical message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.critical(formatted_message)
-
-    def exception(self, message: str, **kwargs):
-        """Log exception message with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.exception(formatted_message)
-
-    def log(self, level: int, message: str, **kwargs):
-        """Log message at specified level with structured data"""
-        formatted_message = self._format_message(message, **kwargs)
-        self._logger.log(level, formatted_message)
+    def log(self, level: int, message: str, /, *, exc_info: bool = False, **kwargs):
+        self._log(level, message, exc_info=exc_info, **kwargs)
 
 
 def setup_logging(config: Optional[LoggingConfig] = None) -> None:
@@ -135,10 +126,26 @@ def setup_logging(config: Optional[LoggingConfig] = None) -> None:
         )
         root_logger.addHandler(console_handler)
 
-    # Disable propagation for external loggers
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("requests").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # Silence third-party loggers.
+    #
+    # The root logger carries an OTLP handler, so anything any dependency logs
+    # is shipped and stored. At LOG_LEVEL=debug that means aiokafka's per-poll
+    # chatter, SQLAlchemy's full statement echo and botocore's request signing
+    # all land in OpenObserve alongside our own lines, where they are the bulk
+    # of the volume and none of the signal. Only three libraries were pinned
+    # here before; these are the ones that actually talk.
+    for name in (
+        "urllib3", "requests", "httpx", "httpcore", "hpack",
+        "aiokafka", "kafka", "asyncio", "botocore", "boto3", "s3transfer",
+        "sqlalchemy.engine", "sqlalchemy.pool", "sqlalchemy.dialects",
+        "alembic", "multipart", "PIL", "matplotlib", "charset_normalizer",
+        "opentelemetry", "google", "grpc", "openai", "anthropic",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    # uvicorn's access log duplicates what the FastAPI instrumentation already
+    # records as a span and a metric, with none of the attributes.
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
     logging.info("Logging system initialized")
 

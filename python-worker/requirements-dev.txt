@@ -1,0 +1,9 @@
+# Dev-only tooling. Kept out of requirements.txt so the production image does
+# not ship a test runner and three linters it can never run.
+-r requirements.txt
+
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0

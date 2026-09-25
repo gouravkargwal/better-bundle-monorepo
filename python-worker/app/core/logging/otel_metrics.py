@@ -27,7 +27,14 @@ def init_otel_metrics(settings: "Settings") -> MeterProvider:
         {
             "service.name": "python-worker",
             "service.version": settings.VERSION,
-            "deployment.environment": settings.ENVIRONMENT,
+            # `deployment.environment.name`, not `deployment.environment`.
+            # The latter is the DEPRECATED pre-1.27 spelling. The Node SDK in
+            # better-bundle uses ATTR_DEPLOYMENT_ENVIRONMENT_NAME and so writes
+            # the new one, which meant the two services landed in the same
+            # stream under two different column names: a
+            # `WHERE deployment_environment = 'production'` filter matched
+            # python-worker and silently dropped every remix-app record.
+            "deployment.environment.name": settings.ENVIRONMENT,
         }
     )
 
