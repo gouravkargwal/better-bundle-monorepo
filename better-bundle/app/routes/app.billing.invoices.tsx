@@ -28,6 +28,35 @@ interface InvoiceItem {
   orderCount?: number; // Number of orders
 }
 
+function commissionRowToInvoiceItem(row: {
+  id: string;
+  order_id: string;
+  order_date: Date | string;
+  commission_charged: string | number;
+  attributed_revenue: string | number;
+  status: string;
+}): InvoiceItem {
+  const d = new Date(row.order_date);
+  return {
+    id: row.id,
+    date: d.toISOString().split("T")[0],
+    amount:
+      typeof row.commission_charged === "number"
+        ? row.commission_charged
+        : parseFloat(row.commission_charged),
+    status: row.status.toLowerCase(),
+    description: `Commission — order ${row.order_id}`,
+    type: "usage_record",
+    createdAt: d.toISOString(),
+    orderIds: [row.order_id],
+    totalRevenue:
+      typeof row.attributed_revenue === "number"
+        ? row.attributed_revenue
+        : parseFloat(row.attributed_revenue),
+    orderCount: 1,
+  };
+}
+
 interface InvoicesLoaderData {
   invoices: InvoiceItem[];
   pagination: {
@@ -251,16 +280,41 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // ✅ Strategy 2: If no usage records from subscriptions, try getting them from commission records
       if (allUsageRecords.length === 0) {
         console.log(
-          "No usage records from subscriptions, checking commission records with usage_record_id...",
+          "No usage records from subscriptions, checking commission records...",
         );
 
-        // Group by usage_record_id to avoid duplicates
+        const commissionRows = await prisma.$queryRaw<any[]>`
+          SELECT
+            id,
+            order_id,
+            order_date,
+            commission_charged,
+            attributed_revenue,
+            status
+          FROM commission_records
+          WHERE shop_id = ${shop.id}
+            AND commission_charged > 0
+            AND deleted_at IS NULL
+          ORDER BY order_date DESC
+        `;
+
         const usageRecordsMap = new Map<string, InvoiceItem>();
 
-        // Convert map to array
+        for (const row of commissionRows) {
+          if (startDate || endDate) {
+            const recordDate = new Date(row.order_date);
+            const recordDateStr = recordDate.toISOString().split("T")[0];
+
+            if (startDate && recordDateStr < startDate) continue;
+            if (endDate && recordDateStr > endDate) continue;
+          }
+
+          const item = commissionRowToInvoiceItem(row);
+          usageRecordsMap.set(item.id, item);
+        }
+
         usageRecords = Array.from(usageRecordsMap.values());
 
-        // Sort by date descending
         usageRecords.sort(
           (a, b) =>
             new Date(b.createdAt || b.date).getTime() -
@@ -271,7 +325,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
           `Created ${usageRecords.length} usage records from commission records`,
         );
 
-        // Apply pagination if we have records from commission data
         if (usageRecords.length > 0) {
           const paginatedItems = usageRecords.slice(offset, offset + limit);
           const totalCount = usageRecords.length;
