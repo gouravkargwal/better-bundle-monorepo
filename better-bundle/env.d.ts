@@ -35,6 +35,11 @@ declare namespace NodeJS {
     // Python Worker
     PYTHON_WORKER_API_URL?: string;
 
+    // Extension build-time injection (Shopify CLI replaces process.env.* in
+    // extension bundles at build / deploy time).
+    VITE_BACKEND_URL?: string;
+    VITE_SHOPIFY_APP_URL?: string;
+
     // Server
     HOST?: string;
     PORT?: string;

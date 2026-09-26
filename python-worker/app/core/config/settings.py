@@ -2,7 +2,7 @@
 Application settings and configuration management
 """
 
-from typing import List, Optional
+from typing import List
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
 
@@ -12,28 +12,20 @@ from app.shared.constants.app import (
     DEFAULT_PORT,
     HEALTH_CHECK_TIMEOUT,
     ENVIRONMENT_DEVELOPMENT,
-    DEFAULT_WORKER_ID,
-    DEFAULT_WORKER_CONCURRENCY,
-    DEFAULT_BATCH_SIZE,
-    DEFAULT_POLLING_INTERVAL_MS,
-    DEFAULT_IDLE_SLEEP_SECONDS,
-    DEFAULT_ERROR_SLEEP_SECONDS,
+    ENVIRONMENT_PRODUCTION,
 )
 from app.shared.constants.redis import (
     DEFAULT_REDIS_PORT,
     DEFAULT_REDIS_DB,
     DEFAULT_REDIS_TLS,
 )
-from app.core.exceptions import ConfigurationError, EnvironmentVariableError
+from app.core.exceptions import ConfigurationError
 
 
 class DatabaseSettings(BaseSettings):
     """Database configuration settings"""
 
-    DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@postgres:5432/betterbundle",
-        env="DATABASE_URL",
-    )
+    DATABASE_URL: str = Field(default="", env="DATABASE_URL")
     # Control SQLAlchemy logging of SQL and pool events
     SQLALCHEMY_ECHO: bool = Field(default=False, env="SQLALCHEMY_ECHO")
     SQLALCHEMY_ECHO_POOL: bool = Field(default=False, env="SQLALCHEMY_ECHO_POOL")
@@ -41,7 +33,9 @@ class DatabaseSettings(BaseSettings):
     @validator("DATABASE_URL")
     def validate_database_url(cls, v):
         if not v:
-            return "postgresql+asyncpg://postgres:postgres@postgres:5432/betterbundle"
+            raise ValueError(
+                "DATABASE_URL is required. Set it in your environment or .env file."
+            )
         return v
 
 
@@ -73,13 +67,6 @@ class ShopifySettings(BaseSettings):
     SHOPIFY_APP_URL: str = Field(default="http://localhost:3000", env="SHOPIFY_APP_URL")
     SHOPIFY_ACCESS_TOKEN: str = Field(default="", env="SHOPIFY_ACCESS_TOKEN")
 
-    # App Identity Configuration
-    # Note: SHOPIFY_APP_ID is the GraphQL app ID (gid://shopify/App/...), not the client_id from shopify.app.toml
-    SHOPIFY_APP_ID: str = Field(
-        default="gid://shopify/App/277451505665", env="SHOPIFY_APP_ID"
-    )
-    SHOPIFY_APP_TITLE: str = Field(default="BetterBundle", env="SHOPIFY_APP_TITLE")
-
     # API Configuration
     SHOPIFY_API_RATE_LIMIT: int = Field(default=40, env="SHOPIFY_API_RATE_LIMIT")
     SHOPIFY_API_BATCH_SIZE: int = Field(default=250, env="SHOPIFY_API_BATCH_SIZE")
@@ -91,83 +78,20 @@ class ShopifySettings(BaseSettings):
 
 
 class MLSettings(BaseSettings):
-    """Machine Learning configuration settings"""
+    """Machine Learning / AI configuration settings"""
 
-    # Training Configuration
-    MIN_ORDERS_FOR_TRAINING: int = Field(default=1, env="MIN_ORDERS_FOR_TRAINING")
-    MIN_PRODUCTS_FOR_TRAINING: int = Field(default=20, env="MIN_PRODUCTS_FOR_TRAINING")
-    MAX_RECOMMENDATIONS: int = Field(default=10, env="MAX_RECOMMENDATIONS")
-    MIN_CONFIDENCE_THRESHOLD: float = Field(default=0.3, env="MIN_CONFIDENCE_THRESHOLD")
+    # Provider selection: "gemini" (AI Studio) or "vertex" (Vertex AI)
+    AI_PROVIDER: str = Field(default="gemini", env="AI_PROVIDER")
 
-    # Feature Computation
-    TRANSFORM_FALLBACK_DAYS: int = Field(default=90, env="TRANSFORM_FALLBACK_DAYS")
-    PRICE_TIER_LOW_MAX: float = Field(default=20.0, env="PRICE_TIER_LOW_MAX")
-    PRICE_TIER_HIGH_MIN: float = Field(default=100.0, env="PRICE_TIER_HIGH_MIN")
-    TIME_DECAY_LAMBDA: float = Field(default=0.07, env="TIME_DECAY_LAMBDA")
-
-    # Cross-encoder / bi-encoder settings (Phase 1 — semantic similarity)
-    CROSS_ENCODER_ENABLED: bool = Field(default=True, env="CROSS_ENCODER_ENABLED")
-    BI_ENCODER_MODEL: str = Field(default="all-MiniLM-L6-v2", env="BI_ENCODER_MODEL")
-    CROSS_ENCODER_MODEL: str = Field(
-        default="cross-encoder/ms-marco-MiniLM-L-6-v2", env="CROSS_ENCODER_MODEL"
-    )
-    ENABLE_HEAVY_RERANK: bool = Field(default=False, env="ENABLE_HEAVY_RERANK")
-
-    # Google AI (Gemini / Vertex AI) - Gorse LLM reranking + item embeddings
-    # Gated separately from AI_PROVIDER since embedding calls cost money per item;
-    # disabled by default so syncs don't silently rack up Gemini API charges.
-    ENABLE_ITEM_EMBEDDINGS: bool = Field(default=False, env="ENABLE_ITEM_EMBEDDINGS")
-    AI_PROVIDER: str = Field(default="gemini", env="AI_PROVIDER")  # "gemini" | "vertex"
+    # Gemini / AI Studio
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
+
+    # Vertex AI
     VERTEX_PROJECT_ID: str = Field(default="", env="VERTEX_PROJECT_ID")
     VERTEX_LOCATION: str = Field(default="us-central1", env="VERTEX_LOCATION")
-    AI_EMBEDDING_MODEL: str = Field(
-        default="gemini-embedding-001", env="AI_EMBEDDING_MODEL"
-    )
-    AI_EMBEDDING_DIMENSIONS: int = Field(default=768, env="AI_EMBEDDING_DIMENSIONS")
+
+    # Chat / enrichment model
     AI_CHAT_MODEL: str = Field(default="gemini-2.5-flash-lite", env="AI_CHAT_MODEL")
-    AI_RERANK_TOKEN: str = Field(default="", env="AI_RERANK_TOKEN")
-
-
-class WorkerSettings(BaseSettings):
-    """Worker configuration settings"""
-
-    WORKER_ID: str = Field(default=DEFAULT_WORKER_ID, env="WORKER_ID")
-    WORKER_CONCURRENCY: int = Field(
-        default=DEFAULT_WORKER_CONCURRENCY, env="WORKER_CONCURRENCY"
-    )
-
-    # Consumer Configuration
-    ENABLE_FEATURES_CONSUMER: bool = Field(default=True, env="ENABLE_FEATURES_CONSUMER")
-    ENABLE_ML_TRAINING_CONSUMER: bool = Field(
-        default=True, env="ENABLE_ML_TRAINING_CONSUMER"
-    )
-    ENABLE_COMPLETION_HANDLER: bool = Field(
-        default=True, env="ENABLE_COMPLETION_HANDLER"
-    )
-    ENABLE_HEURISTIC_DECISION_CONSUMER: bool = Field(
-        default=True, env="ENABLE_HEURISTIC_DECISION_CONSUMER"
-    )
-
-    # Resource Optimization
-    CONSUMER_POLLING_INTERVAL_MS: int = Field(
-        default=DEFAULT_POLLING_INTERVAL_MS, env="CONSUMER_POLLING_INTERVAL_MS"
-    )
-    CONSUMER_BATCH_SIZE: int = Field(
-        default=DEFAULT_BATCH_SIZE, env="CONSUMER_BATCH_SIZE"
-    )
-    CONSUMER_IDLE_SLEEP_SECONDS: int = Field(
-        default=DEFAULT_IDLE_SLEEP_SECONDS, env="CONSUMER_IDLE_SLEEP_SECONDS"
-    )
-    CONSUMER_ERROR_SLEEP_SECONDS: int = Field(
-        default=DEFAULT_ERROR_SLEEP_SECONDS, env="CONSUMER_ERROR_SLEEP_SECONDS"
-    )
-
-    # Redis Timeout Settings
-    REDIS_TIMEOUT_BUFFER_SECONDS: int = Field(
-        default=60,
-        env="REDIS_TIMEOUT_BUFFER_SECONDS",  # Increased from 30 to 60 for better database reliability
-    )
 
 
 class LoggingSettings(BaseSettings):
@@ -214,9 +138,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = Field(default=ENVIRONMENT_DEVELOPMENT, env="ENVIRONMENT")
 
     # Security Configuration
-    SECRET_KEY: str = Field(
-        default="your-secret-key-change-in-production", env="SECRET_KEY"
-    )
+    SECRET_KEY: str = Field(default="", env="SECRET_KEY")
 
     # Admin / operations console
     ADMIN_CRON_SECRET: str = Field(default="", env="ADMIN_CRON_SECRET")
@@ -229,11 +151,7 @@ class Settings(BaseSettings):
     redis: RedisSettings = RedisSettings()
     shopify: ShopifySettings = ShopifySettings()
     ml: MLSettings = MLSettings()
-    worker: WorkerSettings = WorkerSettings()
     logging: LoggingSettings = LoggingSettings()
-
-    # External Services
-    ML_API_URL: str = Field(default="http://localhost:8000", env="ML_API_URL")
 
     # OpenObserve (new observability platform)
     OPENOBSERVE_ENDPOINT: str = Field(
@@ -263,51 +181,18 @@ class Settings(BaseSettings):
     def REDIS_TLS(self) -> bool:
         return self.redis.REDIS_TLS
 
-    # Redis Stream Names (Direct access for backward compatibility)
-    # These are the stream/topic names used for inter-service messaging.
-    # They can be overridden via env vars if needed.
-    ML_TRAINING_STREAM: str = "ml-training"
-    ANALYSIS_RESULTS_STREAM: str = "analysis-results"
-    USER_NOTIFICATIONS_STREAM: str = "user-notifications"
-    FEATURES_COMPUTED_STREAM: str = "features-computed"
-    ML_TRAINING_COMPLETE_STREAM: str = "ml-training-complete"
-    HEURISTIC_DECISION_REQUESTED_STREAM: str = "heuristic-decision-requested"
-    HEURISTIC_DECISION_MADE_STREAM: str = "heuristic-decision-made"
-    HEURISTIC_DECISION_STREAM: str = "heuristic-decision"
-    NEXT_ANALYSIS_SCHEDULED_STREAM: str = "next-analysis-scheduled"
-    COMPLETION_RESULTS_STREAM: str = "completion-results"
-    COMPLETION_EVENTS_STREAM: str = "completion-events"
-    BEHAVIORAL_EVENTS_STREAM: str = "behavioral-events"
-
-    # Worker Configuration (Direct access for backward compatibility)
-    @property
-    def WORKER_ID(self) -> str:
-        return self.worker.WORKER_ID
-
-    @property
-    def REDIS_TIMEOUT_BUFFER_SECONDS(self) -> int:
-        return self.worker.REDIS_TIMEOUT_BUFFER_SECONDS
-
     # Retry Configuration
-    MAX_RETRIES: int = Field(default=5, env="MAX_RETRIES")  # Increased from 3 to 5
-    RETRY_DELAY: float = Field(
-        default=2.0, env="RETRY_DELAY"
-    )  # Increased from 1.0 to 2.0
+    MAX_RETRIES: int = Field(default=5, env="MAX_RETRIES")
+    RETRY_DELAY: float = Field(default=2.0, env="RETRY_DELAY")
     RETRY_BACKOFF: float = Field(default=2.0, env="RETRY_BACKOFF")
 
-    # Database Timeout Configuration - Industry Standard
-    DATABASE_CONNECT_TIMEOUT: int = Field(
-        default=10, env="DATABASE_CONNECT_TIMEOUT"
-    )  # Reduced from 30
-    DATABASE_QUERY_TIMEOUT: int = Field(
-        default=30, env="DATABASE_QUERY_TIMEOUT"
-    )  # Reduced from 60
-    DATABASE_POOL_TIMEOUT: int = Field(
-        default=10, env="DATABASE_POOL_TIMEOUT"
-    )  # Reduced from 30
+    # Database Timeout Configuration
+    DATABASE_CONNECT_TIMEOUT: int = Field(default=10, env="DATABASE_CONNECT_TIMEOUT")
+    DATABASE_QUERY_TIMEOUT: int = Field(default=30, env="DATABASE_QUERY_TIMEOUT")
+    DATABASE_POOL_TIMEOUT: int = Field(default=10, env="DATABASE_POOL_TIMEOUT")
     DATABASE_HEALTH_CHECK_INTERVAL: int = Field(
         default=300, env="DATABASE_HEALTH_CHECK_INTERVAL"
-    )  # 5 minutes
+    )
 
     # Health Check Configuration
     HEALTH_CHECK_TIMEOUT: int = Field(
@@ -315,38 +200,39 @@ class Settings(BaseSettings):
     )
 
     # CORS Configuration
-    # Should be configured via env vars in production; never use ["*"] in production.
-    CORS_ORIGINS: List[str] = Field(
-        default=[],
-        env="CORS_ORIGINS",
-    )
-
-    # SendPulse Email Configuration
-    SENDPULSE_USER_ID: str = Field(default="", env="SENDPULSE_USER_ID")
-    SENDPULSE_SECRET: str = Field(default="", env="SENDPULSE_SECRET")
-    SENDPULSE_SENDER_EMAIL: str = Field(
-        default="noreply@betterbundle.com", env="SENDPULSE_SENDER_EMAIL"
-    )
-    SENDPULSE_SENDER_NAME: str = Field(
-        default="BetterBundle", env="SENDPULSE_SENDER_NAME"
-    )
+    CORS_ORIGINS: List[str] = Field(default=[], env="CORS_ORIGINS")
 
     class Config:
-        env_file = [".env.local", ".env"]  # Try .env.local first, then .env
+        env_file = [".env.local", ".env"]
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "allow"
 
     def validate_configuration(self) -> None:
-        """Validate the complete configuration"""
-        try:
-            # For development, we'll use defaults if not provided
-            # In production, these should be properly configured
-            pass
+        """Validate the complete configuration.
 
+        In production, critical secrets and URLs must be explicitly set.
+        Missing values raise ConfigurationError instead of silently falling
+        back to hardcoded defaults.
+        """
+        try:
+            if self.ENVIRONMENT == ENVIRONMENT_PRODUCTION:
+                missing = []
+                if not self.SECRET_KEY:
+                    missing.append("SECRET_KEY")
+                if not self.ADMIN_CRON_SECRET:
+                    missing.append("ADMIN_CRON_SECRET")
+                if not self.ADMIN_PASSWORD:
+                    missing.append("ADMIN_PASSWORD")
+                if not self.ADMIN_SECRET_KEY:
+                    missing.append("ADMIN_SECRET_KEY")
+                if missing:
+                    raise ConfigurationError(
+                        f"Missing required production configuration: {', '.join(missing)}"
+                    )
+        except ConfigurationError:
+            raise
         except Exception as e:
-            if isinstance(e, ConfigurationError):
-                raise
             raise ConfigurationError(f"Configuration validation failed: {str(e)}")
 
 

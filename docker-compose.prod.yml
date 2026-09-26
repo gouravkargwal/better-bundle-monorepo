@@ -37,6 +37,8 @@ services:
         condition: service_healthy
       python-worker:
         condition: service_healthy
+      openobserve:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/"]
@@ -344,8 +346,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-
-
   # ==================== PYTHON WORKER ====================
   python-worker:
     build:
@@ -363,6 +363,12 @@ services:
       - OTEL_SEMCONV_STABILITY_OPT_IN=http
     env_file:
       - .env.prod
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     volumes:
       # Vertex AI service-account credentials (AI_PROVIDER=vertex), referenced by
       # GOOGLE_APPLICATION_CREDENTIALS in .env.prod. Place the real key file at
@@ -376,6 +382,8 @@ services:
       redis:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      openobserve:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -391,58 +399,6 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        labels: "service,container"
-
-  # ==================== DJANGO ADMIN (BACKOFFICE) ====================
-  admin:
-    build:
-      context: ./admin
-      dockerfile: Dockerfile
-    container_name: betterbundle-admin
-    ports:
-      - "127.0.0.1:8003:8000"
-    env_file:
-      - .env.prod
-    environment:
-      DB_HOST: postgres
-      DB_PORT: "5432"
-    networks:
-      - frontend
-      - backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      kafka:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c ''import urllib.request; urllib.request.urlopen("http://localhost:8000/")'' || exit 1',
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    deploy:
-      resources:
-        limits:
-          # 0.5 -> 0.25. A low-traffic internal console does not need a quarter of the box.
-          cpus: "0.25"
-          memory: 384M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
     security_opt:
       - no-new-privileges:true
     logging:
@@ -491,20 +447,9 @@ services:
     env_file:
       - .env.prod
     environment:
-      - ZO_ROOT_USER_EMAIL=admin@betterbundle.io
-      - ZO_ROOT_USER_PASSWORD=${OPENOBSERVE_ADMIN_PASSWORD}
-      # Local disk, same as dev — one storage path to reason about instead of
-      # two, and no AWS account or egress in the loop. Logs live on the
-      # `openobserve_data` volume, so that volume is now the only copy: it
-      # needs to be in the block-volume backup set.
       - ZO_DATA_DIR=/data
       - ZO_LOCAL_MODE=true
       - ZO_TELEMETRY=false
-      # Retention. Without this OpenObserve keeps data for its default 3650
-      # days, i.e. forever, on a local disk volume. Trace volume measured at
-      # ~41k spans/day is harmless per day and 15M/year is not; the dashboards
-      # and alerts all query windows of minutes to 24h, so nothing reads past
-      # a fortnight. Traces are the bulk and expire first.
       - ZO_COMPACT_DATA_RETENTION_DAYS=30
     ports:
       - "127.0.0.1:5080:5080"
@@ -513,6 +458,12 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/openobserve", "node", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -532,7 +483,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
 
   # ── OpenObserve config import ────────────────────────
   # One-shot: brings the dashboards, alerts and destinations in this repo into

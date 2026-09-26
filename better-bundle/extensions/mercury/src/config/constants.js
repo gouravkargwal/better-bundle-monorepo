@@ -4,8 +4,13 @@
 // reachable host: localhost is not visible to them. During local development
 // that means a tunnel to the Python worker on port 8000.
 //
-// Production: https://api.betterbundle.site
-export const BACKEND_URL = "https://nonconscientious-annette-saddeningly.ngrok-free.dev";
+// Injected at build time by Shopify CLI via `process.env.VITE_BACKEND_URL`.
+// Falls back to the production domain so the extension never ships a broken
+// URL. Example:
+//
+//   VITE_BACKEND_URL=https://api.betterbundle.online shopify app dev
+export const BACKEND_URL =
+  process.env.VITE_BACKEND_URL || "https://api.betterbundle.online";
 
 // Storage Keys - Centralized storage key constants
 export const STORAGE_KEYS = {

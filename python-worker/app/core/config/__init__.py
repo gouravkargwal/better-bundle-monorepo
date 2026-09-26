@@ -5,11 +5,10 @@ Configuration module for BetterBundle Python Worker
 from .settings import settings, Settings
 from .settings import (
     DatabaseSettings,
-    RedisSettings, 
+    RedisSettings,
     ShopifySettings,
     MLSettings,
-    WorkerSettings,
-    LoggingSettings
+    LoggingSettings,
 )
 
 __all__ = [
@@ -17,8 +16,7 @@ __all__ = [
     "Settings",
     "DatabaseSettings",
     "RedisSettings",
-    "ShopifySettings", 
+    "ShopifySettings",
     "MLSettings",
-    "WorkerSettings",
     "LoggingSettings",
 ]

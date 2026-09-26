@@ -165,3 +165,4 @@ cookd-prod-vertex-key.json
 # Credentials directory
 .credentials/
 csv_data/
+graphify-out/

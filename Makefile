@@ -12,7 +12,7 @@
 #
 # Anything that talks to a real Shopify store needs SHOP and TOKEN passed in.
 
-ENV ?= dev
+ENV ?= prod
 COMPOSE := docker compose -f docker-compose.$(ENV).yml
 WORKER  := $(COMPOSE) exec python-worker
 

@@ -56,16 +56,12 @@ def create_sample_env_file(env_file):
 NODE_ENV=development
 DEBUG=true
 LOG_LEVEL=debug
-HOT_RELOAD=true
 PORT=8001
 
 # ===========================================
 # DATABASE CONFIGURATION
 # ===========================================
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/betterbundle
-POSTGRES_DB=betterbundle
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
 
 # ===========================================
 # REDIS CONFIGURATION
@@ -79,15 +75,7 @@ REDIS_DB=0
 # ===========================================
 # KAFKA CONFIGURATION
 # ===========================================
-KAFKA_BROKERS=localhost:9092
 KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-
-# ===========================================
-# GORSE RECOMMENDATION ENGINE
-# ===========================================
-GORSE_BASE_URL=http://localhost:8088
-GORSE_API_KEY=secure_random_key_123
-GORSE_LOG_LEVEL=debug
 
 # ===========================================
 # SHOPIFY APP CONFIGURATION (Development)
@@ -98,20 +86,12 @@ SHOPIFY_API_KEY=abc123def456ghi789jkl012mno345pqr678
 SHOPIFY_API_SECRET=xyz789uvw456rst123def456ghi789jkl012mno345pqr678
 
 # ===========================================
-# MONITORING & LOGGING
-# ===========================================
-LOKI_URL=http://localhost:3100
-GF_SECURITY_ADMIN_USER=admin
-GF_SECURITY_ADMIN_PASSWORD=admin
-GF_USERS_ALLOW_SIGN_UP=false
-GF_SERVER_ROOT_URL=http://localhost:3001
-GF_INSTALL_PLUGINS=redis-datasource
-
-# ===========================================
 # SECURITY & ENCRYPTION (Development)
 # ===========================================
-JWT_SECRET=dev_jwt_secret_123
-ENCRYPTION_KEY=dev_encryption_key_123
+SECRET_KEY=dev_secret_key_123
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=dev_admin_password_123
+ADMIN_SECRET_KEY=dev_admin_secret_key_123
 """
 
     with open(env_file, "w") as f:
@@ -131,8 +111,6 @@ os.environ.setdefault("REDIS_HOST", "localhost")
 os.environ.setdefault("REDIS_PORT", "6379")
 os.environ.setdefault("REDIS_PASSWORD", "")
 os.environ.setdefault("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-os.environ.setdefault("GORSE_BASE_URL", "http://localhost:8088")
-os.environ.setdefault("LOKI_URL", "http://localhost:3100")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("LOG_LEVEL", "debug")
 os.environ.setdefault("PORT", "8001")

@@ -58,7 +58,14 @@ target_metadata = Base.metadata
 
 def get_url() -> str:
     """The application's own DSN."""
-    return settings.database.DATABASE_URL
+    database_url = settings.database.DATABASE_URL
+    # Convert sync driver URLs to async so async_engine_from_config can build
+    # the engine. The app's own engine.py does the same conversion at runtime;
+    # migrations must do it too, otherwise asyncpg is never selected and
+    # alembic crashes with "The asyncio extension requires an async driver".
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return database_url
 
 
 def include_object(obj, name, type_, reflected, compare_to):

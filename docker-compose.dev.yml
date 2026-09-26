@@ -231,12 +231,7 @@ services:
       kafka_b:
         condition: service_healthy
       openobserve:
-        # No healthcheck on the OpenObserve image, so this only orders startup.
-        # That is enough: it closes the window where the worker's own startup
-        # logs and migration spans — the ones you actually want when a deploy
-        # goes wrong — are exported into a refused connection and dropped by
-        # the batch processors without an error anyone sees.
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     # The largest ceiling, because this is the process that legitimately needs
     # headroom: a catalog sweep and an embedding run both hold real data. It is
@@ -285,6 +280,12 @@ services:
     volumes:
       - openobserve_data:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/openobserve", "node", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     # Observability must never be the reason the thing it observes goes down —
     # but it must not be starved into a crash loop either. 300m put this into
     # one: OOM-killed on ingest, restarted, killed again, taking the cost

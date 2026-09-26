@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database.models import (
@@ -96,57 +97,68 @@ class CommissionServiceV2:
                 )
                 return None
 
-            commission = await self._create_commission_by_type(
-                shop_id,
-                purchase_attribution_id,
-                shop_subscription,
-                commission_data,
-                purchase_attr,
-            )
-
-            if commission:
-                # Record what priced this charge. Stored, not re-derived: a
-                # later rate refresh must not restate an invoice the merchant
-                # has already paid, and a billing dispute needs an answer.
-                commission.source_currency = converted.source_currency
-                commission.fx_rate = converted.rate
-
-                await self.commission_repository.commit()
-                logger.info(
-                    f"✅ Created commission: ${commission.commission_earned} "
-                    f"({commission.billing_phase.value}, {commission.charge_type.value})"
+            try:
+                commission = await self._create_commission_by_type(
+                    shop_id,
+                    purchase_attribution_id,
+                    shop_subscription,
+                    commission_data,
+                    purchase_attr,
                 )
 
-                # ✅ Publish Kafka event for async Shopify usage recording (PAID commissions only)
-                # Skip publishing if shop subscription is SUSPENDED — the rollover reconciler drains it on reactivation
-                if (
-                    commission.billing_phase == BillingPhase.PAID
-                    and commission.commission_charged > 0
-                    and commission.status == CommissionStatus.PENDING
-                    and shop_subscription.status == SubscriptionStatus.ACTIVE
-                ):
-                    try:
+                if commission:
+                    # Record what priced this charge. Stored, not re-derived: a
+                    # later rate refresh must not restate an invoice the merchant
+                    # has already paid, and a billing dispute needs an answer.
+                    commission.source_currency = converted.source_currency
+                    commission.fx_rate = converted.rate
 
-                        event_publisher = EventPublisher(kafka_settings.model_dump())
-                        await event_publisher.initialize()
+                    await self.commission_repository.commit()
+                    logger.info(
+                        f"✅ Created commission: ${commission.commission_earned} "
+                        f"({commission.billing_phase.value}, {commission.charge_type.value})"
+                    )
 
-                        await event_publisher.publish_shopify_usage_event(
-                            {
-                                "event_type": "record_usage",
-                                "shop_id": shop_id,
-                                "commission_id": commission.id,
-                            }
-                        )
+                    # ✅ Publish Kafka event for async Shopify usage recording (PAID commissions only)
+                    # Skip publishing if shop subscription is SUSPENDED — the rollover reconciler drains it on reactivation
+                    if (
+                        commission.billing_phase == BillingPhase.PAID
+                        and commission.commission_charged > 0
+                        and commission.status == CommissionStatus.PENDING
+                        and shop_subscription.status == SubscriptionStatus.ACTIVE
+                    ):
+                        try:
 
-                        logger.info(
-                            f"📤 Published Shopify usage recording event for commission {commission.id}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"❌ Failed to publish Shopify usage event for commission {commission.id}: {e}",
-                            exc_info=True,
-                        )
-                        # Don't fail the entire flow - can retry later
+                            event_publisher = EventPublisher(kafka_settings.model_dump())
+                            await event_publisher.initialize()
+
+                            await event_publisher.publish_shopify_usage_event(
+                                {
+                                    "event_type": "record_usage",
+                                    "shop_id": shop_id,
+                                    "commission_id": commission.id,
+                                }
+                            )
+
+                            logger.info(
+                                f"📤 Published Shopify usage recording event for commission {commission.id}"
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"❌ Failed to publish Shopify usage event for commission {commission.id}: {e}",
+                                exc_info=True,
+                            )
+                            # Don't fail the entire flow - can retry later
+
+            except IntegrityError:
+                await self.session.rollback()
+                logger.info(
+                    f"🔁 Duplicate commission race for attribution {purchase_attribution_id}; "
+                    f"returning existing row"
+                )
+                return await self.commission_repository.get_by_purchase_attribution_id(
+                    purchase_attribution_id
+                )
 
             return commission
 

@@ -155,6 +155,12 @@ services:
     networks:
       - betterbundle-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/openobserve", "node", "status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 
   # ── OpenObserve config import ────────────────────────
@@ -169,7 +175,8 @@ services:
     image: python:3.12-alpine
     container_name: betterbundle-openobserve-import
     depends_on:
-      - openobserve
+      openobserve:
+        condition: service_healthy
     environment:
       # Derived from this file's own ZO_ROOT_USER_* values above — the local
       # stack has no .env, and OpenObserve's API key is just basic auth. Local
