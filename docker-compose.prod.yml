@@ -23,6 +23,9 @@ services:
       # panel or alert could cover both, and the dashboards only query the
       # stable name, so remix-app's request timings appeared nowhere.
       - OTEL_SEMCONV_STABILITY_OPT_IN=http
+      - VIRTUAL_HOST=betterbundle.online,app.betterbundle.online
+      - VIRTUAL_PORT=3000
+      - LETSENCRYPT_HOST=betterbundle.online,app.betterbundle.online
     env_file:
       - .env.prod
     networks:
@@ -361,6 +364,9 @@ services:
       # OpenObserve are the pre-1.23 ones, which no off-the-shelf dashboard or
       # runbook is written against.
       - OTEL_SEMCONV_STABILITY_OPT_IN=http
+      - VIRTUAL_HOST=api.betterbundle.online
+      - VIRTUAL_PORT=8000
+      - LETSENCRYPT_HOST=api.betterbundle.online
     env_file:
       - .env.prod
     healthcheck:
@@ -408,30 +414,45 @@ services:
         max-file: "3"
         labels: "service,container"
 
-  # ==================== NGINX PROXY MANAGER ====================
-  nginx-proxy-manager:
-    image: jc21/nginx-proxy-manager:latest
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:latest
     container_name: betterbundle-nginx-proxy
     ports:
       - "80:80"
       - "443:443"
-      - "81:81"
     volumes:
-      - npm_data:/data
-      - npm_letsencrypt:/etc/letsencrypt
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - nginx_conf:/etc/nginx/conf.d
+      - nginx_vhost:/etc/nginx/vhost.d
+      - nginx_html:/usr/share/nginx/html
+      - nginx_certs:/etc/nginx/certs:ro
     networks:
       - frontend
       - backend
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          # 0.5 -> 0.25. A reverse proxy at this request volume is nearly idle; it needs headroom for TLS bursts, not a fixed quarter-box.
-          cpus: "0.25"
-          memory: 384M
-        reservations:
-          cpus: "0.25"
-          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  acme-companion:
+    image: nginxproxy/acme-companion:latest
+    container_name: betterbundle-acme-companion
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - nginx_certs:/etc/nginx/certs:rw
+      - acme_data:/etc/acme.sh
+    environment:
+      DEFAULT_EMAIL: admin@betterbundle.online
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     logging:
@@ -451,6 +472,9 @@ services:
       - ZO_LOCAL_MODE=true
       - ZO_TELEMETRY=false
       - ZO_COMPACT_DATA_RETENTION_DAYS=30
+      - VIRTUAL_HOST=observe.betterbundle.online
+      - VIRTUAL_PORT=5080
+      - LETSENCRYPT_HOST=observe.betterbundle.online
     ports:
       - "127.0.0.1:5080:5080"
     volumes:
@@ -518,6 +542,9 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
-  npm_data:
-  npm_letsencrypt:
+  nginx_conf:
+  nginx_vhost:
+  nginx_html:
+  nginx_certs:
+  acme_data:
   openobserve_data:

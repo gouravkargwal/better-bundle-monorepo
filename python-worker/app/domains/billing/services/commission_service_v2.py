@@ -1,11 +1,11 @@
 import logging
-import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
 
 from app.core.database.models import (
     CommissionRecord,
@@ -25,12 +25,14 @@ from app.core.database.models.order_data import OrderData
 from app.core.database.models.shop import Shop
 from .fx import convert_to_usd
 from ..repositories.billing_repository_v2 import BillingRepositoryV2
+from ..services.shopify_usage_billing_service_v2 import ShopifyUsageBillingServiceV2
 from app.repository.CommissionRepository import CommissionRepository
 from app.repository.PurchaseAttributionRepository import PurchaseAttributionRepository
 from app.core.messaging.event_publisher import EventPublisher
 from app.core.config.kafka_settings import kafka_settings
+from app.core.database.session import get_transaction_context
 from app.core.database.models.shop_subscription import ShopSubscription
-from app.core.database.models.enums import SubscriptionStatus
+from app.core.exceptions import CapError, TransientError, PermanentError
 from sqlalchemy import update, and_
 
 logger = logging.getLogger(__name__)
@@ -39,11 +41,13 @@ logger = logging.getLogger(__name__)
 class CommissionServiceV2:
     """Updated service for managing commission records with unified subscription system"""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: Optional[AsyncSession] = None):
         self.session = session
-        self.billing_repository = BillingRepositoryV2(session)
-        self.commission_repository = CommissionRepository(session)
-        self.purchase_attribution_repository = PurchaseAttributionRepository(session)
+        self.billing_repository = BillingRepositoryV2(session) if session else None
+        self.commission_repository = CommissionRepository(session) if session else None
+        self.purchase_attribution_repository = (
+            PurchaseAttributionRepository(session) if session else None
+        )
 
     async def create_commission_record(
         self,
@@ -353,411 +357,134 @@ class CommissionServiceV2:
             currency=shop_subscription.currency,
         )
 
-    async def _suspend_shop_for_cap_reached(
-        self, shop_id: str, balance_used: Optional[Decimal] = None
-    ) -> None:
-        """Suspend shop subscription when monthly cap is reached - ATOMIC"""
-        try:
+    def _classify_shopify_user_error(self, user_errors: list) -> PermanentError:
+        """Classify a Shopify userError.
 
-            # Get active subscription for this shop
-            shop_subscription = await self.billing_repository.get_shop_subscription(
-                shop_id
-            )
-            if not shop_subscription:
-                logger.error(f"❌ No active subscription found for shop {shop_id}")
+        Until a live test call gives the exact cap-exceeded signal, treat every
+        user error as permanent. Do not guess from docs or message text.
+        """
+        if not user_errors:
+            return PermanentError("Shopify returned userErrors with no entries")
+
+        first = user_errors[0]
+        message = (first.get("message") or "").strip()
+        code = first.get("code")
+        detail = f"code={code!r}, message={message!r}" if message or code else str(first)
+
+        return PermanentError(f"Shopify user error: {detail}")
+
+    async def charge_commission_to_shopify(self, commission_id: str) -> None:
+        """Charge a single commission to Shopify using two short DB transactions
+        with the Shopify call in between.
+
+        Phase 1 — read commission in a short transaction.
+        Phase 2 — call Shopify outside any transaction.
+        Phase 3 — write outcome in a short transaction with SELECT FOR UPDATE.
+
+        Returns None on success. Raises CapError, TransientError, or
+        PermanentError on failure.
+        """
+        # Phase 1 — read in a short transaction
+        async with get_transaction_context() as session:
+            repo = CommissionRepository(session)
+            commission = await repo.get_by_id(commission_id)
+            if commission is None:
+                logger.warning("Commission not found", commission_id=commission_id)
+                return
+            if commission.status != CommissionStatus.PENDING:
                 return
 
-            metadata = dict(shop_subscription.shop_subscription_metadata or {})
-            if balance_used is not None:
-                metadata["suspended_balance_used"] = float(balance_used)
-            metadata["suspended_at"] = now_utc().isoformat()
+            shop_id = commission.shop_id
+            earned = commission.commission_earned
+            order_id = commission.order_id
+            currency = commission.currency
 
-            # Only suspend if subscription is currently ACTIVE
-            subscription_update = (
-                update(ShopSubscription)
-                .where(
-                    and_(
-                        ShopSubscription.id == shop_subscription.id,
-                        ShopSubscription.status
-                        == SubscriptionStatus.ACTIVE,  # Only suspend if currently active
-                    )
-                )
-                .values(
-                    status=SubscriptionStatus.SUSPENDED,
-                    shop_subscription_metadata=metadata,
-                    updated_at=now_utc(),
-                )
-            )
-
-            result = await self.session.execute(subscription_update)
-
-            if result.rowcount > 0:
-                logger.warning(
-                    f"🛑 Shop subscription {shop_subscription.id} suspended due to monthly cap reached for shop {shop_id} "
-                    f"(suspended_balance_used={metadata.get('suspended_balance_used')})"
-                )
-                # Write to suspension_audit_log
-                try:
-                    from app.core.database.models.suspension_audit_log import (
-                        SuspensionAuditLog,
-                    )
-                    import json
-
-                    audit_entry = SuspensionAuditLog(
-                        shop_id=shop_id,
-                        action="SUSPENDED",
-                        reason=f"Monthly usage cap reached (Shopify balance: {metadata.get('suspended_balance_used')})",
-                        triggered_by="system",
-                        metadata_json=json.dumps(metadata),
-                    )
-                    self.session.add(audit_entry)
-                except Exception as audit_err:
-                    logger.warning(
-                        f"Failed to write suspension audit log for shop {shop_id}: {audit_err}"
-                    )
-
-                # Invalidate Redis suspension cache
-                try:
-                    from app.core.redis_client import get_redis_client
-
-                    redis = await get_redis_client()
-                    await redis.delete(f"suspension:{shop_id}")
-                except Exception as cache_err:
-                    logger.debug(
-                        f"Could not invalidate redis cache for {shop_id}: {cache_err}"
-                    )
-            else:
-                logger.debug(
-                    f"Shop subscription {shop_subscription.id} was already suspended or not found"
-                )
-
-        except Exception as e:
-            logger.error(
-                f"❌ Error suspending shop subscription for shop {shop_id}: {e}"
-            )
-            raise
-
-    async def record_commission_to_shopify(
-        self, commission_id: str, shopify_billing_service
-    ) -> Dict[str, Any]:
-        commission = None
-        try:
-            # Get commission record
-            commission = await self.commission_repository.get_by_id(commission_id)
-            if not commission:
-                logger.error(f"❌ Commission {commission_id} not found")
-                return {"success": False, "error": "commission_not_found"}
-
-            # Check if already recorded AND no overflow remains to be settled
-            overflow_amount = Decimal(str(commission.commission_overflow or 0))
-            if commission.shopify_usage_record_id and overflow_amount == Decimal("0"):
-                logger.info(
-                    f"✅ Commission already recorded to Shopify (no overflow remaining)"
-                )
-                return {
-                    "success": True,
-                    "already_recorded": True,
-                    "shopify_usage_record_id": commission.shopify_usage_record_id,
-                }
-
-            # Check if this is trial phase
-            if commission.billing_phase == BillingPhase.TRIAL:
-                logger.warning(
-                    f"⚠️ Cannot record trial commission to Shopify: {commission_id}"
-                )
-                return {"success": False, "error": "trial_phase_no_charge"}
-
-            # Get shop
-            shop = await self.billing_repository.get_shop(commission.shop_id)
+            billing_repo = BillingRepositoryV2(session)
+            shop = await billing_repo.get_shop(shop_id)
             if not shop:
-                logger.error(f"❌ Shop not found")
-                return {"success": False, "error": "shop_not_found"}
+                raise PermanentError(f"Shop {shop_id} not found")
 
-            # Get subscription directly from shop_subscriptions (stateless billing)
-            shop_subscription = await self.billing_repository.get_shop_subscription(
-                commission.shop_id
-            )
+            shop_subscription = await billing_repo.get_shop_subscription(shop_id)
             if not shop_subscription:
-                logger.error(
-                    f"❌ Shop subscription not found for shop {commission.shop_id}"
+                raise PermanentError(
+                    f"Shop subscription not found for shop {shop_id}"
                 )
-                return {"success": False, "error": "subscription_not_found"}
 
-            # Check if we have Shopify line item ID
             if not shop_subscription.shopify_line_item_id:
-                logger.error(f"❌ No Shopify line item ID found")
-                return {"success": False, "error": "no_shopify_line_item"}
-
-            # Determine charge amount and idempotency key
-            is_overflow_settlement = overflow_amount > Decimal("0")
-            if is_overflow_settlement:
-                amount_to_charge = overflow_amount
-                idempotency_key = (
-                    f"{commission.shop_id}-{commission.id}-{commission.order_id}-overflow"
-                )
-            else:
-                amount_to_charge = commission.commission_charged
-                idempotency_key = (
-                    f"{commission.shop_id}-{commission.id}-{commission.order_id}"
+                raise PermanentError(
+                    f"No Shopify line item ID for shop {shop_id}"
                 )
 
-            # Check if we have positive charge amount
-            if amount_to_charge <= Decimal("0"):
-                logger.warning(f"⚠️ Commission has no charge amount: {commission_id}")
-                return {"success": False, "error": "no_charge_amount"}
+            shop_domain = shop.shop_domain
+            access_token = shop.access_token
+            line_item_id = shop_subscription.shopify_line_item_id
 
-            # Record to Shopify with retry and backoff
-            logger.info(
-                f"📤 Recording ${amount_to_charge} to Shopify (overflow_settlement={is_overflow_settlement})..."
+        # Phase 2 — Shopify call, no transaction
+        try:
+            billing_repo = BillingRepositoryV2(None) if self.billing_repository is None else self.billing_repository
+            billing_service = ShopifyUsageBillingServiceV2(
+                session=None, billing_repository=billing_repo
+            )
+            usage_record = await billing_service.record_usage(
+                shop_id=shop_id,
+                shop_domain=shop_domain,
+                access_token=access_token,
+                subscription_line_item_id=line_item_id,
+                description=f"Better Bundle - Order {order_id}",
+                amount=earned,
+                currency=currency,
+                idempotency_key=f"commission-{commission_id}",
+                commission_ids=[commission_id],
             )
 
-            max_retries = 3
-            backoff_base_seconds = 0.5
-            usage_record = None
-            last_error_message = None
-
-            cap_exceeded_error = False
-            for attempt in range(1, max_retries + 1):
-                usage_record_result = await shopify_billing_service.record_usage(
-                    shop_id=shop.id,
-                    shop_domain=shop.shop_domain,
-                    access_token=shop.access_token,
-                    subscription_line_item_id=shop_subscription.shopify_line_item_id,
-                    description=(
-                        f"Better Bundle - Order {commission.order_id} (Overflow)"
-                        if is_overflow_settlement
-                        else f"Better Bundle - Order {commission.order_id}"
-                    ),
-                    amount=amount_to_charge,
-                    currency=commission.currency,
-                    idempotency_key=idempotency_key,
-                    commission_ids=[commission.id],
+            if isinstance(usage_record, dict) and usage_record.get("error"):
+                raise self._classify_shopify_user_error(
+                    usage_record.get("user_errors", [])
                 )
 
-                # Check if Shopify returned an error (cap exceeded or other)
-                if isinstance(usage_record_result, dict) and usage_record_result.get(
-                    "error"
-                ):
-                    if usage_record_result.get("cap_exceeded"):
-                        # Cap exceeded - don't retry, handle it immediately
-                        cap_exceeded_error = True
-                        last_error_message = "Capped amount exceeded"
-                        logger.error(
-                            f"❌ Shopify rejected usage record due to cap exceeded: {usage_record_result.get('user_errors')}"
-                        )
-                        break
-                    else:
-                        # Other user error - log and retry
-                        last_error_message = f"Shopify user errors: {usage_record_result.get('user_errors')}"
-                        logger.warning(
-                            f"Shopify returned user errors (attempt {attempt}/{max_retries}): {last_error_message}"
-                        )
-                        if attempt < max_retries:
-                            sleep_seconds = backoff_base_seconds * (2 ** (attempt - 1))
-                            await asyncio.sleep(sleep_seconds)
-                        continue
-                elif usage_record_result:
-                    # Success - got a UsageRecord
-                    usage_record = usage_record_result
-                    break
-                else:
-                    # No result (None) - retry
-                    last_error_message = "Failed to create Shopify usage record"
-                    if attempt < max_retries:
-                        sleep_seconds = backoff_base_seconds * (2 ** (attempt - 1))
-                        logger.warning(
-                            f"Retry {attempt}/{max_retries} after failure recording to Shopify; sleeping {sleep_seconds:.2f}s"
-                        )
-                        await asyncio.sleep(sleep_seconds)
-
-            # Handle cap exceeded error from Shopify
-            if cap_exceeded_error:
-                # Query Shopify live status once to inspect remaining cap
-                status_data = await shopify_billing_service.get_subscription_status(
-                    shop_domain=shop.shop_domain,
-                    access_token=shop.access_token,
-                    subscription_id=shop_subscription.shopify_subscription_id,
-                )
-                line_items = (
-                    status_data.get("lineItems", [])
-                    if isinstance(status_data, dict)
-                    else []
-                )
-                pricing = (
-                    line_items[0].get("plan", {}).get("pricingDetails", {})
-                    if line_items
-                    else {}
-                )
-                capped_amount = Decimal(
-                    str(pricing.get("cappedAmount", {}).get("amount", "0"))
-                )
-                balance_used = Decimal(
-                    str(pricing.get("balanceUsed", {}).get("amount", "0"))
-                )
-                remaining = max(Decimal("0.00"), capped_amount - balance_used)
-
-                partial_record = None
-                if remaining > Decimal("0.00") and remaining < amount_to_charge:
-                    logger.info(
-                        f"Attempting partial charge of remaining ${remaining} on shop {shop.id}"
-                    )
-                    partial_key = f"{commission.shop_id}-{commission.id}-{commission.order_id}-partial"
-                    partial_result = await shopify_billing_service.record_usage(
-                        shop_id=shop.id,
-                        shop_domain=shop.shop_domain,
-                        access_token=shop.access_token,
-                        subscription_line_item_id=shop_subscription.shopify_line_item_id,
-                        description=f"Better Bundle - Order {commission.order_id} (Partial)",
-                        amount=remaining,
-                        currency=commission.currency,
-                        idempotency_key=partial_key,
-                        commission_ids=[commission.id],
-                    )
-                    if partial_result and not (
-                        isinstance(partial_result, dict)
-                        and partial_result.get("error")
-                    ):
-                        partial_record = partial_result
-
-                existing_responses = (
-                    list(commission.shopify_response)
-                    if isinstance(commission.shopify_response, list)
-                    else (
-                        [commission.shopify_response]
-                        if commission.shopify_response
-                        else []
-                    )
-                )
-
-                if partial_record:
-                    # Partial charge succeeded
-                    commission.commission_charged = (
-                        (commission.commission_charged or Decimal("0")) + remaining
-                        if is_overflow_settlement
-                        else remaining
-                    )
-                    commission.commission_overflow = (
-                        commission.commission_earned - commission.commission_charged
-                    )
-                    if not commission.shopify_usage_record_id:
-                        commission.shopify_usage_record_id = partial_record.id
-                        commission.shopify_recorded_at = now_utc()
-                    existing_responses.append(
-                        {
-                            "id": partial_record.id,
-                            "created_at": partial_record.created_at,
-                            "price": {
-                                "amount": str(remaining),
-                                "currency": commission.currency,
-                            },
-                            "idempotency_key": partial_key,
-                            "type": "partial",
-                        }
-                    )
-                    commission.shopify_response = existing_responses
-                    commission.charge_type = ChargeType.PARTIAL
-                    balance_used = balance_used + remaining
-                else:
-                    # Nothing could be charged
-                    if not is_overflow_settlement:
-                        commission.commission_overflow = commission.commission_earned
-                        commission.commission_charged = Decimal("0")
-                    commission.charge_type = ChargeType.REJECTED
-
-                # Keep status as PENDING so it can be replayed after rollover
-                commission.status = CommissionStatus.PENDING
-                commission.updated_at = now_utc()
-                await self.commission_repository.commit()
-
-                # Suspend shop with recorded live balance
-                await self._suspend_shop_for_cap_reached(
-                    commission.shop_id, balance_used=balance_used
-                )
-
-                logger.warning(
-                    f"🛑 Commission {commission_id} exceeded cap. "
-                    f"Charged: ${commission.commission_charged}, Overflow: ${commission.commission_overflow}. "
-                    f"Shop {commission.shop_id} suspended with Shopify balance ${balance_used}."
-                )
-
-                return {
-                    "success": False,
-                    "error": "cap_exceeded",
-                    "error_message": "Capped amount exceeded - Shopify rejected usage record",
-                    "commission_pending": True,
-                    "commission_charged": float(commission.commission_charged),
-                    "commission_overflow": float(commission.commission_overflow),
-                }
-
-            # Check if we still don't have a usage record (other errors)
             if not usage_record:
-                logger.error("❌ Failed to record to Shopify after retries")
-                # Commission remains PENDING - don't update status
-                await self.commission_repository.rollback()
-                return {
-                    "success": False,
-                    "error": "shopify_api_failed",
-                    "error_message": last_error_message,
-                }
+                raise PermanentError("Shopify returned no usage record")
 
-            existing_responses = (
-                list(commission.shopify_response)
-                if isinstance(commission.shopify_response, list)
-                else (
-                    [commission.shopify_response]
-                    if commission.shopify_response
-                    else []
-                )
-            )
-            record_type = "overflow_settlement" if is_overflow_settlement else "full"
-            existing_responses.append(
-                {
-                    "id": usage_record.id,
-                    "created_at": usage_record.created_at,
-                    "price": {
-                        "amount": str(amount_to_charge),
-                        "currency": usage_record.price["currencyCode"],
-                    },
-                    "idempotency_key": idempotency_key,
-                    "type": record_type,
-                }
-            )
-            commission.shopify_response = existing_responses
+            outcome = "RECORDED"
+            usage_record_id = usage_record.id
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                raise TransientError(f"Shopify 5xx: {e}") from e
+            raise PermanentError(f"Shopify HTTP error: {e}") from e
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            raise TransientError(f"Shopify connection error: {e}") from e
+        except PermanentError:
+            outcome = "FAILED"
+            logger.error("Permanent Shopify charge failure", exc_info=True)
+        except CapError:
+            outcome = "CAPPED"
 
-            if is_overflow_settlement:
-                commission.commission_charged = (
-                    commission.commission_charged or Decimal("0")
-                ) + amount_to_charge
+        # Phase 3 — write in a short transaction with SELECT FOR UPDATE
+        async with get_transaction_context() as session:
+            repo = CommissionRepository(session)
+            commission = await repo.get_for_update(commission_id, session)
+            if commission.status != CommissionStatus.PENDING:
+                return
+
+            if outcome == "RECORDED":
+                commission.shopify_usage_record_id = usage_record_id
+                commission.status = CommissionStatus.RECORDED
+                commission.commission_charged = earned
                 commission.commission_overflow = Decimal("0")
-            else:
-                commission.shopify_usage_record_id = usage_record.id
+                commission.charge_type = ChargeType.FULL
                 commission.shopify_recorded_at = now_utc()
-                commission.commission_charged = amount_to_charge
-                commission.commission_overflow = Decimal("0")
-
-            commission.charge_type = ChargeType.FULL
-            commission.status = CommissionStatus.RECORDED
-            commission.updated_at = now_utc()
-
-            await self.commission_repository.commit()
-
-            logger.info(
-                f"✅ Commission marked as RECORDED: {usage_record.id} "
-                f"(${commission.commission_charged} total charged)"
-            )
-
-            return {
-                "success": True,
-                "shopify_usage_record_id": commission.shopify_usage_record_id,
-                "commission_charged": float(commission.commission_charged),
-                "commission_overflow": float(commission.commission_overflow),
-                "charge_type": commission.charge_type.value,
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error recording to Shopify: {e}")
-            await self.commission_repository.rollback()
-            return {"success": False, "error": str(e)}
+            elif outcome == "CAPPED":
+                commission.status = CommissionStatus.CAPPED
+                await session.execute(
+                    update(ShopSubscription)
+                    .where(
+                        ShopSubscription.shop_id == shop_id,
+                        ShopSubscription.paused.is_(False),
+                    )
+                    .values(paused=True, paused_at=func.now())
+                )
+            elif outcome == "FAILED":
+                commission.status = CommissionStatus.FAILED
 
     async def get_commissions_by_shop(
         self,

@@ -20,128 +20,6 @@ from app.core.database.models import (
 
 logger = logging.getLogger(__name__)
 
-# Currency symbols mapping (same as original)
-CURRENCY_SYMBOLS = {
-    "USD": "$",
-    "EUR": "€",
-    "GBP": "£",
-    "CAD": "C$",
-    "AUD": "A$",
-    "JPY": "¥",
-    "CHF": "CHF",
-    "SEK": "kr",
-    "NOK": "kr",
-    "DKK": "kr",
-    "PLN": "zł",
-    "CZK": "Kč",
-    "HUF": "Ft",
-    "BGN": "лв",
-    "RON": "lei",
-    "HRK": "kn",
-    "RSD": "дин",
-    "MKD": "ден",
-    "BAM": "КМ",
-    "ALL": "L",
-    "ISK": "kr",
-    "UAH": "₴",
-    "RUB": "₽",
-    "BYN": "Br",
-    "KZT": "₸",
-    "GEL": "₾",
-    "AMD": "֏",
-    "AZN": "₼",
-    "KGS": "с",
-    "TJS": "SM",
-    "TMT": "T",
-    "UZS": "so'm",
-    "MNT": "₮",
-    "KHR": "៛",
-    "LAK": "₭",
-    "VND": "₫",
-    "THB": "฿",
-    "MYR": "RM",
-    "SGD": "S$",
-    "IDR": "Rp",
-    "PHP": "₱",
-    "INR": "₹",
-    "PKR": "₨",
-    "BDT": "৳",
-    "LKR": "₨",
-    "NPR": "₨",
-    "BTN": "Nu",
-    "MVR": "ރ",
-    "AFN": "؋",
-    "IRR": "﷼",
-    "IQD": "ع.د",
-    "JOD": "د.ا",
-    "KWD": "د.ك",
-    "LBP": "ل.ل",
-    "OMR": "ر.ع",
-    "QAR": "ر.ق",
-    "SAR": "ر.س",
-    "SYP": "ل.س",
-    "AED": "د.إ",
-    "YER": "﷼",
-    "ILS": "₪",
-    "JMD": "J$",
-    "BBD": "Bds$",
-    "BZD": "BZ$",
-    "XCD": "EC$",
-    "KYD": "CI$",
-    "TTD": "TT$",
-    "AWG": "ƒ",
-    "BSD": "B$",
-    "BMD": "BD$",
-    "BND": "B$",
-    "FJD": "FJ$",
-    "GYD": "G$",
-    "LRD": "L$",
-    "SBD": "SI$",
-    "SRD": "Sr$",
-    "TVD": "TV$",
-    "VES": "Bs.S",
-    "ARS": "$",
-    "BOB": "Bs",
-    "BRL": "R$",
-    "CLP": "$",
-    "COP": "$",
-    "CRC": "₡",
-    "CUP": "$",
-    "DOP": "RD$",
-    "GTQ": "Q",
-    "HNL": "L",
-    "MXN": "$",
-    "NIO": "C$",
-    "PAB": "B/.",
-    "PEN": "S/",
-    "PYG": "₲",
-    "UYU": "$U",
-    "VEF": "Bs",
-    "ZAR": "R",
-    "BWP": "P",
-    "LSL": "L",
-    "NAD": "N$",
-    "SZL": "L",
-    "ZMW": "ZK",
-    "ZWL": "Z$",
-    "AOA": "Kz",
-    "CDF": "FC",
-    "GMD": "D",
-    "GNF": "FG",
-    "KES": "KSh",
-    "MAD": "د.م.",
-    "MGA": "Ar",
-    "MUR": "₨",
-    "NGN": "₦",
-    "RWF": "RF",
-    "SLL": "Le",
-    "SOS": "S",
-    "TZS": "TSh",
-    "UGX": "USh",
-    "XAF": "FCFA",
-    "XOF": "CFA",
-}
-
 
 @dataclass
 class UsageRecord:
@@ -166,11 +44,17 @@ class ShopifyUsageBillingServiceV2:
     def __init__(self, session: AsyncSession, billing_repository: BillingRepositoryV2):
         self.session = session
         self.billing_repository = billing_repository
-        self.base_url = "https://{shop_domain}/admin/api/2025-10/graphql.json"
+        self.base_url = "https://{shop_domain}/admin/api/{api_version}/graphql.json"
+        self._api_version = None
 
-    def _get_currency_symbol(self, currency_code: str) -> str:
-        """Get currency symbol for display"""
-        return CURRENCY_SYMBOLS.get(currency_code, currency_code)
+    def _get_api_version(self):
+        if self._api_version is None:
+            try:
+                from app.core.config.settings import settings
+                self._api_version = settings.shopify.SHOPIFY_API_VERSION
+            except Exception:
+                self._api_version = "2026-07"
+        return self._api_version
 
     async def record_usage(
         self,
@@ -269,9 +153,10 @@ class ShopifyUsageBillingServiceV2:
                 logger.error("No usage record data returned")
                 return None
 
-            # ✅ CRITICAL: Store usage record AND update billing cycle usage
-            # This must succeed before commission can be marked as RECORDED
-            # If this fails, the exception will propagate and commission stays PENDING
+            # Store usage record and update billing cycle usage as best-effort.
+            # A Shopify charge is the source of truth; if local tracking fails we
+            # still mark the commission RECORDED and surface the bookkeeping error
+            # in logs. We do NOT let bookkeeping failure corrupt commission state.
             try:
                 await self._store_usage_record(
                     shop_id,
@@ -285,11 +170,9 @@ class ShopifyUsageBillingServiceV2:
                 )
             except Exception as e:
                 logger.error(
-                    f"❌ Failed to store usage record/update billing cycle: {e}. "
-                    f"Commission will NOT be marked as RECORDED."
+                    f"Failed to store usage record/update billing cycle for shop {shop_id}: {e}. "
+                    f"Shopify charge succeeded; local tracking is behind."
                 )
-                # Re-raise so caller knows usage tracking failed
-                raise
 
             logger.info(
                 f"✅ Recorded usage for shop {shop_id}: {usage_record_data['id']} "
@@ -383,7 +266,9 @@ class ShopifyUsageBillingServiceV2:
         self, shop_domain: str, access_token: str, query: str, variables: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Make a GraphQL request to Shopify"""
-        url = self.base_url.format(shop_domain=shop_domain)
+        url = self.base_url.format(
+            shop_domain=shop_domain, api_version=self._get_api_version()
+        )
 
         headers = {
             "X-Shopify-Access-Token": access_token,

@@ -2,7 +2,14 @@
 Custom exceptions for the BetterBundle Python Worker
 """
 
-from .base import BetterBundleException, DataStorageError
+from .base import (
+    BetterBundleException,
+    DataStorageError,
+    ShopifyChargeError,
+    CapError,
+    TransientError,
+    PermanentError,
+)
 from .config import (
     ConfigurationError,
     EnvironmentVariableError,
@@ -27,4 +34,8 @@ __all__ = [
     "ValidationError",
     "DataValidationError",
     "DataStorageError",
+    "ShopifyChargeError",
+    "CapError",
+    "TransientError",
+    "PermanentError",
 ]

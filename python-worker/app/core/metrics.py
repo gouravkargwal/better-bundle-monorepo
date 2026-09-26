@@ -162,9 +162,29 @@ rollover_drained_commissions = get_meter().create_counter(
     description="Pending commissions drained upon shop reactivation",
     unit="{commission}",
 )
+commission_reconciler_reset_capped_total = get_meter().create_counter(
+    f"{NS}.reconciler.commission.reset_capped_total",
+    description="CAPPED commissions reset to PENDING by the commission reconciler",
+    unit="{commission}",
+)
+commission_reconciler_republished_pending_total = get_meter().create_counter(
+    f"{NS}.reconciler.commission.republished_pending_total",
+    description="Stale PENDING commissions republished by the commission reconciler",
+    unit="{commission}",
+)
+commission_reconciler_skipped_with_usage_record_total = get_meter().create_counter(
+    f"{NS}.reconciler.commission.skipped_with_usage_record_total",
+    description="PENDING commissions skipped because they already have a shopify_usage_record_id",
+    unit="{commission}",
+)
 backstop_missed_orders = get_meter().create_counter(
     f"{NS}.reconciler.backstop.missed_orders",
     description="Missing orders detected and ingested by the ingestion backstop",
     unit="{order}",
+)
+billing_reconciliation_mismatch_total = get_meter().create_counter(
+    f"{NS}.reconciler.billing.mismatch_total",
+    description="Billing reconciliation mismatches between Shopify invoices and intended commissions",
+    unit="{mismatch}",
 )
 

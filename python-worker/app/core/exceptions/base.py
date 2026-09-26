@@ -58,3 +58,23 @@ class DataStorageError(BetterBundleException):
         base_dict = super().to_dict()
         base_dict.update({"operation": self.operation, "data_type": self.data_type})
         return base_dict
+
+
+class ShopifyChargeError(Exception):
+    """Base for Shopify usage-record charge failures."""
+    pass
+
+
+class CapError(ShopifyChargeError):
+    """Raised when a usage charge would exceed the merchant's cap."""
+    pass
+
+
+class TransientError(ShopifyChargeError):
+    """Raised for retryable failures: 5xx, timeout, connection error."""
+    pass
+
+
+class PermanentError(ShopifyChargeError):
+    """Raised for non-retryable failures: bad request, uninstalled shop, invalid token."""
+    pass

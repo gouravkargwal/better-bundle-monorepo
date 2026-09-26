@@ -202,7 +202,58 @@ services:
       timeout: 3s
       retries: 5
 
-  # ==================== PYTHON WORKER ====================
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:latest
+    container_name: betterbundle-nginx-proxy-dev
+    ports:
+       - "80:80"
+    volumes:
+       - /var/run/docker.sock:/tmp/docker.sock:ro
+       - nginx_conf:/etc/nginx/conf.d
+       - nginx_vhost:/etc/nginx/vhost.d
+       - nginx_html:/usr/share/nginx/html
+       - nginx_certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+ 
+  # ==================== REMIX APPLICATION ====================
+  remix-app:
+    build:
+      context: ./better-bundle
+      dockerfile: Dockerfile.dev
+    container_name: betterbundle-remix-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - VIRTUAL_HOST=betterbundle.localhost,app.betterbundle.localhost
+      - VIRTUAL_PORT=3000
+    env_file:
+      - .env.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka_b:
+        condition: service_healthy
+      openobserve:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    mem_limit: 800m
+    memswap_limit: 800m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=remix-app,env=dev"
+
+   # ==================== PYTHON WORKER ====================
   python-worker:
     build:
       context: ./python-worker
@@ -211,12 +262,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Emit the STABLE http semantic conventions:
-      # http.server.request.duration (seconds) rather than the older
-      # http.server.duration (milliseconds). Without this the metric names in
-      # OpenObserve are the pre-1.23 ones, which no off-the-shelf dashboard or
-      # runbook is written against.
-      - OTEL_SEMCONV_STABILITY_OPT_IN=http
+       # Emit the STABLE http semantic conventions:
+       # http.server.request.duration (seconds) rather than the older
+       # http.server.duration (milliseconds). Without this the metric names in
+       # OpenObserve are the pre-1.23 ones, which no off-the-shelf dashboard or
+       # runbook is written against.
+       - OTEL_SEMCONV_STABILITY_OPT_IN=http
+       - VIRTUAL_HOST=api.localhost
+       - VIRTUAL_PORT=8000
     env_file:
       - .env.dev
     volumes:
@@ -264,17 +317,19 @@ services:
     env_file:
       - .env.dev
     environment:
-      # Local disk only. The previous S3 block pointed at a MinIO container,
-      # which was redundant next to ZO_LOCAL_MODE and cost a whole service.
-      - ZO_DATA_DIR=/data
-      - ZO_LOCAL_MODE=true
-      - ZO_TELEMETRY=false
-      # Retention. Without this OpenObserve keeps data for its default 3650
-      # days, i.e. forever, on a local disk volume. Trace volume measured at
-      # ~41k spans/day is harmless per day and 15M/year is not; the dashboards
-      # and alerts all query windows of minutes to 24h, so nothing reads past
-      # a fortnight. Traces are the bulk and expire first.
-      - ZO_COMPACT_DATA_RETENTION_DAYS=30
+       # Local disk only. The previous S3 block pointed at a MinIO container,
+       # which was redundant next to ZO_LOCAL_MODE and cost a whole service.
+       - ZO_DATA_DIR=/data
+       - ZO_LOCAL_MODE=true
+       - ZO_TELEMETRY=false
+       # Retention. Without this OpenObserve keeps data for its default 3650
+       # days, i.e. forever, on a local disk volume. Trace volume measured at
+       # ~41k spans/day is harmless per day and 15M/year is not; the dashboards
+       # and alerts all query windows of minutes to 24h, so nothing reads past
+       # a fortnight. Traces are the bulk and expire first.
+       - ZO_COMPACT_DATA_RETENTION_DAYS=30
+       - VIRTUAL_HOST=observe.localhost
+       - VIRTUAL_PORT=5080
     ports:
       - "5080:5080"
     volumes:
@@ -320,4 +375,8 @@ volumes:
   postgres_data:
   redis_data:
   kafka_data:
+  nginx_conf:
+  nginx_vhost:
+  nginx_html:
+  nginx_certs:
   openobserve_data:

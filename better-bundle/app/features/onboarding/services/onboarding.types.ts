@@ -1,7 +1,7 @@
 // features/onboarding/services/onboarding.types.ts
 export interface OnboardingData {
   subscriptionPlan: {
-    symbol: string;
+    currency_code: string;
     /** Share of attributed revenue charged, e.g. 0.03 for 3%. */
     commission_rate: number;
     /** Maximum chargeable per 30-day cycle. */

@@ -93,14 +93,6 @@ async def lifespan(app: FastAPI):
     reconciler_task = asyncio.create_task(attribution_reconciler.run_forever())
     logger.info("✅ Attribution reconciler started")
 
-    # Rollover reconciler for usage-based billing. Detects 30-day Shopify cycle
-    # rollovers for suspended shops and reactivates them while draining backlogged
-    # commissions.
-    from app.domains.billing.services import rollover_reconciler
-
-    rollover_task = asyncio.create_task(rollover_reconciler.run_forever())
-    logger.info("✅ Rollover reconciler started")
-
     # FX rates for billing. Attributed revenue is in the shopper's currency and
     # commissions are USD; without these rates every non-USD shop is either
     # unbillable or billed at its FX rate, which over-charged an INR merchant
@@ -111,12 +103,11 @@ async def lifespan(app: FastAPI):
     fx_task = asyncio.create_task(fx_refresher.run_forever())
     logger.info("✅ FX rate refresher started")
 
-    # Asks Shopify what we have not seen. Data had exactly two routes in — the
-    # onboarding backfill and webhooks — so when webhook delivery broke (the
-    # subscriptions were pinned to a removed api_version) nothing arrived and
-    # nothing noticed for days. The attribution reconciler could not help: it
-    # reconciles orders already stored, so it swept correctly and found nothing.
-    # A non-empty sweep here is also the webhook-failure alarm.
+    # Safety net for missed order webhooks. Shopify retries for 48h then gives
+    # up; a deploy, an outage or a consumer rebalance in that window means the
+    # order arrives only via the periodic collection, which is deliberately not
+    # attributed. Without this sweep that sale is never billed and never shown
+    # to the merchant, and nothing reports it.
     from app.domains.shopify.services import ingestion_backstop
 
     backstop_task = asyncio.create_task(ingestion_backstop.run_forever())
@@ -138,11 +129,25 @@ async def lifespan(app: FastAPI):
     holdout_tuner_task = asyncio.create_task(holdout_tuner.run_forever())
     logger.info("✅ Holdout tuner started")
 
+    # Commission reconciler for usage-based billing. Detects Shopify cycle
+    # rollovers for CAPPED commissions and republishes stale PENDING commissions.
+    from app.domains.billing.services import commission_reconciler
+
+    commission_reconciler_task = asyncio.create_task(commission_reconciler.run_forever())
+    logger.info("Commission reconciler started")
+
+    # Billing reconciler for usage-based billing. Compares Shopify invoice usage
+    # charges against intended commission charges per billing cycle.
+    from app.domains.billing.services import billing_reconciler
+
+    billing_reconciler_task = asyncio.create_task(billing_reconciler.run_forever())
+    logger.info("Billing reconciler started")
+
     yield
 
     # Shutdown
 
-    for task in (sweeper_task, reconciler_task, rollover_task, fx_task, backstop_task, reconciler_entity_task, holdout_tuner_task):
+    for task in (sweeper_task, reconciler_task, fx_task, backstop_task, reconciler_entity_task, holdout_tuner_task, commission_reconciler_task, billing_reconciler_task):
         task.cancel()
         try:
             await task

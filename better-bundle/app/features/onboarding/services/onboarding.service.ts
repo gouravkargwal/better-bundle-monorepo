@@ -1,5 +1,4 @@
 import prisma from "../../../db.server";
-import { getCurrencySymbol } from "../../../utils/currency";
 import { KafkaProducerService } from "../../../services/kafka/kafka-producer.service";
 import { BillingService } from "../../billing/services/billing.service";
 import logger from "app/utils/logger";
@@ -112,7 +111,7 @@ export class OnboardingService {
       }
 
       return {
-        symbol: getCurrencySymbol(currencyCode),
+        currency_code: currencyCode,
         commission_rate: Number(defaultPlan.commission_rate) || 0.03,
         cap_amount: Number(defaultPlan.cap_amount) || 29,
         trial_revenue_threshold:

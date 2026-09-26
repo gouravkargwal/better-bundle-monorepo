@@ -1,52 +1,33 @@
 """
 Billing API
 
-Commission backfill and rollover reconciliation endpoints.
+Commission reconciliation endpoints.
 """
-
-from typing import List, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import traceback
 
 from app.core.logging import get_logger
-from app.core.messaging.event_publisher import EventPublisher
-from app.core.config.kafka_settings import kafka_settings
-from app.shared.helpers.datetime_utils import now_utc
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 logger = get_logger(__name__)
 
 
-# ============= COMMISSION RETRIGGER / BACKFILL =============
+class CommissionReconcileResponse(BaseModel):
+    checked: int
+    capped_reset: int
+    pending_republished: int
+    dry_run: bool
 
 
-class CommissionBackfillRequest(BaseModel):
-    """Optional filters for commission backfill."""
-
-    order_id: Optional[str] = None
-    since: Optional[str] = None  # ISO8601 datetime string
-    limit: Optional[int] = None  # Safety cap
-
-
-class CommissionBackfillResponse(BaseModel):
-    success: bool
-    shop_id: str
-    total_candidates: int
-    events_published: int
-    skipped_existing: int
-    errors: List[Dict]
-
-
-@router.post("/reconcile-rollovers")
-async def trigger_rollover_reconciliation(limit: int = 50, dry_run: bool = False):
-    """Trigger a rollover reconciliation pass manually."""
-    from ..services.rollover_reconciler import reconcile_rollovers_once
+@router.post("/reconcile-commissions", response_model=CommissionReconcileResponse)
+async def trigger_commission_reconciliation(limit: int = 100, dry_run: bool = False):
+    """Trigger a commission reconciliation pass manually."""
+    from ..services.commission_reconciler import reconcile_commissions_once
 
     try:
-        result = await reconcile_rollovers_once(limit=limit, dry_run=dry_run)
-        return {"success": True, "result": result}
+        result = await reconcile_commissions_once(limit=limit, dry_run=dry_run)
+        return CommissionReconcileResponse(**result)
     except Exception as e:
-        logger.error(f"Error in rollover reconciliation endpoint: {e}", exc_info=True)
+        logger.error(f"Error in commission reconciliation endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

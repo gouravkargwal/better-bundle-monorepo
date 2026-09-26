@@ -1,13 +1,3 @@
-import currencySymbolMap from "currency-symbol-map";
-
-/**
- * Get currency symbol from currency code
- * @param currencyCode - ISO 4217 currency code (e.g., 'USD', 'EUR', 'GBP')
- * @returns Currency symbol (e.g., '$', '€', '£')
- */
-export function getCurrencySymbol(currencyCode: string): string {
-  return currencySymbolMap(currencyCode) || currencyCode;
-}
 
 /**
  * Format amount with currency symbol
@@ -30,11 +20,14 @@ export function formatCurrency(
   // Fallback to USD if currency code is empty or invalid
   const validCurrencyCode = currencyCode && currencyCode.trim() ? currencyCode : "USD";
 
-  // Default to the currency's own convention rather than a flat 2. Yen, Won,
-  // Dong and Rupiah have no minor unit, so "¥1,234.00" is not a number that
-  // exists — `getCurrencyInfo` below already knew this and nothing asked it.
   const decimals =
-    options.decimals ?? getCurrencyInfo(validCurrencyCode).decimalPlaces;
+    options.decimals ??
+    (validCurrencyCode === "JPY" ||
+    validCurrencyCode === "KRW" ||
+    validCurrencyCode === "VND" ||
+    validCurrencyCode === "IDR"
+      ? 0
+      : 2);
 
   if (showSymbol) {
     // Use Intl.NumberFormat for proper locale-aware formatting
@@ -95,30 +88,6 @@ export function parseCurrencyAmount(
   }
 
   return amount;
-}
-
-/**
- * Get currency information including symbol and formatting details
- * @param currencyCode - ISO 4217 currency code
- * @returns Currency information object
- */
-export function getCurrencyInfo(currencyCode: string) {
-  const symbol = getCurrencySymbol(currencyCode);
-
-  // Common decimal places for different currencies
-  const decimalPlaces: Record<string, number> = {
-    JPY: 0, // Japanese Yen
-    KRW: 0, // South Korean Won
-    VND: 0, // Vietnamese Dong
-    IDR: 0, // Indonesian Rupiah
-    // Most other currencies use 2 decimal places
-  };
-
-  return {
-    code: currencyCode,
-    symbol,
-    decimalPlaces: decimalPlaces[currencyCode] ?? 2,
-  };
 }
 
 /**

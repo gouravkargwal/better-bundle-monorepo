@@ -30,9 +30,6 @@ vi.mock("../../../../services/kafka/kafka-producer.service", () => ({
 vi.mock("app/utils/logger", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock("../../../../utils/currency", () => ({
-  getCurrencySymbol: vi.fn((code: string) => (code === "USD" ? "$" : code)),
-}));
 
 import { OnboardingService } from "../onboarding.service";
 

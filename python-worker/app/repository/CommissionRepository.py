@@ -26,6 +26,18 @@ class CommissionRepository:
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
 
+    async def get_for_update(
+        self, commission_id: str, session: AsyncSession
+    ) -> Optional[CommissionRecord]:
+        """Get commission record by ID with SELECT FOR UPDATE."""
+        query = (
+            select(CommissionRecord)
+            .where(CommissionRecord.id == commission_id)
+            .with_for_update()
+        )
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+
     async def get_by_purchase_attribution_id(
         self, purchase_attribution_id: str
     ) -> Optional[CommissionRecord]:

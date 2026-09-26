@@ -16,6 +16,7 @@ from sqlalchemy import (
     Index,
     Enum as SQLEnum,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, JSON
 from sqlalchemy.orm import relationship
@@ -28,17 +29,32 @@ class BillingInvoice(BaseModel):
     """
     Billing Invoice
 
-    Stores Shopify billing invoices received via webhooks.
-    Links to shop subscriptions and tracks payment status.
+    Written only by the two billing webhook handlers. Read-only for all other
+    code. Never written by the consumer, reconciler, or any other path.
+    Append-only in practice; upsert keyed on `shopify_invoice_id`. Nothing
+    reads it to make a charging decision. Shopify is the source of truth; if
+    the row and Shopify disagree, Shopify wins.
     """
 
     __tablename__ = "billing_invoices"
 
     # Foreign keys
+    shop_id = Column(
+        String(255),
+        ForeignKey("shops.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     shop_subscription_id = Column(
         String(255),
         ForeignKey("shop_subscriptions.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
+    )
+    billing_cycle_id = Column(
+        String(255),
+        ForeignKey("billing_cycles.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -75,14 +91,28 @@ class BillingInvoice(BaseModel):
     payment_reference = Column(String(255), nullable=True)
     failure_reason = Column(String(500), nullable=True)
 
+    # Reconciliation
+    usage_amount = Column(
+        Numeric(10, 2),
+        nullable=False,
+        server_default=text("0.00"),
+        default=Decimal("0.00"),
+        comment="Sum of usage line items from Shopify invoice",
+    )
+
     # Relationships
     shop_subscription = relationship(
         "ShopSubscription", back_populates="billing_invoices"
     )
+    billing_cycle = relationship(
+        "BillingCycle", back_populates="billing_invoices"
+    )
 
     # Indexes
     __table_args__ = (
+        Index("ix_billing_invoice_shop_id", "shop_id"),
         Index("ix_billing_invoice_subscription", "shop_subscription_id"),
+        Index("ix_billing_invoice_billing_cycle_id", "billing_cycle_id"),
         Index("ix_billing_invoice_shopify_id", "shopify_invoice_id"),
         Index("ix_billing_invoice_status", "status"),
         Index("ix_billing_invoice_date", "invoice_date"),

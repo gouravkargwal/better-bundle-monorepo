@@ -54,26 +54,13 @@ function formatPrice(amount, currencyCode) {
     // Fallback formatting if Intl.NumberFormat fails
     const numericAmount = parseFloat(amount);
 
-    // Custom symbol mapping for fallback
-    const currencySymbols = {
-      INR: "Rs",
-      USD: "$",
-      EUR: "€",
-      GBP: "£",
-      JPY: "¥",
-      KRW: "₩",
-      CAD: "C$",
-      AUD: "A$",
-      BRL: "R$",
-      MXN: "$",
-    };
-
-    const symbol = currencySymbols[currencyCode] || currencyCode;
-
     if (currencyCode === "JPY" || currencyCode === "KRW") {
-      return `${symbol} ${Math.round(numericAmount).toLocaleString()}`;
+      return `${currencyCode} ${Math.round(numericAmount).toLocaleString()}`;
     } else {
-      return `${symbol} ${numericAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(numericAmount);
     }
   }
 }

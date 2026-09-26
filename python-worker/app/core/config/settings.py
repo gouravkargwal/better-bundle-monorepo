@@ -70,6 +70,7 @@ class ShopifySettings(BaseSettings):
     # API Configuration
     SHOPIFY_API_RATE_LIMIT: int = Field(default=40, env="SHOPIFY_API_RATE_LIMIT")
     SHOPIFY_API_BATCH_SIZE: int = Field(default=250, env="SHOPIFY_API_BATCH_SIZE")
+    SHOPIFY_API_VERSION: str = Field(default="2026-07", env="SHOPIFY_API_VERSION")
 
     # Data Collection
     MAX_INITIAL_DAYS: int = Field(default=60, env="MAX_INITIAL_DAYS")

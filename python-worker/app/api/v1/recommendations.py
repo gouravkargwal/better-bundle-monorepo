@@ -180,6 +180,36 @@ async def fetch_recommendations_logic(
         )
         return _empty(request, "surface_disabled")
 
+    # Cap-hit pause: recommendation generation stops when the shop hits its
+    # usage cap. The consumer sets paused=True; the reconciler clears it on
+    # cycle rollover. Nothing else writes this flag.
+    active_subscription = None
+    for sub in getattr(shop, "shop_subscriptions", []):
+        if sub.is_active:
+            active_subscription = sub
+            break
+    if active_subscription is None:
+        async with get_transaction_context() as session:
+            from sqlalchemy import select as sa_select, and_
+            from app.core.database.models.shop_subscription import ShopSubscription
+            result = await session.execute(
+                sa_select(ShopSubscription)
+                .where(
+                    and_(
+                        ShopSubscription.shop_id == shop.id,
+                        ShopSubscription.is_active.is_(True),
+                    )
+                )
+                .limit(1)
+            )
+            active_subscription = result.scalar_one_or_none()
+
+    if active_subscription and active_subscription.paused:
+        logger.info(
+            f"⏸️ Recommendations paused for {request.shop_domain} (cap hit)"
+        )
+        return _empty(request, "subscription_paused")
+
     request.metadata = request.metadata or {}
 
     # 3. Holdout bucketing. A control shopper sees nothing and is recorded, so

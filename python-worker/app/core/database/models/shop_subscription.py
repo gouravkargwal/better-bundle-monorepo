@@ -89,6 +89,8 @@ class ShopSubscription(BaseModel, ShopMixin):
 
     # ===== STATE & METADATA =====
     is_active = Column(Boolean, default=True, nullable=False, index=True)
+    paused = Column(Boolean, default=False, nullable=False)
+    paused_at = Column(TIMESTAMP(timezone=True), nullable=True)
     shop_subscription_metadata = Column(JSONB, nullable=True)
 
     # ===== RELATIONSHIPS =====

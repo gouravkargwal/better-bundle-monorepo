@@ -29,10 +29,6 @@ vi.mock("app/utils/logger", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../../../utils/currency", () => ({
-  getCurrencySymbol: vi.fn((code: string) => (code === "USD" ? "$" : code)),
-}));
-
 import { OnboardingService } from "../onboarding.service";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -167,7 +163,7 @@ describe("OnboardingService", () => {
       );
 
       expect(result.subscriptionPlan).toEqual({
-        symbol: "$",
+        currency_code: "USD",
         commission_rate: 0.03,
         cap_amount: 299,
         trial_revenue_threshold: 1000,

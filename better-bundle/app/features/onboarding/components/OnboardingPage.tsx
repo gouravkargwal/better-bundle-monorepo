@@ -67,7 +67,7 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
   const isLoading = navigation.state === "submitting";
 
   const plan = data.subscriptionPlan ?? {
-    symbol: "$",
+    currency_code: "USD",
     commission_rate: 0.03,
     cap_amount: 29,
     trial_revenue_threshold: 1000,
@@ -187,9 +187,12 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
                     {ratePercent}% of attributed revenue
                   </Text>
                   <Text as="p" variant="bodyMd" tone="subdued">
-                    Free until we&apos;ve driven {plan.symbol}
-                    {plan.trial_revenue_threshold.toLocaleString()} in sales
-                    across {MIN_TRIAL_ORDERS} orders
+                    Free until we&apos;ve driven{" "}
+                    {new Intl.NumberFormat("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }).format(plan.trial_revenue_threshold)} {plan.currency_code}{" "}
+                    in sales
                   </Text>
                 </BlockStack>
               </Box>
@@ -209,8 +212,11 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
                     </Text>
                     <Text as="p" variant="bodySm" tone="subdued">
                       When the free period ends you choose a monthly limit —{" "}
-                      {plan.symbol}
-                      {plan.cap_amount.toLocaleString()} to start — and we can
+                      {new Intl.NumberFormat("en-US", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      }).format(plan.cap_amount)} {plan.currency_code}{" "}
+                      to start — and we can
                       never charge above it. Change it whenever you like.
                     </Text>
                   </BlockStack>
@@ -252,8 +258,12 @@ export function OnboardingPage({ data, error }: OnboardingPageProps) {
               </Text>
               <Text as="p" tone="subdued">
                 No credit card required. You pay nothing until recommendations
-                have earned you {plan.symbol}
-                {plan.trial_revenue_threshold.toLocaleString()} across{" "}
+                have earned you{" "}
+                {new Intl.NumberFormat("en-US", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }).format(plan.trial_revenue_threshold)} {plan.currency_code}{" "}
+                across{" "}
                 {MIN_TRIAL_ORDERS} separate orders — enough that you can see
                 it working before you decide. Setup takes about two minutes.
               </Text>

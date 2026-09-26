@@ -1,14 +1,10 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
-import { authenticate } from "../shopify.server";
+import { json } from "@remix-run/node";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const url = new URL(request.url);
   if (!url.hostname.startsWith("app.")) {
     throw new Response("Not Found", { status: 404 });
   }
-
-  const { redirect } = await authenticate.admin(request);
-  const searchParams = url.searchParams.toString();
-  const redirectUrl = searchParams ? `/app?${searchParams}` : "/app";
-  return redirect(redirectUrl);
+  return json({});
 };

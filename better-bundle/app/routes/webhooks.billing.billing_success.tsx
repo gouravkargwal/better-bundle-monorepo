@@ -6,6 +6,50 @@ import { processSuccessfulPayment } from "../services/dunning.service";
 import { invalidateSuspensionCache } from "../middleware/serviceSuspension";
 import { incrementCounter } from "../services/metrics.service";
 
+function sumUsageAmount(lineItems: unknown[]): number {
+  if (!Array.isArray(lineItems) || lineItems.length === 0) return 0;
+
+  let total = 0;
+  let foundUsageType = false;
+
+  for (const item of lineItems) {
+    const pricingDetails = (item as Record<string, unknown>)?.plan as Record<string, unknown> | undefined;
+    const details = pricingDetails?.pricingDetails as Record<string, unknown> | undefined;
+    if (details?.__typename === "AppUsagePricing") {
+      foundUsageType = true;
+      const amountRaw = (item as Record<string, unknown>)?.amount;
+      const amount = typeof amountRaw === "string"
+        ? parseFloat(amountRaw)
+        : typeof amountRaw === "number"
+          ? amountRaw
+          : parseFloat(((amountRaw as Record<string, unknown>)?.amount as string) || "0");
+      if (!Number.isNaN(amount)) {
+        total += amount;
+      }
+    }
+  }
+
+  if (!foundUsageType) {
+    logger.warn(
+      { lineItemCount: lineItems.length },
+      "No AppUsagePricing line items found; falling back to summing all line items",
+    );
+    for (const item of lineItems) {
+      const amountRaw = (item as Record<string, unknown>)?.amount;
+      const amount = typeof amountRaw === "string"
+        ? parseFloat(amountRaw)
+        : typeof amountRaw === "number"
+          ? amountRaw
+          : parseFloat(((amountRaw as Record<string, unknown>)?.amount as string) || "0");
+      if (!Number.isNaN(amount)) {
+        total += amount;
+      }
+    }
+  }
+
+  return total;
+}
+
 export async function action({ request }: ActionFunctionArgs) {
   const { topic, shop, payload } = await authenticate.webhook(request);
 
@@ -15,12 +59,40 @@ export async function action({ request }: ActionFunctionArgs) {
     const amount = billingAttempt?.amount;
     const currency = billingAttempt?.currency;
 
+    if (!billingAttempt || !billingAttempt.id) {
+      logger.warn({ shop, payload }, "Missing billing attempt data in success webhook");
+      return json({ success: true });
+    }
+
     if (!subscriptionId) {
-      logger.error({ shop }, "No billing attempt data in success webhook");
-      return json(
-        { success: false, error: "No billing data" },
-        { status: 400 },
-      );
+      logger.warn({ shop, attemptId: billingAttempt.id }, "No subscription_id in billing attempt");
+      return json({ success: true });
+    }
+
+    const createdAt = billingAttempt.created_at ? new Date(billingAttempt.created_at) : new Date();
+    if (Number.isNaN(createdAt.getTime())) {
+      logger.warn({ shop, attemptId: billingAttempt.id }, "Malformed created_at in billing attempt");
+      return json({ success: true });
+    }
+
+    const dueDate = billingAttempt.due_date ? new Date(billingAttempt.due_date) : null;
+    if (dueDate && Number.isNaN(dueDate.getTime())) {
+      logger.warn({ shop, attemptId: billingAttempt.id }, "Malformed due_date in billing attempt");
+      return json({ success: true });
+    }
+
+    const currentPeriodStartRaw = billingAttempt.currentPeriodStart || billingAttempt.current_period_start;
+    const currentPeriodEndRaw = billingAttempt.currentPeriodEnd || billingAttempt.current_period_end;
+    const currentPeriodStart = currentPeriodStartRaw ? new Date(currentPeriodStartRaw) : null;
+    const currentPeriodEnd = currentPeriodEndRaw ? new Date(currentPeriodEndRaw) : null;
+
+    if (currentPeriodStart && Number.isNaN(currentPeriodStart.getTime())) {
+      logger.warn({ shop, attemptId: billingAttempt.id }, "Malformed currentPeriodStart in billing attempt");
+      return json({ success: true });
+    }
+    if (currentPeriodEnd && Number.isNaN(currentPeriodEnd.getTime())) {
+      logger.warn({ shop, attemptId: billingAttempt.id }, "Malformed currentPeriodEnd in billing attempt");
+      return json({ success: true });
     }
 
     // Find shop record
@@ -48,9 +120,59 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ success: true });
     }
 
+    // Look up or create billing cycle for this period
+    let billingCycleId: string | null = null;
+
+    if (currentPeriodStart && currentPeriodEnd) {
+      let cycle = await prisma.billing_cycles.findFirst({
+        where: {
+          shop_subscription_id: shopSubscription.id,
+          start_date: currentPeriodStart,
+        },
+      });
+
+      if (!cycle) {
+        const maxCycleNumberResult = await prisma.billing_cycles.findFirst({
+          where: { shop_subscription_id: shopSubscription.id },
+          orderBy: { cycle_number: "desc" },
+          select: { cycle_number: true },
+        });
+
+        const nextCycleNumber = (maxCycleNumberResult?.cycle_number ?? 0) + 1;
+
+        await prisma.$executeRaw`
+          INSERT INTO billing_cycles (
+            shop_subscription_id, cycle_number, start_date, end_date, status, activated_at
+          )
+          VALUES (
+            ${shopSubscription.id},
+            ${nextCycleNumber},
+            ${currentPeriodStart},
+            ${currentPeriodEnd},
+            'active',
+            NOW()
+          )
+          ON CONFLICT (shop_subscription_id, start_date) DO NOTHING
+        `;
+
+        cycle = await prisma.billing_cycles.findFirst({
+          where: {
+            shop_subscription_id: shopSubscription.id,
+            start_date: currentPeriodStart,
+          },
+        });
+      }
+
+      billingCycleId = cycle?.id ?? null;
+    }
+
+    const usageAmount = sumUsageAmount(Array.isArray(billingAttempt.line_items) ? billingAttempt.line_items : []);
+
     // Create billing invoice record
     const invoiceData = {
+      shop_id: shopRecord.id,
       shop_subscription_id: shopSubscription.id,
+      billing_cycle_id: billingCycleId,
       shopify_invoice_id:
         billingAttempt.id?.toString() || `invoice_${Date.now()}`,
       invoice_number: billingAttempt.invoice_number || null,
@@ -58,17 +180,16 @@ export async function action({ request }: ActionFunctionArgs) {
       amount_paid: parseFloat(billingAttempt.amount_paid || "0"),
       total_amount: parseFloat(amount || "0"),
       currency: currency || "USD",
-      invoice_date: new Date(billingAttempt.created_at || new Date()),
-      due_date: billingAttempt.due_date
-        ? new Date(billingAttempt.due_date)
-        : null,
-      paid_at: new Date(), // Since this is a success webhook
+      invoice_date: createdAt,
+      due_date: dueDate,
+      paid_at: new Date(),
       status: "PAID" as const,
       description: `Billing invoice for subscription ${subscriptionId}`,
       line_items: billingAttempt.line_items || [],
       shopify_response: payload,
       payment_method: billingAttempt.payment_method || null,
       payment_reference: billingAttempt.payment_reference || null,
+      usage_amount: usageAmount,
     };
 
     // ✅ RACE CONDITION PROTECTION: Use upsert to prevent duplicate processing
@@ -83,6 +204,8 @@ export async function action({ request }: ActionFunctionArgs) {
         payment_method: invoiceData.payment_method,
         payment_reference: invoiceData.payment_reference,
         shopify_response: invoiceData.shopify_response,
+        billing_cycle_id: invoiceData.billing_cycle_id,
+        usage_amount: invoiceData.usage_amount,
         updated_at: new Date(),
       },
       create: invoiceData as any,
@@ -106,7 +229,7 @@ export async function action({ request }: ActionFunctionArgs) {
       metadata?.dunningState || metadata?.dunningFailureCount;
 
     if (hasActiveDunning) {
-      processSuccessfulPayment(); // Returns { reset: true }
+      processSuccessfulPayment();
 
       // Clear dunning state from subscription metadata
       await prisma.shop_subscriptions.update({

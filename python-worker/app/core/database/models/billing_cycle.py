@@ -15,6 +15,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Enum as SQLEnum,
+    text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.orm import relationship
@@ -94,6 +95,7 @@ class BillingCycle(BaseModel):
     activated_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     completed_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
     cancelled_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
+    reconciled_at = Column(TIMESTAMP(timezone=True), nullable=True, index=True)
 
     # Cycle metadata
     cycle_metadata = Column(String(1000), nullable=True)  # JSON string
@@ -104,6 +106,9 @@ class BillingCycle(BaseModel):
     )
     commission_records = relationship(
         "CommissionRecord", back_populates="billing_cycle"
+    )
+    billing_invoices = relationship(
+        "BillingInvoice", back_populates="billing_cycle"
     )
 
     # Indexes
@@ -123,6 +128,19 @@ class BillingCycle(BaseModel):
             "shop_subscription_id",
             "status",
             unique=True,
+        ),
+        # Unique constraint: one cycle per subscription per start_date
+        Index(
+            "ix_billing_cycle_unique_subscription_start",
+            "shop_subscription_id",
+            "start_date",
+            unique=True,
+        ),
+        # Partial index for reconciler: find completed but unreconciled cycles
+        Index(
+            "ix_billing_cycles_unreconciled",
+            "completed_at",
+            postgresql_where=text("reconciled_at IS NULL"),
         ),
     )
 

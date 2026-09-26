@@ -20,14 +20,24 @@ COPY package.json package-lock.json* ./
 # npm ci, not `rm -rf package-lock.json && npm install`: deleting the lockfile
 # that was just copied throws away reproducibility and re-resolves the whole
 # tree from the registry on every build.
-RUN npm ci --workspaces=false --include-workspace-root
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --workspaces=false --include-workspace-root
+
+COPY prisma ./prisma
+
+# Use the local binary to avoid npx's registry re-resolution on every build.
+RUN ./node_modules/.bin/prisma generate
 
 COPY . .
 
-# prisma generate moves to build time. It used to run on every container start
-# via `docker-start`, which meant the prisma CLI (a devDependency) had to
-# survive into the production image, and a cold start paid for codegen.
-RUN npx prisma generate && npm run build
+# Cache Vite's incremental build artifacts across runs so rebuilds are fast
+# even when source files above invalidate this layer.
+RUN --mount=type=cache,target=/app/node_modules/.vite \
+    npm run build
+
+# Strip devDependencies in-place. The runtime stage copies this pruned tree
+# instead of resolving the full dependency graph again.
+RUN npm prune --omit=dev
 
 # ---------- runtime ----------
 FROM node:22-alpine
@@ -41,13 +51,10 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json* ./
 
-RUN npm ci --omit=dev --workspaces=false --include-workspace-root \
-    && npm cache clean --force
-
-# The generated client only exists after `prisma generate`; @prisma/client is
-# a regular dependency, so npm ci above installed the stub and this overlays
-# the engine and generated types onto it.
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+# Copy the pruned node_modules from the build stage instead of running a
+# second npm ci. This saves an entire install cycle and guarantees the
+# runtime tree matches exactly what was built.
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/build ./build
 COPY --from=build /app/public ./public
 COPY --from=build /app/prisma ./prisma
